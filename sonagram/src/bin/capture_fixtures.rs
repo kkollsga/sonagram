@@ -15,54 +15,13 @@
 //! never a user directory. No audio is ever copied — JSON only lands in
 //! `out_dir`.
 
-use std::collections::HashSet;
 use std::path::Path;
 use std::process::ExitCode;
 
-use sonara::analyze::{analyze_file, AnalysisConfig, AnalysisMode};
+use sonara::analyze::analyze_file;
 
 use sonagram::record::{AnalysisRecord, SourceInfo};
-
-/// Explicit feature set covering everything the music graph schema needs.
-///
-/// Documented sonara feature names (see `sonara::analyze::AnalysisConfig::features`).
-/// The brief's shorthand "spectral" and "tempo" are expanded to sonara's real
-/// names (`bandwidth`/`rolloff`/`flatness`/`contrast`, `tempo_curve`). Requesting
-/// an explicit set overrides the mode, so the extended perceptual/spectral names
-/// are listed alongside the opt-in-only groups. `embedding` additionally
-/// auto-pulls its own deps, but we list them anyway for clarity.
-const FEATURES: &[&str] = &[
-    // Spectral (extended)
-    "bandwidth",
-    "rolloff",
-    "flatness",
-    "contrast",
-    "mfcc",
-    "chroma",
-    // Tonal
-    "chords",
-    "dissonance",
-    // Perceptual
-    "energy",
-    "danceability",
-    "key",
-    "valence",
-    "acousticness",
-    // Rhythm analysis
-    "tempo_curve",
-    "time_signature",
-    // Opt-in-only groups the graph needs
-    "tags",
-    "mood",
-    "instrumentalness",
-    "loudness",
-    "structure",
-    "beatgrid",
-    "silence",
-    "embedding",
-    "vocalness",
-    "key_candidates",
-];
+use sonagram::scan::default_analysis_config;
 
 /// Slugify a file stem for use as an output filename. Keeps alphanumerics
 /// (including CJK, which `char::is_alphanumeric` accepts), lowercases ASCII, and
@@ -103,13 +62,9 @@ fn capture_one(out_dir: &Path, audio: &Path) -> Result<String, String> {
         .unwrap_or("")
         .to_lowercase();
 
-    let features: HashSet<String> = FEATURES.iter().map(|s| s.to_string()).collect();
-    let config = AnalysisConfig {
-        mode: AnalysisMode::Playlist,
-        features: Some(features),
-        bpm_min: None,
-        bpm_max: None,
-    };
+    // Shared with the live scanner so fixtures and scans request identical
+    // features (see `sonagram::scan::DEFAULT_FEATURES`).
+    let config = default_analysis_config();
 
     // sr = 0 → analyze at the file's native rate.
     let analysis = analyze_file(audio, 0, &config)

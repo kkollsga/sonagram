@@ -18,3 +18,8 @@ thiserror = { workspace = true }
 rayon = { workspace = true }
 sonara = { workspace = true }
 kglite = { workspace = true }
+
+[dev-dependencies]
+# Test-only: precise mtime control for the incremental-rescan stat fast-path
+# tests (touch a file's mtime without touching its bytes). Never a runtime dep.
+filetime = "0.2"

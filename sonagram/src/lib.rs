@@ -20,9 +20,7 @@ pub mod error;
 
 pub mod record;
 
-/// Library scan: filesystem walk, ID3-stripped content hashing, per-hash cache
-/// and incremental rescan. Populated in P3.
-pub mod scan {}
+pub mod scan;
 
 /// Graph mapping: analysis records into a `kglite` `DirGraph` following the
 /// music schema. Populated in P4.
