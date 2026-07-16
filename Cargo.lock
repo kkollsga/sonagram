@@ -1482,9 +1482,11 @@ dependencies = [
 name = "sonagram-python"
 version = "0.1.0"
 dependencies = [
+ "kglite",
  "numpy",
  "pyo3",
  "sonagram",
+ "tempfile",
 ]
 
 [[package]]

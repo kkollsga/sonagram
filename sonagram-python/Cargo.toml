@@ -14,5 +14,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 sonagram = { path = "../sonagram" }
+kglite = { workspace = true }
 pyo3 = { workspace = true }
 numpy = { workspace = true }
+tempfile = "3"
