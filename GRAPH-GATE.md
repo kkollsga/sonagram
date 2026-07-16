@@ -60,3 +60,4 @@ land.)
 | Date       | Digest (first 12) | Reason                   |
 |------------|-------------------|--------------------------|
 | 2026-07-16 | `d7a4a24f5366`    | initial goldens (P5)     |
+| 2026-07-17 | `7ca12b8ac3bd`    | P6: +SIMILAR_TO/+CAMELOT_ADJACENT/+Style (intended) |

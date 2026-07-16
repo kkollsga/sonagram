@@ -74,6 +74,8 @@ fn str_prop(graph: &DirGraph, node_type: &str, hash: &str, prop: &str) -> String
 }
 
 // Expected cardinalities, computed independently from the fixture JSON.
+// `Style` (P6) is 2 communities over the 15 fixtures at the tuned
+// `STYLE_SCORE_THRESHOLD` (see `graph_derive.rs` for the derivation of that 2).
 const EXPECT_NODES: &[(&str, usize)] = &[
     ("Library", 1),
     ("Track", 15),
@@ -84,9 +86,13 @@ const EXPECT_NODES: &[(&str, usize)] = &[
     ("TempoBand", 7),
     ("EnergyLevel", 10),
     ("Decade", 4),
+    ("Style", 2),
 ];
 
 // BY_ARTIST carries both Track→Artist (15) and Album→Artist (15) = 30.
+// P6 derived edges: SIMILAR_TO = 15 tracks × min(10, 14) = 150 (dense, all 15
+// carry embeddings); CAMELOT_ADJACENT = 24 keys × 3 = 72; IN_STYLE = 4 + 3 = 7
+// (the two communities' members; the other 8 tracks are style-less singletons).
 const EXPECT_EDGES: &[(&str, usize)] = &[
     ("BY_ARTIST", 30),
     ("ON_ALBUM", 15),
@@ -95,6 +101,9 @@ const EXPECT_EDGES: &[(&str, usize)] = &[
     ("IN_TEMPO_BAND", 15),
     ("AT_ENERGY", 15),
     ("FROM_DECADE", 15),
+    ("SIMILAR_TO", 150),
+    ("CAMELOT_ADJACENT", 72),
+    ("IN_STYLE", 7),
 ];
 
 #[test]

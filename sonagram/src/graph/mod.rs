@@ -21,6 +21,7 @@
 //! `add_nodes` pass) → edges → embedding store. `SIMILAR_TO` / `Style` /
 //! `CAMELOT_ADJACENT` are Phase 6, deliberately absent here.
 
+mod derive;
 pub mod normalize;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -67,6 +68,7 @@ const KEY: &str = "Key";
 const TEMPO_BAND_TYPE: &str = "TempoBand";
 const ENERGY_LEVEL: &str = "EnergyLevel";
 const DECADE: &str = "Decade";
+const STYLE: &str = "Style";
 
 // Edge-type names. None contains the reserved Cypher substring "CONTAINS".
 const BY_ARTIST: &str = "BY_ARTIST";
@@ -76,6 +78,10 @@ const IN_KEY: &str = "IN_KEY";
 const IN_TEMPO_BAND: &str = "IN_TEMPO_BAND";
 const AT_ENERGY: &str = "AT_ENERGY";
 const FROM_DECADE: &str = "FROM_DECADE";
+// Phase 6 derived edges (built after the embedding store — see `derive`).
+const SIMILAR_TO: &str = "SIMILAR_TO";
+const CAMELOT_ADJACENT: &str = "CAMELOT_ADJACENT";
+const IN_STYLE: &str = "IN_STYLE";
 
 /// Minimal library-root metadata for the `Library` root node.
 #[derive(Debug, Clone)]
@@ -178,6 +184,17 @@ pub fn build_graph(records: &[AnalysisRecord], library: &LibraryInfo) -> Result<
     graph
         .embeddings
         .insert((TRACK.to_string(), EMBEDDING_PROPERTY.to_string()), store);
+
+    // ── Stage 6: SIMILAR_TO (reads the store) ───────────────────────────────
+    // Materialize the top-k nearest-neighbour graph; keep the scored fan-out so
+    // the style detector reuses it instead of recomputing.
+    let sim_edges = derive::add_similar_to(&mut graph, &sorted)?;
+
+    // ── Stage 7: CAMELOT_ADJACENT (static wheel between the 24 Key nodes) ────
+    derive::add_camelot_adjacent(&mut graph)?;
+
+    // ── Stage 8: Style community nodes + IN_STYLE edges ─────────────────────
+    derive::add_styles(&mut graph, &sorted, &sim_edges)?;
 
     Ok(Arc::new(graph))
 }
