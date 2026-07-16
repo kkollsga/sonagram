@@ -24,9 +24,18 @@
 //! union-find over the sorted edge list, so the result is order-independent and
 //! reproducible by construction — no randomised refinement to verify. This
 //! choice is reported to the PM for an upstream `notify` decision.
+//!
+//! ## P10b: mutual-kNN input + unique names
+//! Plain connected components over the directed top-k `SIMILAR_TO` graph is
+//! **single-linkage** and chains a diverse library into one mega-community. P10b
+//! feeds the union-find a **mutual-kNN** edge set instead (pairs reciprocated in
+//! both tracks' top-k — see [`mutual_pairs`]), then the score threshold, then the
+//! same union-find. The directed `SIMILAR_TO` edges in the graph are unchanged.
+//! Style names are also uniqued ([`unique_names`]) and the acoustic/electric term
+//! is three-way (see [`style_name`]).
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use kglite::api::algorithms::{vector_search, DistanceMetric, VectorSearchOptions};
 use kglite::api::mutation::{add_edges_from_specs, EdgeSpec};
@@ -52,16 +61,32 @@ const TOP_K: usize = 10;
 /// Minimum members for a connected component to become a `Style` node. Singletons
 /// (and any component of one track) carry no `Style` — a "style" of one is not a
 /// discovered pattern, and it would explode node count on a diverse library.
+/// Kept at 2 after P10b tuning: on the 456-track subset the mutual-kNN edge set
+/// yields 28 styles at 2 (no singleton-pair explosion), so raising to 3 only
+/// discards small genuine communities.
 pub(super) const STYLE_MIN_SIZE: usize = 2;
 
-/// Two tracks join the same style-community only along a `SIMILAR_TO` edge whose
-/// `score` clears this bar. Connected components are single-linkage, so a low
-/// bar lets a chain of merely-adjacent tracks collapse the whole library into
-/// one blob (measured: the 15 diverse fixtures stay one component up to ~0.74).
-/// Tuned to **0.75**, which fragments them into a handful (2–5) of tight
-/// communities with the outliers left style-less. Raising it splits styles
-/// further; lowering it merges them.
-pub(super) const STYLE_SCORE_THRESHOLD: f64 = 0.75;
+/// Two tracks join the same style-community only along a **mutual-kNN** edge (see
+/// [`mutual_pairs`]) whose `score` clears this bar. Connected components are
+/// single-linkage, so a low bar lets a chain of merely-adjacent tracks collapse
+/// the whole library into one blob.
+///
+/// P10b tuning (measured on the frozen 456-track subset — see the permanent
+/// `graph_derive::style_threshold_tuning` diagnostic): sonara 0.2.2's similarity
+/// scores are compressed high, so the library's mega-community only fragments in
+/// a sharp phase transition between ~0.84 and ~0.85. **0.85** is the lowest bar
+/// that puts the largest community under 15% of tracks (measured: 456-track
+/// subset → 28 styles, largest 8.1%, coverage 24.6%). Mutual-kNN symmetrization
+/// alone does *not* break this blob (it is densely reciprocal — 70% at 0.75); the
+/// threshold does the work, and mutual-kNN + this bar are identical here but keep
+/// the edge set robust for less-compressed future distributions.
+///
+/// This bar is **calibrated to sonara 0.2.2's observed compressed score range**
+/// and MUST be revisited when sonara recalibrates similarity. NOTE (P10b): the
+/// 15 diverse committed fixtures top out at pair-score ~0.78, so at 0.85 they
+/// produce **zero** styles — the fixture set and the real library have
+/// non-overlapping score distributions (flagged to PM).
+pub(super) const STYLE_SCORE_THRESHOLD: f64 = 0.85;
 
 /// One materialised `SIMILAR_TO` edge, kept so [`add_styles`] can build
 /// components from the same scored fan-out that was written to the graph.
@@ -245,17 +270,50 @@ fn parse_camelot(code: &str) -> (u32, char) {
 
 // ─────────────────────────────── Style nodes ────────────────────────────────
 
+/// The **mutual-kNN** edge set for style-community detection: the unordered
+/// pairs `(a, b)` where `a` is in `b`'s top-k `SIMILAR_TO` fan-out **and** `b` is
+/// in `a`'s. This is the P10b fix for single-linkage chaining — a track pulls the
+/// whole library into one blob only along edges that are *not* reciprocated (one
+/// track's 8th-nearest that does not return the favour); requiring reciprocity
+/// prunes those bridges before the threshold is even applied.
+///
+/// `sim_edges` are the directed top-k edges already written as `SIMILAR_TO`, so
+/// no new similarity is computed. Because `sonara::similarity` is symmetric, both
+/// directed edges of a mutual pair carry the exact same `score`, returned once.
+/// Deterministic: emitted in sorted `(src, tgt)` order with `src < tgt`.
+///
+/// Note this changes **only** the Style community input — the directed top-10
+/// `SIMILAR_TO` edges in the graph are untouched.
+pub(super) fn mutual_pairs(sim_edges: &[SimEdge]) -> Vec<(&str, &str, f64)> {
+    let directed: BTreeSet<(&str, &str)> = sim_edges
+        .iter()
+        .map(|e| (e.src.as_str(), e.tgt.as_str()))
+        .collect();
+    let mut out: Vec<(&str, &str, f64)> = Vec::new();
+    for e in sim_edges {
+        let (a, b) = (e.src.as_str(), e.tgt.as_str());
+        // Emit once (a < b) and only when the reverse edge is also present.
+        if a < b && directed.contains(&(b, a)) {
+            out.push((a, b, e.score));
+        }
+    }
+    out
+}
+
 /// Add `Style` community nodes + `IN_STYLE` edges.
 ///
-/// Communities are the connected components of the `SIMILAR_TO` graph restricted
-/// to edges with `score >= STYLE_SCORE_THRESHOLD` (union-find over the sorted
-/// edge list — order-independent). Components smaller than [`STYLE_MIN_SIZE`] are
-/// dropped (no `Style` of one track). Each surviving component becomes one
-/// `Style` carrying the schema doc's agent-readable profile, with
-/// `unique_id = "style-<idx>"` where the index is assigned by
+/// Communities are the connected components of the **mutual-kNN** graph (see
+/// [`mutual_pairs`]) restricted to pairs with `score >= STYLE_SCORE_THRESHOLD`
+/// (union-find over the sorted pair list — order-independent). Components smaller
+/// than [`STYLE_MIN_SIZE`] are dropped (no `Style` of one track). Each surviving
+/// component becomes one `Style` carrying the schema doc's agent-readable
+/// profile, with `unique_id = "style-<idx>"` where the index is assigned by
 /// `(n_tracks desc, min member content_hash asc)` — stable across rebuilds.
 /// `IN_STYLE` edges carry `membership = 1.0` (v1 hard assignment). Returns the
 /// number of `Style` nodes created.
+///
+/// Style **names** are made unique in the same index order (see [`unique_names`]):
+/// the descriptive base name gets a `-2`, `-3`, … suffix on collision.
 ///
 /// Degenerate cases are handled: every track its own component ⇒ no `Style`
 /// nodes; all tracks one component ⇒ a single `Style`.
@@ -275,12 +333,12 @@ pub(super) fn add_styles(
     let by_hash: BTreeMap<&str, &AnalysisRecord> =
         sorted.iter().map(|r| (r.source.content_hash.as_str(), *r)).collect();
 
+    // Mutual-kNN symmetrization THEN threshold THEN union-find (P10b).
     let mut uf = UnionFind::new(hashes.len());
-    for e in sim_edges {
-        if e.score >= STYLE_SCORE_THRESHOLD {
-            if let (Some(&a), Some(&b)) = (index_of.get(e.src.as_str()), index_of.get(e.tgt.as_str()))
-            {
-                uf.union(a, b);
+    for (a, b, score) in mutual_pairs(sim_edges) {
+        if score >= STYLE_SCORE_THRESHOLD {
+            if let (Some(&ia), Some(&ib)) = (index_of.get(a), index_of.get(b)) {
+                uf.union(ia, ib);
             }
         }
     }
@@ -307,6 +365,15 @@ pub(super) fn add_styles(
 
     let width = comps.len().to_string().len().max(3);
 
+    // Profile every component in the stable comps order, then unique the base
+    // names in that same order (see `unique_names`) so a `-2`/`-3` suffix is
+    // deterministic and collision-free.
+    let profiles: Vec<StyleProfile> = comps
+        .iter()
+        .map(|members| profile(&members.iter().map(|h| by_hash[*h]).collect::<Vec<_>>()))
+        .collect();
+    let unique = unique_names(profiles.iter().map(|p| p.name.as_str()));
+
     // Build the Style node table + IN_STYLE edges.
     let mut ids: Vec<Option<String>> = Vec::new();
     let mut names: Vec<Option<String>> = Vec::new();
@@ -320,9 +387,7 @@ pub(super) fn add_styles(
     let mut exemplars_col: Vec<Option<Vec<Value>>> = Vec::new();
     let mut edge_specs: Vec<EdgeSpec> = Vec::new();
 
-    for (i, members) in comps.iter().enumerate() {
-        let recs: Vec<&AnalysisRecord> = members.iter().map(|h| by_hash[*h]).collect();
-        let p = profile(&recs);
+    for (i, (members, p)) in comps.iter().zip(profiles.iter()).enumerate() {
         let id = format!("style-{i:0width$}");
 
         for h in members {
@@ -332,7 +397,7 @@ pub(super) fn add_styles(
         }
 
         ids.push(Some(id));
-        names.push(Some(p.name));
+        names.push(Some(unique[i].clone()));
         mean_bpm.push(Some(p.mean_bpm));
         mean_energy.push(Some(p.mean_energy));
         mean_valence.push(Some(p.mean_valence));
@@ -445,23 +510,69 @@ fn profile(members: &[&AnalysisRecord]) -> StyleProfile {
 }
 
 /// Derive a deterministic style name from the profile, per the schema doc:
-/// `"<tempo-band>-<acoustic|electric>-<top-genre>"`.
+/// `"<tempo-band>-[acoustic|electric-]<top-genre>"`.
 ///
 /// Rule (documented so the golden is explainable):
 /// - `<tempo-band>` = [`tempo_band`] of `mean_bpm` (e.g. `"house"`).
-/// - `<acoustic|electric>` = `"acoustic"` if `mean_acousticness >= 0.5`, else
-///   `"electric"`.
+/// - acoustic/electric term is **three-way** with distinctive cutoffs (P10b):
+///   `"acoustic"` if `mean_acousticness >= 0.70`, `"electric"` if `<= 0.50`, else
+///   the term is **omitted entirely** (e.g. `"house-pop"`). The old 0.5 split
+///   named ~84% of tracks "acoustic" because sonara 0.2.2's `acousticness` is
+///   compressed to roughly `[0.42, 0.93]` (avg ~0.63) — these cutoffs are
+///   **calibrated to that observed compressed range** and MUST be revisited when
+///   sonara recalibrates.
 /// - `<top-genre>` = the #1 `top_genre` (by count, name-tiebroken), or `"mixed"`
 ///   when the community carries no genre tags.
 fn style_name(mean_bpm: f64, mean_acousticness: f64, top_genre: Option<&str>) -> String {
     let band = tempo_band(mean_bpm as f32);
-    let ae = if mean_acousticness >= 0.5 {
-        "acoustic"
-    } else {
-        "electric"
-    };
     let genre = top_genre.unwrap_or("mixed");
-    format!("{band}-{ae}-{genre}")
+    match acoustic_term(mean_acousticness) {
+        Some(ae) => format!("{band}-{ae}-{genre}"),
+        None => format!("{band}-{genre}"),
+    }
+}
+
+/// The three-way acoustic/electric term, or `None` when the middle band omits it.
+/// Cutoffs calibrated to sonara 0.2.2's compressed `acousticness` range (P10b).
+fn acoustic_term(mean_acousticness: f64) -> Option<&'static str> {
+    if mean_acousticness >= 0.70 {
+        Some("acoustic")
+    } else if mean_acousticness <= 0.50 {
+        Some("electric")
+    } else {
+        None
+    }
+}
+
+/// Make the ordered base style names unique: the first occurrence of a name is
+/// kept verbatim, later collisions get a `-2`, `-3`, … suffix in the same order
+/// (which is the stable `(n_tracks desc, min-hash asc)` style-index order). The
+/// suffixed form is itself checked against the taken set so a base name that
+/// already ends in a number can never alias a generated one.
+fn unique_names<'a>(names: impl Iterator<Item = &'a str>) -> Vec<String> {
+    let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+    let mut taken: BTreeSet<String> = BTreeSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for base in names {
+        let n = seen.entry(base.to_string()).or_insert(0);
+        *n += 1;
+        let name = if *n == 1 {
+            base.to_string()
+        } else {
+            // Advance the suffix until it is genuinely free.
+            let mut k = *n;
+            loop {
+                let candidate = format!("{base}-{k}");
+                if !taken.contains(&candidate) {
+                    break candidate;
+                }
+                k += 1;
+            }
+        };
+        taken.insert(name.clone());
+        out.push(name);
+    }
+    out
 }
 
 /// Element-wise mean of the given raw embeddings (each [`EMBEDDING_DIM`] long).
@@ -627,13 +738,77 @@ mod tests {
     }
 
     #[test]
-    fn style_name_follows_the_template() {
-        // house band (110–125), acoustic (>=0.5), top genre "folk".
+    fn style_name_follows_the_three_way_template() {
+        // house band (110–125), acoustic (>=0.70), top genre "folk".
         assert_eq!(style_name(118.0, 0.8, Some("folk")), "house-acoustic-folk");
-        // upbeat, electric (<0.5), no genre → "mixed".
+        // upbeat, electric (<=0.50), no genre → "mixed".
         assert_eq!(style_name(130.0, 0.2, None), "upbeat-electric-mixed");
-        // boundary: acousticness exactly 0.5 → acoustic.
-        assert_eq!(style_name(80.0, 0.5, Some("jazz")), "downtempo-acoustic-jazz");
+        // P10b: mid band (0.50, 0.70) omits the acoustic/electric term entirely.
+        assert_eq!(style_name(100.0, 0.60, Some("pop")), "mid-pop");
+        // P10b boundary: exactly 0.70 → acoustic; exactly 0.50 → electric.
+        assert_eq!(style_name(80.0, 0.70, Some("jazz")), "downtempo-acoustic-jazz");
+        assert_eq!(style_name(80.0, 0.50, Some("jazz")), "downtempo-electric-jazz");
+    }
+
+    #[test]
+    fn acoustic_term_is_three_way_with_calibrated_cutoffs() {
+        assert_eq!(acoustic_term(0.93), Some("acoustic"));
+        assert_eq!(acoustic_term(0.70), Some("acoustic")); // inclusive high cutoff
+        assert_eq!(acoustic_term(0.69), None); // just inside the omitted middle
+        assert_eq!(acoustic_term(0.60), None);
+        assert_eq!(acoustic_term(0.51), None);
+        assert_eq!(acoustic_term(0.50), Some("electric")); // inclusive low cutoff
+        assert_eq!(acoustic_term(0.42), Some("electric"));
+    }
+
+    #[test]
+    fn unique_names_suffixes_collisions_in_order() {
+        // First keeps the base name; 2nd/3rd get -2/-3 in style-index order.
+        let got = unique_names(
+            ["house-acoustic-pop", "house-acoustic-pop", "downtempo-folk", "house-acoustic-pop"]
+                .into_iter(),
+        );
+        assert_eq!(
+            got,
+            vec![
+                "house-acoustic-pop".to_string(),
+                "house-acoustic-pop-2".to_string(),
+                "downtempo-folk".to_string(),
+                "house-acoustic-pop-3".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn unique_names_avoids_aliasing_a_pre_numbered_base() {
+        // A base already ending "-2" must not be aliased by the generated suffix.
+        let got = unique_names(["mid-pop", "mid-pop-2", "mid-pop"].into_iter());
+        // 1st "mid-pop" verbatim; "mid-pop-2" verbatim; 2nd "mid-pop" wants "-2"
+        // but it is taken, so it advances to "-3".
+        assert_eq!(
+            got,
+            vec![
+                "mid-pop".to_string(),
+                "mid-pop-2".to_string(),
+                "mid-pop-3".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn mutual_pairs_keep_only_reciprocated_edges() {
+        // a<->b reciprocated; a->c one-way (c never returns a); b<->d reciprocated.
+        let edges = vec![
+            SimEdge { src: "a".into(), tgt: "b".into(), score: 0.9 },
+            SimEdge { src: "b".into(), tgt: "a".into(), score: 0.9 },
+            SimEdge { src: "a".into(), tgt: "c".into(), score: 0.8 },
+            SimEdge { src: "b".into(), tgt: "d".into(), score: 0.7 },
+            SimEdge { src: "d".into(), tgt: "b".into(), score: 0.7 },
+        ];
+        let got = mutual_pairs(&edges);
+        // Only (a,b) and (b,d) survive; a->c is excluded (one-way); emitted once
+        // per pair with src < tgt.
+        assert_eq!(got, vec![("a", "b", 0.9), ("b", "d", 0.7)]);
     }
 
     #[test]
