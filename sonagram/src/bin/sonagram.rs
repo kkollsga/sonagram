@@ -1,0 +1,250 @@
+//! The `sonagram` CLI — the end-to-end driver over the library scanner, the
+//! graph builder, and the playlist writer.
+//!
+//! Plain `std::env` argument parsing (no `clap`), matching the upstream
+//! no-heavy-CLI-deps discipline. Three subcommands:
+//!
+//! ```text
+//! sonagram scan     <library_root>
+//! sonagram build    <library_root> <out.kgl>
+//! sonagram playlist <library_root> <graph.kgl> (--cypher '<q>' | --ids h1,h2)
+//!                   --out <file.m3u8>
+//! ```
+//!
+//! Progress and stage lines go to stderr; results (reports, paths, counts) go
+//! to stdout, so the CLI composes in a pipeline.
+
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
+
+use sonagram::graph::{self, LibraryInfo};
+use sonagram::playlist;
+use sonagram::scan::{scan_library, ScanOptions, ScanProgress, ScanStage};
+use sonagram::{Result, SonagramError, VERSION};
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // Global flags.
+    if args.iter().any(|a| a == "--help" || a == "-h") && args.first().map(String::as_str) != Some("playlist") {
+        print_help();
+        return ExitCode::SUCCESS;
+    }
+    match args.first().map(String::as_str) {
+        None => {
+            print_help();
+            return ExitCode::SUCCESS;
+        }
+        Some("--help") | Some("-h") | Some("help") => {
+            print_help();
+            return ExitCode::SUCCESS;
+        }
+        Some("--version") | Some("-V") | Some("version") => {
+            println!("sonagram {VERSION}");
+            return ExitCode::SUCCESS;
+        }
+        _ => {}
+    }
+
+    let result = match args[0].as_str() {
+        "scan" => cmd_scan(&args[1..]),
+        "build" => cmd_build(&args[1..]),
+        "playlist" => cmd_playlist(&args[1..]),
+        other => Err(SonagramError::Playlist(format!(
+            "unknown subcommand '{other}' — try `sonagram --help`"
+        ))),
+    };
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn print_help() {
+    println!(
+        "sonagram {VERSION} — map a music library into a queryable kglite graph\n\
+\n\
+USAGE:\n\
+    sonagram <SUBCOMMAND>\n\
+\n\
+SUBCOMMANDS:\n\
+    scan     <library_root>\n\
+             Scan a library (walk, hash, analyze unseen files) and cache\n\
+             per-track analysis under <library_root>/.sonagram/. Prints a\n\
+             scan report.\n\
+\n\
+    build    <library_root> <out.kgl>\n\
+             Build the knowledge graph from the cached analysis records and\n\
+             save it to <out.kgl>. Run `scan` first.\n\
+\n\
+    playlist <library_root> <graph.kgl> --out <file.m3u8>\n\
+             (--cypher '<query>' | --ids <hash1,hash2,...>)\n\
+             Resolve a track set from the graph and write a .m3u8 playlist.\n\
+             --cypher runs a read-only query whose result is a Track-node or\n\
+             content-hash column; --ids takes content hashes directly. Track\n\
+             order is preserved (never re-sorted).\n\
+\n\
+FLAGS:\n\
+    -h, --help       Print this help\n\
+    -V, --version    Print version\n\
+\n\
+EXAMPLES:\n\
+    sonagram scan  ~/Music\n\
+    sonagram build ~/Music music.kgl\n\
+    sonagram playlist ~/Music music.kgl \\\n\
+        --cypher 'MATCH (t:Track) WHERE t.bpm > 120 RETURN t.content_hash ORDER BY t.energy' \\\n\
+        --out set.m3u8"
+    );
+}
+
+fn cmd_scan(args: &[String]) -> Result<()> {
+    let root = positional(args, 0, "scan", "<library_root>")?;
+    let root = PathBuf::from(root);
+
+    let opts = ScanOptions {
+        progress: Some(Box::new(stage_line)),
+        ..Default::default()
+    };
+    let report = scan_library(&root, &opts)?;
+
+    println!("scan report for {}", root.display());
+    println!("  total files:        {}", report.total_files);
+    println!("  analyzed (new):     {}", report.analyzed);
+    println!("  reused (hash match):{}", report.reused_hash_match);
+    println!("  reused (stat match):{}", report.reused_stat_match);
+    println!("  failed:             {}", report.failed.len());
+    for (path, msg) in &report.failed {
+        println!("    - {}: {msg}", path.display());
+    }
+    println!("  elapsed:            {:.2?}", report.elapsed);
+    Ok(())
+}
+
+fn cmd_build(args: &[String]) -> Result<()> {
+    let root = positional(args, 0, "build", "<library_root>")?;
+    let out = positional(args, 1, "build", "<out.kgl>")?;
+    let root = PathBuf::from(root);
+    let out = PathBuf::from(out);
+
+    eprintln!("[build] loading cached records from {}", root.display());
+    let records = sonagram::scan::load_records(&root)?;
+    if records.is_empty() {
+        return Err(SonagramError::Playlist(format!(
+            "no cached records under {} — run `sonagram scan` first",
+            root.display()
+        )));
+    }
+    eprintln!("[build] {} records → building graph", records.len());
+    let library = LibraryInfo {
+        root: library_label(&root),
+        n_tracks: records.len(),
+    };
+    let mut g = graph::build_graph(&records, &library)?;
+    graph::save(&mut g, &out)?;
+    println!(
+        "built graph from {} tracks → {}",
+        records.len(),
+        out.display()
+    );
+    Ok(())
+}
+
+fn cmd_playlist(args: &[String]) -> Result<()> {
+    // Local --help for the subcommand (its flags are non-trivial).
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print_help();
+        return Ok(());
+    }
+    let root = positional(args, 0, "playlist", "<library_root>")?;
+    let graph_path = positional(args, 1, "playlist", "<graph.kgl>")?;
+    let root = PathBuf::from(root);
+
+    let mut cypher: Option<String> = None;
+    let mut ids: Option<String> = None;
+    let mut out: Option<PathBuf> = None;
+
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--cypher" => cypher = Some(flag_value(args, &mut i, "--cypher")?),
+            "--ids" => ids = Some(flag_value(args, &mut i, "--ids")?),
+            "--out" => out = Some(PathBuf::from(flag_value(args, &mut i, "--out")?)),
+            other => {
+                return Err(SonagramError::Playlist(format!(
+                    "unexpected argument '{other}' to `playlist`"
+                )))
+            }
+        }
+        i += 1;
+    }
+
+    let out = out.ok_or_else(|| SonagramError::Playlist("playlist: --out <file.m3u8> is required".into()))?;
+    if cypher.is_some() == ids.is_some() {
+        return Err(SonagramError::Playlist(
+            "playlist: pass exactly one of --cypher '<query>' or --ids <hashes>".into(),
+        ));
+    }
+
+    let g = kglite::api::io::load_file(path_str(Path::new(graph_path))?)
+        .map_err(|e| SonagramError::Graph(format!("load {graph_path}: {e}")))?;
+
+    let entries = if let Some(q) = cypher {
+        playlist::entries_from_cypher(g.as_ref(), &root, &q)?
+    } else {
+        let id_list: Vec<String> = ids
+            .unwrap()
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        playlist::entries_from_graph(g.as_ref(), &root, &id_list)?
+    };
+
+    playlist::write_m3u8(&entries, &out)?;
+    println!("wrote {} tracks → {}", entries.len(), out.display());
+    Ok(())
+}
+
+// ───────────────────────────── helpers ──────────────────────────────
+
+/// Print a coarse stage line to stderr — one per stage boundary (plus the
+/// start of analysis), not per file, so a 10k-track scan stays readable.
+fn stage_line(p: ScanProgress) {
+    let at_boundary = p.done == p.total;
+    let analyze_start = p.stage == ScanStage::Analyze && p.done == 0;
+    if at_boundary || analyze_start {
+        eprintln!("[scan] {:?} {}/{}", p.stage, p.done, p.total);
+    }
+}
+
+/// A short library label for the `Library` root node — the last path component
+/// (never the full user directory tree; the scanner keeps paths relative).
+fn library_label(root: &Path) -> String {
+    root.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| root.to_string_lossy().into_owned())
+}
+
+fn positional<'a>(args: &'a [String], idx: usize, cmd: &str, name: &str) -> Result<&'a str> {
+    args.get(idx)
+        .map(String::as_str)
+        .filter(|a| !a.starts_with("--"))
+        .ok_or_else(|| SonagramError::Playlist(format!("{cmd}: missing {name}")))
+}
+
+fn flag_value(args: &[String], i: &mut usize, flag: &str) -> Result<String> {
+    *i += 1;
+    args.get(*i)
+        .cloned()
+        .ok_or_else(|| SonagramError::Playlist(format!("{flag} requires a value")))
+}
+
+fn path_str(p: &Path) -> Result<&str> {
+    p.to_str()
+        .ok_or_else(|| SonagramError::Graph(format!("non-UTF-8 path: {}", p.display())))
+}

@@ -26,6 +26,12 @@ pub enum SonagramError {
     /// A scan-cache failure (per-hash JSON cache under `<lib>/.sonagram/`).
     #[error("cache error: {0}")]
     Cache(String),
+
+    /// A playlist-materialization failure (empty track set, unresolvable track
+    /// ids, or a Cypher result with no usable Track id column). Ours: the
+    /// mapping from a graph answer to a `.m3u8` is sonagram's responsibility.
+    #[error("playlist error: {0}")]
+    Playlist(String),
 }
 
 /// The crate-wide result alias.

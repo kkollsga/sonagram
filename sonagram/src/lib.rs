@@ -24,8 +24,7 @@ pub mod scan;
 
 pub mod graph;
 
-/// M3U playlist export from a set of tracks. Populated in P7.
-pub mod playlist {}
+pub mod playlist;
 
 pub use error::{Result, SonagramError};
 
