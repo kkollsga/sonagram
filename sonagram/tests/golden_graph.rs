@@ -1,0 +1,504 @@
+//! THE regression net for sonagram's graph mapping — the gate every future
+//! phase runs via `cargo test -p sonagram --test golden_graph`.
+//!
+//! sonagram's output is a graph, so the net is **digest fidelity +
+//! determinism**, not audio fidelity (CLAUDE.md, "The graph gate"). Three
+//! standing parts:
+//!
+//! - [`golden_graph`] — build the graph from the 15 frozen `TrackAnalysis`
+//!   fixtures, render it to a deterministic canonical string, SHA-256 it, and
+//!   assert the digest equals the committed golden at `tests/goldens/`.
+//! - [`determinism`] — the same records built twice, in reversed order, and in
+//!   a deterministically shuffled order all yield an identical digest, and node
+//!   identity is stable across input reordering. Catches iteration-order and
+//!   identity leaks a golden alone would miss.
+//! - [`contract_*`] — compiles and asserts against the **real** `sonara` +
+//!   `kglite` APIs, so an upstream bump that breaks the mapping fails loudly
+//!   here instead of drifting silently.
+//!
+//! The `#[ignore]`d [`capture_goldens`] regenerates the committed goldens; it
+//! is the deliberate regen path — see `GRAPH-GATE.md` for THE RULE.
+//!
+//! ## The canonical digest
+//! [`canonical_graph_string`] is a full, deterministic render of the graph read
+//! through the same public kglite accessors the builder and P4 gate use
+//! (`type_indices`, `get_node`, `NodeData::{id, properties_cloned}`,
+//! `get_edge_type_counts`, the stable-digraph edge view, and `graph.embeddings`).
+//! Every input is sorted (`BTreeMap` / sorted `Vec`) and every value is rendered
+//! via `Value`'s stable `Debug`, so the render is reproducible across runs and
+//! machines. Embedding vectors are rendered as exact f32 bits (`to_bits()` hex)
+//! to defeat float-formatting drift.
+
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+use sha2::{Digest, Sha256};
+use sonagram::graph::{self, LibraryInfo, GRAPH_SCHEMA_VERSION};
+use sonagram::record::AnalysisRecord;
+
+// ─────────────────────────── fixture loading ────────────────────────────────
+
+fn fixtures_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/analyses")
+}
+
+fn goldens_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/goldens")
+}
+
+/// Load the 15 frozen fixture records. Mirrors the `scan::load_records`
+/// contract the builder consumes: read every `*.json` and sort by
+/// `content_hash` so input order is fixed regardless of directory-walk order.
+fn load_records() -> Vec<AnalysisRecord> {
+    let dir = fixtures_dir();
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("read fixtures dir {}: {e}", dir.display()))
+        .map(|e| e.expect("dir entry").path())
+        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("json"))
+        .collect();
+    paths.sort();
+    let mut records: Vec<AnalysisRecord> = paths
+        .iter()
+        .map(|p| {
+            let text = std::fs::read_to_string(p).unwrap();
+            AnalysisRecord::from_json(&text).unwrap_or_else(|e| panic!("parse {}: {e}", p.display()))
+        })
+        .collect();
+    records.sort_by(|a, b| a.source.content_hash.cmp(&b.source.content_hash));
+    records
+}
+
+fn library() -> LibraryInfo {
+    LibraryInfo {
+        root: "fixtures".to_string(),
+        n_tracks: 15,
+    }
+}
+
+// ───────────────────────── canonical rendering ──────────────────────────────
+
+/// Stable canonical form of any value. `Value`'s `Debug` is an enum form (not a
+/// map), so it is deterministic across runs; `Cow<Value>` forwards to it.
+fn canon<T: std::fmt::Debug>(v: &T) -> String {
+    format!("{v:?}")
+}
+
+/// A deterministic, exhaustive canonical rendering of the built graph. Two
+/// graphs render to the same string iff they are equivalent along every
+/// dimension the gate protects: node-type counts, edge-type counts, the sorted
+/// (node_type, id) identity set, the full per-node property sweep, the full
+/// per-edge property sweep, and every embedding store (dimension / model / metric
+/// / per-node vectors in exact f32 bits).
+fn canonical_graph_string(g: &kglite::api::DirGraph) -> String {
+    let mut s = String::new();
+    s.push_str(&format!("## schema_version\n{GRAPH_SCHEMA_VERSION}\n"));
+
+    // ── Node sweep (via type_indices → get_node) ────────────────────────────
+    // Grouped so we build counts, identities, the property sweep, and the
+    // node-index → id map (used to render embeddings by node identity) in one
+    // pass.
+    let mut type_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut nodes: Vec<(String, String, BTreeMap<String, String>)> = Vec::new();
+    let mut id_by_index: BTreeMap<usize, String> = BTreeMap::new();
+
+    for (ty, refs) in g.type_indices.iter() {
+        let tname = ty.to_string();
+        type_counts.insert(tname.clone(), refs.len());
+        for ni in refs.to_vec() {
+            let node = g
+                .get_node(ni)
+                .unwrap_or_else(|| panic!("type_indices points at missing node in {tname}"));
+            let id = canon(&node.id());
+            id_by_index.insert(ni.index(), id.clone());
+            let props: BTreeMap<String, String> = node
+                .properties_cloned(&g.interner)
+                .into_iter()
+                .map(|(k, v)| (k, canon(&v)))
+                .collect();
+            nodes.push((tname.clone(), id, props));
+        }
+    }
+    nodes.sort();
+
+    s.push_str("## node_type_counts\n");
+    for (ty, n) in &type_counts {
+        s.push_str(&format!("{ty}\t{n}\n"));
+    }
+
+    // ── Edge-type counts (via get_edge_type_counts) ─────────────────────────
+    let edge_counts: BTreeMap<String, usize> = g.get_edge_type_counts().into_iter().collect();
+    s.push_str("## edge_type_counts\n");
+    for (ty, n) in &edge_counts {
+        s.push_str(&format!("{ty}\t{n}\n"));
+    }
+
+    s.push_str("## node_identities\n");
+    for (ty, id, _) in &nodes {
+        s.push_str(&format!("{ty}\t{id}\n"));
+    }
+
+    s.push_str("## node_props\n");
+    for (ty, id, props) in &nodes {
+        s.push_str(&format!("{ty}\t{id}\n"));
+        for (k, v) in props {
+            s.push_str(&format!("\t{k}={v}\n"));
+        }
+    }
+
+    // ── Edge sweep (endpoints + props, via the stable-digraph view) ─────────
+    let sg = g.graph.as_stable_digraph();
+    let mut edges: Vec<(String, String, String, BTreeMap<String, String>)> = Vec::new();
+    for e in sg.edge_indices() {
+        let edge = sg.edge_weight(e).expect("edge weight");
+        let (si, ti) = sg.edge_endpoints(e).expect("edge endpoints");
+        let sn = sg.node_weight(si).expect("edge source node");
+        let tn = sg.node_weight(ti).expect("edge target node");
+        let props: BTreeMap<String, String> = edge
+            .properties_cloned(&g.interner)
+            .into_iter()
+            .map(|(k, v)| (k, canon(&v)))
+            .collect();
+        edges.push((
+            edge.connection_type_str(&g.interner).to_string(),
+            canon(&sn.id()),
+            canon(&tn.id()),
+            props,
+        ));
+    }
+    edges.sort();
+
+    s.push_str("## edge_props\n");
+    for (conn, src, tgt, props) in &edges {
+        s.push_str(&format!("{conn}\t{src}\t{tgt}\n"));
+        for (k, v) in props {
+            s.push_str(&format!("\t{k}={v}\n"));
+        }
+    }
+
+    // ── Embedding stores (dimension / model / metric / per-node vectors) ────
+    s.push_str("## embeddings\n");
+    let mut emb_keys: Vec<&(String, String)> = g.embeddings.keys().collect();
+    emb_keys.sort();
+    for key in emb_keys {
+        let store = &g.embeddings[key];
+        let dim = store.dimension;
+        s.push_str(&format!(
+            "{}::{}\tdim={dim}\tmodel={:?}\tmetric={:?}\n",
+            key.0, key.1, store.model_id, store.metric
+        ));
+        // Render one row per stored vector, keyed by the owning node's id so
+        // the order is stable independent of slot assignment. f32 as exact bits
+        // (to_bits hex) — no decimal formatting to drift across platforms.
+        let mut rows: Vec<(String, String)> = Vec::with_capacity(store.slot_to_node.len());
+        for (slot, &node_idx) in store.slot_to_node.iter().enumerate() {
+            let id = id_by_index
+                .get(&node_idx)
+                .cloned()
+                .unwrap_or_else(|| format!("idx:{node_idx}"));
+            let start = slot * dim;
+            let hex: Vec<String> = store.data[start..start + dim]
+                .iter()
+                .map(|f| format!("{:08x}", f.to_bits()))
+                .collect();
+            rows.push((id, hex.join(",")));
+        }
+        rows.sort();
+        for (id, hex) in rows {
+            s.push_str(&format!("\t{id}\t{hex}\n"));
+        }
+    }
+
+    s
+}
+
+/// SHA-256 (lowercase hex) of the canonical graph rendering — the golden digest.
+fn graph_digest(g: &kglite::api::DirGraph) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(canonical_graph_string(g).as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+fn read_golden() -> String {
+    let path = goldens_dir().join("library.sha256");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| {
+            panic!(
+                "missing golden {} — capture with `cargo test -p sonagram --test golden_graph -- --ignored capture_goldens`: {e}",
+                path.display()
+            )
+        })
+        .trim()
+        .to_string()
+}
+
+// ──────────────────────────── part 1: golden ────────────────────────────────
+
+/// Build the graph from the 15 frozen fixtures, digest it, and assert the
+/// digest matches the committed golden. On mismatch, print both digests and the
+/// first line where the live canonical string diverges from the committed
+/// snapshot, so a digest diff is explainable rather than opaque.
+#[test]
+fn golden_graph() {
+    let graph = graph::build_graph(&load_records(), &library()).unwrap();
+    let got = graph_digest(&graph);
+    let want = read_golden();
+
+    if got != want {
+        let live = canonical_graph_string(&graph);
+        let snap_path = goldens_dir().join("library.canonical.txt");
+        let diff = match std::fs::read_to_string(&snap_path) {
+            Ok(committed) => first_diff(&committed, &live),
+            Err(e) => format!("(could not read {}: {e})", snap_path.display()),
+        };
+        panic!(
+            "golden digest mismatch\n  golden (committed) = {want}\n  live build         = {got}\n\
+             first canonical difference:\n{diff}\n\n\
+             If this graph change is INTENTIONAL, regenerate the goldens in the SAME commit and\n\
+             explain why in the commit body (GRAPH-GATE.md, THE RULE):\n\
+             `cargo test -p sonagram --test golden_graph -- --ignored capture_goldens`"
+        );
+    }
+}
+
+/// First differing line between the committed canonical snapshot and the live
+/// render, with line numbers. Returns a note if they match line-for-line but
+/// differ in length.
+fn first_diff(committed: &str, live: &str) -> String {
+    for (i, (a, b)) in committed.lines().zip(live.lines()).enumerate() {
+        if a != b {
+            return format!(
+                "  line {}:\n    committed: {a}\n    live:      {b}",
+                i + 1
+            );
+        }
+    }
+    let (nc, nl) = (committed.lines().count(), live.lines().count());
+    if nc != nl {
+        format!("  line counts differ: committed={nc} live={nl}")
+    } else {
+        "  (no line-level difference found — check trailing bytes)".to_string()
+    }
+}
+
+// ─────────────────────────── part 2: determinism ────────────────────────────
+
+/// The same records built twice, in reversed order, and in a deterministically
+/// shuffled order must all yield the identical digest — `build_graph` sorts
+/// internally, so input order must not leak into node identity or ordering.
+#[test]
+fn determinism() {
+    let records = load_records();
+
+    let d0 = graph_digest(&graph::build_graph(&records, &library()).unwrap());
+
+    // Same input, second build.
+    let d1 = graph_digest(&graph::build_graph(&records, &library()).unwrap());
+    assert_eq!(d0, d1, "two builds of the same records must be byte-identical");
+
+    // Reversed input order.
+    let mut reversed = records.clone();
+    reversed.reverse();
+    let dr = graph_digest(&graph::build_graph(&reversed, &library()).unwrap());
+    assert_eq!(d0, dr, "reversed input order must yield the same digest");
+
+    // Deterministic shuffle: a fixed swap pattern (no rand dependency).
+    let mut shuffled = records.clone();
+    let n = shuffled.len();
+    for i in 0..n {
+        // A fixed, seed-free permutation via modular strides.
+        let j = (i * 7 + 3) % n;
+        shuffled.swap(i, j);
+    }
+    let ds = graph_digest(&graph::build_graph(&shuffled, &library()).unwrap());
+    assert_eq!(d0, ds, "deterministically shuffled input must yield the same digest");
+}
+
+// ──────────────────────────── part 3: contract ──────────────────────────────
+//
+// Compile-time + runtime assertions against the REAL upstream APIs. A version
+// bump that renames/removes anything sonagram maps fails HERE, loudly, instead
+// of drifting into a silent mapping bug. Each assert says what breaks downstream.
+
+/// Compile-time proof that every `TrackAnalysis` field sonagram maps still
+/// exists with the same name. Never called — it exists only so the compiler
+/// rejects an upstream rename/removal/addition (no `..`, so an added field is a
+/// non-exhaustive-pattern error and forces us to decide whether to map it).
+///
+/// WHY: `AnalysisRecord::from_analysis` destructures the same fields into the
+/// cache/fixture DTO. If sonara reshapes `TrackAnalysis`, our mapping silently
+/// drops or misreads data unless this breaks the build first.
+#[allow(dead_code)]
+fn _track_analysis_fields_present(a: sonara::analyze::TrackAnalysis) {
+    let sonara::analyze::TrackAnalysis {
+        provenance: _,
+        duration_sec: _,
+        bpm: _,
+        bpm_raw: _,
+        bpm_candidates: _,
+        beats: _,
+        onset_frames: _,
+        rms_mean: _,
+        rms_max: _,
+        loudness_lufs: _,
+        dynamic_range_db: _,
+        true_peak_db: _,
+        replaygain_db: _,
+        loudness_curve: _,
+        loudness_momentary_max_db: _,
+        loudness_range_lu: _,
+        spectral_centroid_mean: _,
+        zero_crossing_rate: _,
+        onset_density: _,
+        spectral_bandwidth_mean: _,
+        spectral_rolloff_mean: _,
+        spectral_flatness_mean: _,
+        spectral_contrast_mean: _,
+        mfcc_mean: _,
+        chroma_mean: _,
+        tempo_curve: _,
+        tempo_variability: _,
+        time_signature: _,
+        time_signature_confidence: _,
+        chord_sequence: _,
+        chord_events: _,
+        chord_change_rate: _,
+        predominant_chord: _,
+        dissonance: _,
+        energy: _,
+        danceability: _,
+        key: _,
+        key_confidence: _,
+        key_camelot: _,
+        valence: _,
+        acousticness: _,
+        embedding: _,
+        mood_happy: _,
+        mood_aggressive: _,
+        mood_relaxed: _,
+        mood_sad: _,
+        instrumentalness: _,
+        genre: _,
+        grid_offset_sec: _,
+        downbeats: _,
+        grid_stability: _,
+        energy_curve: _,
+        energy_curve_hop_sec: _,
+        segments: _,
+        intro_end_sec: _,
+        outro_start_sec: _,
+        energy_level: _,
+        leading_silence_sec: _,
+        trailing_silence_sec: _,
+        key_candidates: _,
+        vocalness: _,
+        fingerprint: _,
+        embedding_version: _,
+        tags: _,
+    } = a;
+}
+
+#[test]
+fn contract_sonara() {
+    use sonara::analyze::{AnalysisConfig, AnalysisMode, ANALYSIS_SCHEMA_VERSION};
+    use sonara::similarity::{EMBEDDING_DIM, SIMILARITY_VERSION, WEIGHTS};
+
+    // AnalysisConfig / AnalysisMode construction: the scanner builds these to
+    // request features. WHY: a field/variant rename breaks `scan::analysis_config`.
+    let _cfg = AnalysisConfig {
+        mode: AnalysisMode::Playlist,
+        features: None,
+        bpm_min: None,
+        bpm_max: None,
+    };
+
+    // WHY: each Track carries `analysis_schema_version`. If sonara bumps its
+    // schema, the frozen fixtures (captured at v1) no longer describe the same
+    // analysis semantics — the goldens must be recaptured, not silently trusted.
+    assert_eq!(
+        ANALYSIS_SCHEMA_VERSION, 1,
+        "sonara ANALYSIS_SCHEMA_VERSION changed — recapture fixtures + goldens"
+    );
+
+    // WHY: the embedding store is built at exactly this width; a mismatch means
+    // `preweight` and `EmbeddingStore::with_metric(EMBEDDING_DIM, ..)` would
+    // store vectors of the wrong dimension and vector search would be corrupt.
+    assert_eq!(EMBEDDING_DIM, 48, "sonara EMBEDDING_DIM changed — remap the embedding store width");
+    assert_eq!(
+        WEIGHTS.len(),
+        48,
+        "sonara WEIGHTS length changed — `preweight` zips weights against the 48-dim vector"
+    );
+
+    // WHY: EMBEDDING_MODEL_ID is pinned to similarity v1; a bump means a stored
+    // vector would be silently reinterpreted under new normalization constants.
+    assert_eq!(
+        SIMILARITY_VERSION, 1,
+        "sonara SIMILARITY_VERSION changed — bump EMBEDDING_MODEL_ID + recapture"
+    );
+}
+
+#[test]
+fn contract_kglite() {
+    use kglite::api::mutation::EdgeSpec;
+    use kglite::api::storage::{EmbeddingStore, StorageMode};
+    use kglite::api::Value;
+    use kglite::datatypes::values::DataFrame;
+    use std::collections::HashMap;
+
+    // EdgeSpec construction: the builder emits these for every graph edge.
+    // WHY: a field rename breaks `graph::edge` / `add_edges_from_specs`.
+    let _spec = EdgeSpec {
+        source_type: "Track".to_string(),
+        source_id: Value::String("x".to_string()),
+        target_type: "Artist".to_string(),
+        target_id: Value::String("y".to_string()),
+        edge_type: "BY_ARTIST".to_string(),
+        properties: HashMap::new(),
+    };
+
+    // DataFrame::new + EmbeddingStore::new: the builder stages every node table
+    // and the similarity store through these. WHY: a signature change breaks
+    // `graph::build_df` / the embedding-store construction.
+    let _df = DataFrame::new(Vec::new());
+    assert_eq!(
+        EmbeddingStore::new(48).dimension,
+        48,
+        "kglite EmbeddingStore no longer honors its constructor dimension"
+    );
+
+    // WHY: the `.kgl` open path (P8 handoff) selects a storage mode; `Memory`
+    // must remain a variant or that path won't compile.
+    let _mode = StorageMode::Memory;
+}
+
+// ─────────────────────── part 4: golden regeneration ────────────────────────
+
+/// Regenerate `tests/goldens/library.sha256` + `library.canonical.txt` from the
+/// current code. `#[ignore]` so it never runs in the normal suite — the
+/// deliberate regen path (GRAPH-GATE.md, THE RULE). Run explicitly:
+///
+///   cargo test -p sonagram --test golden_graph -- --ignored capture_goldens
+#[test]
+#[ignore = "regeneration path; run explicitly with --ignored capture_goldens"]
+fn capture_goldens() {
+    let graph = graph::build_graph(&load_records(), &library()).unwrap();
+    let canonical = canonical_graph_string(&graph);
+    let digest = graph_digest(&graph);
+
+    let dir = goldens_dir();
+    std::fs::create_dir_all(&dir).expect("create goldens dir");
+    std::fs::write(dir.join("library.sha256"), format!("{digest}\n")).expect("write digest golden");
+    std::fs::write(dir.join("library.canonical.txt"), &canonical).expect("write canonical golden");
+
+    let bytes = canonical.len();
+    eprintln!("captured library golden -> {digest}");
+    eprintln!("canonical snapshot: {bytes} bytes ({} lines)", canonical.lines().count());
+    assert!(
+        bytes < 2 * 1024 * 1024,
+        "canonical snapshot exceeded 2MB ({bytes} bytes) — store counts+ids only instead"
+    );
+}

@@ -23,3 +23,7 @@ kglite = { workspace = true }
 # Test-only: precise mtime control for the incremental-rescan stat fast-path
 # tests (touch a file's mtime without touching its bytes). Never a runtime dep.
 filetime = "0.2"
+# Test-only: SHA-256 for the golden_graph gate's canonical-graph digest
+# (`tests/golden_graph.rs`). The gate observes the graph; it never ships, so
+# this is a dev-dependency only, never a normal dep.
+sha2 = "0.10"
