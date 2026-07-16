@@ -22,9 +22,7 @@ pub mod record;
 
 pub mod scan;
 
-/// Graph mapping: analysis records into a `kglite` `DirGraph` following the
-/// music schema. Populated in P4.
-pub mod graph {}
+pub mod graph;
 
 /// M3U playlist export from a set of tracks. Populated in P7.
 pub mod playlist {}
