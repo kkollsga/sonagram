@@ -1,0 +1,18 @@
+[package]
+name = "sonagram-python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Mirrors sonara-python: the compiled module is the private `_sonagram`
+# submodule imported by `python/sonagram/__init__.py`. `module-name` in
+# pyproject.toml (`sonagram._sonagram`) must agree with this lib name.
+[lib]
+name = "_sonagram"
+crate-type = ["cdylib"]
+
+[dependencies]
+sonagram = { path = "../sonagram" }
+pyo3 = { workspace = true }
+numpy = { workspace = true }
