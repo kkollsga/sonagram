@@ -206,5 +206,35 @@ playlist. A hash matching no Track is reported, not silently dropped.
   `t.energy IS NOT NULL` when a null-able property must be present, and
   remember every "Null? yes" property above can drop rows this way.
 - **No query parameters over MCP**: `cypher_query` takes only the query string.
-  Inline all literals; `$seed`-style placeholders fail.
-```
+  Inline all literals; `$seed`-style placeholders fail. (Quote-heavy titles like
+  `O'Neal`: use double-quoted Cypher strings to avoid shell/Cypher `'` fights.)
+
+## Field notes (from live agent validation, 456-track library, 2026-07-17)
+- **Similarity is "same vibe", not "same style".** The embedding ranks on
+  energy/acousticness-like character; country seeds pull crooner jazz and film
+  scores as top neighbours. For a stylistic/genre-character request ("western",
+  "twangy") lead with *specific* genre tags + audio scalars
+  (`spectral_centroid` ~2000–3500 for guitar-range brightness, `acousticness`,
+  `vocalness`) and use `SIMILAR_TO` only to confirm.
+- **One `SIMILAR_TO` hop spans only ±~0.06 energy.** For "like this but
+  calmer/wilder", chain: `-[:SIMILAR_TO*1..2]->` with a `DISTINCT` and your
+  energy bound — that's the real wind-down archetype.
+- **Multi-constraint ordering isn't a Cypher `ORDER BY`.** A dual ramp (smooth
+  BPM steps AND strictly climbing energy) needs candidate export + client-side
+  selection (the two signals are typically uncorrelated). Fetch rows, plan
+  outside, then export with `--ids` (order is preserved verbatim).
+- **Python results are a `kglite.ResultView`**: use `.to_dicts()` /
+  `.to_df()` / `.scalar()` / `.one()`. Printed reprs TRUNCATE rows and long
+  strings (content hashes become `"8fdb…d63"`) — never copy values from a repr;
+  always `.to_dicts()` (or narrow with LIMIT/OFFSET).
+- **`danceability` saturates high** (library mean ~0.89) — near-useless as a
+  filter alone; cross it with genre or energy.
+- **`bpm` is unreliable on low-onset material** (ambient/classical can read
+  145–157). Order calm sets by `energy`, not `bpm`.
+- **Style quality degrades on heterogeneous libraries**: expect one cap-sized
+  catch-all community plus small tight slivers. Styles are a lead, not a
+  survey — for "what's in here", aggregate over `Genre`/`Decade`/`TempoBand`
+  and read Style `top_genres`/`exemplar_titles` skeptically.
+- **Close values need full precision**: two tracks can both display `0.462`
+  yet differ at the 5th decimal — don't judge strict ordering from rounded
+  output.
