@@ -18,9 +18,7 @@
 
 pub mod error;
 
-/// serde DTO mirroring `sonara`'s `TrackAnalysis` plus tags, content-hash and
-/// provenance. Populated in P2.
-pub mod record {}
+pub mod record;
 
 /// Library scan: filesystem walk, ID3-stripped content hashing, per-hash cache
 /// and incremental rescan. Populated in P3.
