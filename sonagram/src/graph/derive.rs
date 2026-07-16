@@ -66,27 +66,93 @@ const TOP_K: usize = 10;
 /// discards small genuine communities.
 pub(super) const STYLE_MIN_SIZE: usize = 2;
 
-/// Two tracks join the same style-community only along a **mutual-kNN** edge (see
-/// [`mutual_pairs`]) whose `score` clears this bar. Connected components are
-/// single-linkage, so a low bar lets a chain of merely-adjacent tracks collapse
-/// the whole library into one blob.
+/// Hard floor for the adaptive style threshold (see [`choose_threshold`]). Below
+/// this, a `SIMILAR_TO` score is noise even if the blob cap would permit it, so
+/// the search never lowers the bar past here regardless of `n_tracks`.
+pub(super) const STYLE_FLOOR: f64 = 0.55;
+
+/// The blob-cap fraction: the largest style community may hold at most this
+/// share of the library. The adaptive threshold is the *lowest* bar (max
+/// coverage) keeping the largest community within [`style_cap`].
+const STYLE_CAP_FRACTION: f64 = 0.15;
+
+/// The maximum allowed largest-community size for a library of `n_tracks`:
+/// `max(5, ceil(STYLE_CAP_FRACTION * n_tracks))`. The floor of 5 keeps tiny
+/// libraries from being capped so hard that no community can form. Measured
+/// caps: 15 fixtures → 5, 456-track subset → 69.
+pub(super) fn style_cap(n_tracks: usize) -> usize {
+    let frac = (STYLE_CAP_FRACTION * n_tracks as f64).ceil() as usize;
+    frac.max(5)
+}
+
+/// **Deterministic adaptive** style-community threshold (P10c). Replaces P10b's
+/// fixed 0.85: no single global bar serves both the 15 diverse fixtures (whose
+/// pair-scores top out ~0.78) and the real library (whose mega-community only
+/// fragments ~0.85) — see the `style_threshold_tuning` diagnostic. Instead each
+/// build picks its own bar from *its own* score distribution.
 ///
-/// P10b tuning (measured on the frozen 456-track subset — see the permanent
-/// `graph_derive::style_threshold_tuning` diagnostic): sonara 0.2.2's similarity
-/// scores are compressed high, so the library's mega-community only fragments in
-/// a sharp phase transition between ~0.84 and ~0.85. **0.85** is the lowest bar
-/// that puts the largest community under 15% of tracks (measured: 456-track
-/// subset → 28 styles, largest 8.1%, coverage 24.6%). Mutual-kNN symmetrization
-/// alone does *not* break this blob (it is densely reciprocal — 70% at 0.75); the
-/// threshold does the work, and mutual-kNN + this bar are identical here but keep
-/// the edge set robust for less-compressed future distributions.
+/// `pairs` are the index-encoded mutual-kNN pairs `(a, b, score)`. The largest
+/// connected-component size is **monotone non-increasing in the threshold**
+/// (raising the bar only ever splits components), so the candidate set — the
+/// distinct mutual-pair scores `>= STYLE_FLOOR`, sorted descending — is binary-
+/// searched for the **smallest** bar whose largest component `<= style_cap`.
+/// Smallest-satisfying maximises coverage subject to the blob cap.
 ///
-/// This bar is **calibrated to sonara 0.2.2's observed compressed score range**
-/// and MUST be revisited when sonara recalibrates similarity. NOTE (P10b): the
-/// 15 diverse committed fixtures top out at pair-score ~0.78, so at 0.85 they
-/// produce **zero** styles — the fixture set and the real library have
-/// non-overlapping score distributions (flagged to PM).
-pub(super) const STYLE_SCORE_THRESHOLD: f64 = 0.85;
+/// Determinism: the candidates and their component sizes are a pure function of
+/// `pairs` (themselves a pure function of the records), so the chosen bar — and
+/// thus the digest — depends only on the input records. Degenerate cases:
+/// - no candidate `>= STYLE_FLOOR` ⇒ return `STYLE_FLOOR` (no pair clears it, so
+///   no community forms anyway);
+/// - even the *highest* candidate's largest component exceeds the cap
+///   (pathological — a huge tied-score blob) ⇒ fall back to that highest
+///   candidate, the most-fragmented option available.
+pub(super) fn choose_threshold(n_tracks: usize, pairs: &[(usize, usize, f64)]) -> f64 {
+    let cap = style_cap(n_tracks);
+
+    // Candidate bars: distinct scores at or above the floor, highest first.
+    let mut cands: Vec<f64> = pairs
+        .iter()
+        .map(|(_, _, s)| *s)
+        .filter(|s| *s >= STYLE_FLOOR)
+        .collect();
+    cands.sort_by(|a, b| b.total_cmp(a));
+    cands.dedup();
+    if cands.is_empty() {
+        return STYLE_FLOOR;
+    }
+
+    // largest(t) = size of the biggest component when unioning pairs with
+    // score >= t. Non-decreasing as the index grows (lower bar → more merging).
+    let largest = |t: f64| -> usize {
+        let mut uf = UnionFind::new(n_tracks);
+        for &(a, b, s) in pairs {
+            if s >= t {
+                uf.union(a, b);
+            }
+        }
+        let mut sizes: BTreeMap<usize, usize> = BTreeMap::new();
+        for i in 0..n_tracks {
+            *sizes.entry(uf.find(i)).or_default() += 1;
+        }
+        sizes.values().copied().max().unwrap_or(0)
+    };
+
+    // Even the strictest bar can't fit the cap ⇒ fall back to it (most split).
+    if largest(cands[0]) > cap {
+        return cands[0];
+    }
+    // Binary-search the rightmost (lowest) candidate still within the cap.
+    let (mut lo, mut hi) = (0usize, cands.len() - 1);
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if largest(cands[mid]) <= cap {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    cands[lo]
+}
 
 /// One materialised `SIMILAR_TO` edge, kept so [`add_styles`] can build
 /// components from the same scored fan-out that was written to the graph.
@@ -300,17 +366,19 @@ pub(super) fn mutual_pairs(sim_edges: &[SimEdge]) -> Vec<(&str, &str, f64)> {
     out
 }
 
-/// Add `Style` community nodes + `IN_STYLE` edges.
+/// Add `Style` community nodes + `IN_STYLE` edges. Returns
+/// `(n_styles, chosen_threshold)` — the caller stamps the threshold on the
+/// `Library` node (`style_threshold`) for transparency.
 ///
 /// Communities are the connected components of the **mutual-kNN** graph (see
-/// [`mutual_pairs`]) restricted to pairs with `score >= STYLE_SCORE_THRESHOLD`
-/// (union-find over the sorted pair list — order-independent). Components smaller
-/// than [`STYLE_MIN_SIZE`] are dropped (no `Style` of one track). Each surviving
-/// component becomes one `Style` carrying the schema doc's agent-readable
-/// profile, with `unique_id = "style-<idx>"` where the index is assigned by
-/// `(n_tracks desc, min member content_hash asc)` — stable across rebuilds.
-/// `IN_STYLE` edges carry `membership = 1.0` (v1 hard assignment). Returns the
-/// number of `Style` nodes created.
+/// [`mutual_pairs`]) restricted to pairs whose `score` clears the **adaptive**
+/// per-build bar from [`choose_threshold`] (union-find over the sorted pair list
+/// — order-independent). Components smaller than [`STYLE_MIN_SIZE`] are dropped
+/// (no `Style` of one track). Each surviving component becomes one `Style`
+/// carrying the schema doc's agent-readable profile, with
+/// `unique_id = "style-<idx>"` where the index is assigned by `(n_tracks desc,
+/// min member content_hash asc)` — stable across rebuilds. `IN_STYLE` edges carry
+/// `membership = 1.0` (v1 hard assignment).
 ///
 /// Style **names** are made unique in the same index order (see [`unique_names`]):
 /// the descriptive base name gets a `-2`, `-3`, … suffix on collision.
@@ -321,9 +389,9 @@ pub(super) fn add_styles(
     graph: &mut DirGraph,
     sorted: &[&AnalysisRecord],
     sim_edges: &[SimEdge],
-) -> Result<usize> {
+) -> Result<(usize, f64)> {
     if sorted.is_empty() {
-        return Ok(0);
+        return Ok((0, STYLE_FLOOR));
     }
 
     // hash → dense index in sorted order (union-find domain).
@@ -333,13 +401,23 @@ pub(super) fn add_styles(
     let by_hash: BTreeMap<&str, &AnalysisRecord> =
         sorted.iter().map(|r| (r.source.content_hash.as_str(), *r)).collect();
 
-    // Mutual-kNN symmetrization THEN threshold THEN union-find (P10b).
-    let mut uf = UnionFind::new(hashes.len());
-    for (a, b, score) in mutual_pairs(sim_edges) {
-        if score >= STYLE_SCORE_THRESHOLD {
-            if let (Some(&ia), Some(&ib)) = (index_of.get(a), index_of.get(b)) {
-                uf.union(ia, ib);
+    // Mutual-kNN symmetrization → index-encode pairs → adaptive threshold (P10c).
+    let pairs: Vec<(usize, usize, f64)> = mutual_pairs(sim_edges)
+        .into_iter()
+        .filter_map(|(a, b, s)| {
+            match (index_of.get(a), index_of.get(b)) {
+                (Some(&ia), Some(&ib)) => Some((ia, ib, s)),
+                _ => None,
             }
+        })
+        .collect();
+    let threshold = choose_threshold(hashes.len(), &pairs);
+
+    // Threshold THEN union-find.
+    let mut uf = UnionFind::new(hashes.len());
+    for &(ia, ib, score) in &pairs {
+        if score >= threshold {
+            uf.union(ia, ib);
         }
     }
 
@@ -360,7 +438,7 @@ pub(super) fn add_styles(
     });
 
     if comps.is_empty() {
-        return Ok(0);
+        return Ok((0, threshold));
     }
 
     let width = comps.len().to_string().len().max(3);
@@ -430,7 +508,7 @@ pub(super) fn add_styles(
             report.skipped_missing_endpoint
         )));
     }
-    Ok(n_styles)
+    Ok((n_styles, threshold))
 }
 
 /// The agent-readable profile of one style community.
@@ -793,6 +871,72 @@ mod tests {
                 "mid-pop-3".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn style_cap_is_max_5_and_15_percent_ceil() {
+        assert_eq!(style_cap(0), 5); // floor protects tiny libraries
+        assert_eq!(style_cap(15), 5); // ceil(2.25)=3 → floored to 5
+        assert_eq!(style_cap(33), 5); // ceil(4.95)=5
+        assert_eq!(style_cap(34), 6); // ceil(5.1)=6 → exceeds the floor
+        assert_eq!(style_cap(100), 15);
+        assert_eq!(style_cap(456), 69); // ceil(68.4)
+    }
+
+    #[test]
+    fn choose_threshold_picks_smallest_bar_within_cap() {
+        // 6 nodes. High-score core 0-1-2 (pairwise 0.90); a 0.70 bridge 2-3 and a
+        // 0.70 bridge 3-4; node 5 isolated. cap = style_cap(6) = 5.
+        //   bar 0.90 → components {0,1,2} largest 3  (<=5)
+        //   bar 0.70 → {0,1,2,3,4} largest 5          (<=5)  ← lowest still fits
+        let pairs = vec![
+            (0, 1, 0.90),
+            (1, 2, 0.90),
+            (0, 2, 0.90),
+            (2, 3, 0.70),
+            (3, 4, 0.70),
+        ];
+        // Smallest bar within cap 5 is 0.70 (largest 5), maximising coverage.
+        assert_eq!(choose_threshold(6, &pairs), 0.70);
+    }
+
+    #[test]
+    fn choose_threshold_tightens_bar_when_low_bar_overshoots_cap() {
+        // Same graph but cap forced smaller by using only 6 nodes with a wider
+        // blob: at 0.70 the whole 0..5 chain merges (largest 6 > cap 5), so the
+        // bar must tighten to 0.90 (largest 3 <= 5).
+        let pairs = vec![
+            (0, 1, 0.90),
+            (1, 2, 0.90),
+            (0, 2, 0.90),
+            (2, 3, 0.70),
+            (3, 4, 0.70),
+            (4, 5, 0.70),
+        ];
+        assert_eq!(choose_threshold(6, &pairs), 0.90);
+    }
+
+    #[test]
+    fn choose_threshold_floors_and_falls_back() {
+        // All scores below the 0.55 floor ⇒ no candidate ⇒ return the floor
+        // (nothing clears it, so no community forms anyway).
+        let below = vec![(0, 1, 0.50), (1, 2, 0.40)];
+        assert_eq!(choose_threshold(3, &below), STYLE_FLOOR);
+
+        // Pathological: a big tied-score blob even at the highest bar exceeds the
+        // cap ⇒ fall back to that highest candidate (most fragmented available).
+        // 8 nodes all pairwise-linked at 0.99; cap = style_cap(8) = 5; largest at
+        // 0.99 is 8 > 5, and 0.99 is the only candidate ⇒ returned as fallback.
+        let blob = vec![
+            (0, 1, 0.99),
+            (1, 2, 0.99),
+            (2, 3, 0.99),
+            (4, 5, 0.99),
+            (5, 6, 0.99),
+            (6, 7, 0.99),
+            (3, 4, 0.99),
+        ];
+        assert_eq!(choose_threshold(8, &blob), 0.99);
     }
 
     #[test]

@@ -8,6 +8,7 @@ EnergyLevel	10
 Genre	10
 Key	24
 Library	1
+Style	2
 TempoBand	7
 Track	15
 ## edge_type_counts
@@ -17,6 +18,7 @@ CAMELOT_ADJACENT	72
 FROM_DECADE	15
 IN_GENRE	14
 IN_KEY	15
+IN_STYLE	8
 IN_TEMPO_BAND	15
 ON_ALBUM	15
 SIMILAR_TO	150
@@ -100,6 +102,8 @@ Key	String("G minor")
 Key	String("G# major")
 Key	String("G# minor")
 Library	String("fixtures")
+Style	String("style-000")
+Style	String("style-001")
 TempoBand	String("downtempo")
 TempoBand	String("fast")
 TempoBand	String("frantic")
@@ -307,6 +311,25 @@ Key	String("G# minor")
 Library	String("fixtures")
 	n_tracks=Int64(15)
 	schema_version=Int64(1)
+	style_threshold=Float64(0.7470618486404419)
+Style	String("style-000")
+	exemplar_titles=List([String("Birthright"), String("Just Like a Woman"), String("Jive Talkin'"), String("薔薇と雨")])
+	mean_acousticness=Float64(0.7060553878545761)
+	mean_bpm=Float64(109.55488204956055)
+	mean_energy=Float64(0.47409600764513016)
+	mean_valence=Float64(0.5229449421167374)
+	n_tracks=Int64(4)
+	top_artists=List([String("A-ha"), String("Bee Gees"), String("Bob Dylan")])
+	top_genres=List([String("pop"), String("folk"), String("jrock")])
+Style	String("style-001")
+	exemplar_titles=List([String("2pac::brenda's got a baby"), String("2 unlimited::let the beat control your body"), String("Toxic - Armand Van Helden Remix Edit"), String("Pure Paradise")])
+	mean_acousticness=Float64(0.4795345440506935)
+	mean_bpm=Float64(126.8098087310791)
+	mean_energy=Float64(0.6566603183746338)
+	mean_valence=Float64(0.7029057592153549)
+	n_tracks=Int64(4)
+	top_artists=List([String("2 Unlimited"), String("2Pac"), String("Armik")])
+	top_genres=List([String("dance"), String("instrumental"), String("pop")])
 TempoBand	String("downtempo")
 TempoBand	String("fast")
 TempoBand	String("frantic")
@@ -1297,6 +1320,22 @@ IN_KEY	String("c1f2b8a8c25f751431a53f8d856b0914e3de2a236011635f2c0292489d1549c1"
 IN_KEY	String("cd0e51f09a0782e61ca9c4f5974e696a807d8386a636b9218f47ad6a3840896c")	String("F major")
 IN_KEY	String("e85543a29c6af995dcb6ae09bbb6c9adac31c733e7cc7e7af0e63220a9c3f347")	String("F major")
 IN_KEY	String("f00d0966b299831f738a50ff439a7ab88b91f9deb38087aa43c39132e34f870b")	String("F major")
+IN_STYLE	String("00ab540156c9b2d4ed3f38f5b3048b3ae2e6c5726c2d7b9d35268f9a65b5de42")	String("style-000")
+	membership=Float64(1.0)
+IN_STYLE	String("110e51661c18afaea7f6bc906a06c531bc9b04027787f187c64e7d5cd3862625")	String("style-000")
+	membership=Float64(1.0)
+IN_STYLE	String("4c0e07d0c71b9296d7e12643397d3c7c14a4f1227a7064964c9bb85e0c8712b8")	String("style-001")
+	membership=Float64(1.0)
+IN_STYLE	String("6734226044b7c965c2a7c71c3d1de4ca5e1e684778d3a8a38a7414054b540954")	String("style-001")
+	membership=Float64(1.0)
+IN_STYLE	String("70ac0152a6ce5eafe33280ef8a3eeef7befcf89e08f0043d97dcbadf10e04edc")	String("style-000")
+	membership=Float64(1.0)
+IN_STYLE	String("7b4be76008e1369bb350ddfbff96848cbaccb0858b9ff235953ee52f22ccb804")	String("style-001")
+	membership=Float64(1.0)
+IN_STYLE	String("c1f2b8a8c25f751431a53f8d856b0914e3de2a236011635f2c0292489d1549c1")	String("style-000")
+	membership=Float64(1.0)
+IN_STYLE	String("cd0e51f09a0782e61ca9c4f5974e696a807d8386a636b9218f47ad6a3840896c")	String("style-001")
+	membership=Float64(1.0)
 IN_TEMPO_BAND	String("00ab540156c9b2d4ed3f38f5b3048b3ae2e6c5726c2d7b9d35268f9a65b5de42")	String("house")
 IN_TEMPO_BAND	String("110e51661c18afaea7f6bc906a06c531bc9b04027787f187c64e7d5cd3862625")	String("house")
 IN_TEMPO_BAND	String("1f22cf364d15a3698b4401d9e87949d399829e3b189953e53849e7d30212a01c")	String("house")

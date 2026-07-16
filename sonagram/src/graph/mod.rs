@@ -16,10 +16,11 @@
 //! - the embedding store's slot order follows the sorted record order.
 //!
 //! ## Stage order (fixed — nodes before edges, no endpoint vivification)
-//! `Library` → dimension nodes (`Artist`, `Album`, `Genre`, static `Key`×24 /
-//! `TempoBand`×7 / `EnergyLevel`×10, `Decade`) → `Track` nodes (one full-width
-//! `add_nodes` pass) → edges → embedding store. `SIMILAR_TO` / `Style` /
-//! `CAMELOT_ADJACENT` are Phase 6, deliberately absent here.
+//! dimension nodes (`Artist`, `Album`, `Genre`, static `Key`×24 / `TempoBand`×7
+//! / `EnergyLevel`×10, `Decade`) → `Track` nodes (one full-width `add_nodes`
+//! pass) → edges → embedding store → `SIMILAR_TO` → `CAMELOT_ADJACENT` →
+//! `Style` → `Library` root **last** (it carries the adaptive `style_threshold`
+//! the Style pass chooses, and has no edges so its position is free).
 
 mod derive;
 pub mod normalize;
@@ -132,20 +133,10 @@ pub fn build_graph(records: &[AnalysisRecord], library: &LibraryInfo) -> Result<
         }
     }
 
-    // ── Stage 1: Library root ───────────────────────────────────────────────
-    let lib_df = build_df(vec![
-        ("id", ColumnType::String, str1(&library.root)),
-        ("path", ColumnType::String, str1(&library.root)),
-        ("n_tracks", ColumnType::Int64, int1(library.n_tracks as i64)),
-        (
-            "schema_version",
-            ColumnType::Int64,
-            int1(GRAPH_SCHEMA_VERSION as i64),
-        ),
-    ]);
-    add(&mut graph, lib_df, LIBRARY, "id", "path")?;
-
-    // ── Stage 2: dimension nodes ────────────────────────────────────────────
+    // ── Stage 1: dimension nodes ────────────────────────────────────────────
+    // (The `Library` root is built LAST — Stage 9 — so it can carry the adaptive
+    // `style_threshold` the Style pass chooses. It has no edges, so its build
+    // order does not affect any endpoint.)
     add_artists(&mut graph, &artists)?;
     add_albums(&mut graph, &albums)?;
     add_genres(&mut graph, &genres)?;
@@ -194,7 +185,27 @@ pub fn build_graph(records: &[AnalysisRecord], library: &LibraryInfo) -> Result<
     derive::add_camelot_adjacent(&mut graph)?;
 
     // ── Stage 8: Style community nodes + IN_STYLE edges ─────────────────────
-    derive::add_styles(&mut graph, &sorted, &sim_edges)?;
+    // The Style pass chooses a deterministic adaptive threshold from this
+    // build's own mutual-kNN score distribution (P10c) and returns it to stamp.
+    let (_n_styles, style_threshold) = derive::add_styles(&mut graph, &sorted, &sim_edges)?;
+
+    // ── Stage 9: Library root (last — carries the chosen `style_threshold`) ──
+    let lib_df = build_df(vec![
+        ("id", ColumnType::String, str1(&library.root)),
+        ("path", ColumnType::String, str1(&library.root)),
+        ("n_tracks", ColumnType::Int64, int1(library.n_tracks as i64)),
+        (
+            "schema_version",
+            ColumnType::Int64,
+            int1(GRAPH_SCHEMA_VERSION as i64),
+        ),
+        (
+            "style_threshold",
+            ColumnType::Float64,
+            ColumnData::Float64(vec![Some(style_threshold)]),
+        ),
+    ]);
+    add(&mut graph, lib_df, LIBRARY, "id", "path")?;
 
     Ok(Arc::new(graph))
 }

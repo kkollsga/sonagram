@@ -176,19 +176,31 @@ fn style_ids(graph: &DirGraph) -> Vec<String> {
 }
 
 #[test]
-fn styles_absent_on_diverse_fixtures_at_calibrated_threshold() {
-    // P10b: the Style community threshold (0.85) is calibrated to the real
-    // library's compressed similarity scores. The 15 committed fixtures are
-    // maximally diverse — their top mutual-kNN pair-score is only ~0.78 — so no
-    // component clears 0.85 and NO Style is created. This is the honest,
-    // documented consequence of the subset calibration; end-to-end Style shape
-    // coverage lives in the `derive` unit tests + the `style_table_dump` /
-    // `style_threshold_tuning` maintainer diagnostics. Regression guard: if this
-    // count ever becomes non-zero on the fixtures the threshold moved.
+fn styles_are_two_on_fixtures_under_adaptive_threshold() {
+    // P10c: the adaptive per-build threshold (chosen from the fixtures' own
+    // score distribution, ≈0.747, cap = style_cap(15) = 5) restores the two
+    // fixture communities P10b's fixed 0.85 had suppressed.
     let graph = graph::build_graph(&load_records(), &library()).unwrap();
-    assert_eq!(node_count(&graph, "Style"), 0, "no style survives 0.85 over diverse fixtures");
-    assert!(style_ids(&graph).is_empty(), "no Style ids");
-    assert_eq!(edges_of(&graph, "IN_STYLE").len(), 0, "no IN_STYLE edges");
+    assert_eq!(node_count(&graph, "Style"), 2, "2 communities at the adaptive threshold");
+    assert_eq!(style_ids(&graph), vec!["style-000", "style-001"]);
+
+    // IN_STYLE membership = 1.0 (v1 hard assignment); 8 members (4 + 4).
+    let in_style = edges_of(&graph, "IN_STYLE");
+    assert_eq!(in_style.len(), 8, "4 + 4 members carry IN_STYLE");
+    for (_, _, props) in &in_style {
+        assert_eq!(props.get("membership"), Some(&Value::Float64(1.0)));
+    }
+
+    // The chosen adaptive threshold is stamped on the Library root, finite and
+    // within (STYLE_FLOOR=0.55, 1.0].
+    let lib = graph
+        .lookup_by_id_readonly("Library", &Value::String("fixtures".to_string()))
+        .expect("Library node present");
+    let thr = match resolve_node_property(graph.get_node(lib).unwrap(), "style_threshold", &graph) {
+        Value::Float64(v) => v,
+        other => panic!("style_threshold not Float64: {other:?}"),
+    };
+    assert!(thr > 0.55 && thr <= 1.0, "stamped style_threshold in (0.55, 1.0]: {thr}");
 }
 
 #[test]
@@ -421,11 +433,20 @@ fn style_table_dump() {
         .collect();
     rows.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
 
+    // The adaptive threshold this build chose, stamped on the Library root.
+    let chosen = graph
+        .lookup_by_id_readonly("Library", &Value::String("subset".to_string()))
+        .and_then(|ni| match resolve_node_property(graph.get_node(ni).unwrap(), "style_threshold", &graph) {
+            Value::Float64(v) => Some(v),
+            _ => None,
+        })
+        .unwrap_or(f64::NAN);
+
     let n_styles = rows.len();
     let coverage: i64 = rows.iter().map(|r| r.0).sum();
     let mut out = String::new();
     use std::fmt::Write as _;
-    writeln!(out, "P10b Style table — n_tracks={n}, n_styles={n_styles}, coverage={coverage} ({:.1}%)",
+    writeln!(out, "P10c Style table — n_tracks={n}, chosen_threshold={chosen:.4}, n_styles={n_styles}, coverage={coverage} ({:.1}%)",
         100.0 * coverage as f64 / n as f64).unwrap();
     writeln!(out, "  rank  n   mean_bpm  name  [top_genres]").unwrap();
     for (i, (nt, name, bpm, genres)) in rows.iter().take(15).enumerate() {
@@ -437,69 +458,51 @@ fn style_table_dump() {
     }
 }
 
-/// Synthetic cluster derived from the committed fixtures (no maintainer dir):
-/// force three records to share one embedding so they are mutual nearest
-/// neighbours at similarity 1.0 and provably clear the 0.85 bar, forming exactly
-/// one Style of three. Exercises the end-to-end Style profile shape + determinism
-/// that the (now styleless) diverse fixtures can no longer cover on their own.
-fn synthetic_style_records() -> Vec<AnalysisRecord> {
-    let mut recs = load_records();
-    recs.sort_by(|a, b| a.source.content_hash.cmp(&b.source.content_hash));
-    // Three identical 48-dim embeddings ⇒ pairwise similarity 1.0 ⇒ one style.
-    let shared = vec![0.5f32; 48];
-    for r in recs.iter_mut().take(3) {
-        r.analysis.embedding = Some(shared.clone());
-    }
-    recs
-}
-
 #[test]
-fn style_profile_is_shaped_and_deterministic_on_synthetic_cluster() {
-    let recs = synthetic_style_records();
+fn style_profiles_are_shaped_and_deterministic() {
+    let recs = load_records();
     let a = graph::build_graph(&recs, &library()).unwrap();
     let b = graph::build_graph(&recs, &library()).unwrap();
 
-    assert_eq!(node_count(&a, "Style"), 1, "the shared-embedding trio forms one style");
-    // Id width = max(3, ndigits(n_styles)); one style ⇒ "style-000".
-    let id = "style-000";
+    for id in ["style-000", "style-001"] {
+        let ni_a = a
+            .lookup_by_id_readonly("Style", &Value::String(id.to_string()))
+            .unwrap_or_else(|| panic!("style {id} present"));
+        let node_a = a.get_node(ni_a).unwrap();
 
-    let ni_a = a
-        .lookup_by_id_readonly("Style", &Value::String(id.to_string()))
-        .unwrap_or_else(|| panic!("style {id} present"));
-    let node_a = a.get_node(ni_a).unwrap();
+        // name: template string with 2–3 dash-segments — the middle
+        // acoustic/electric term (P10b three-way) is omitted for mid-acousticness
+        // communities, so a name may be "<band>-<genre>" or "<band>-<ae>-<genre>".
+        let name = match resolve_node_property(node_a, "name", &a) {
+            Value::String(s) => s,
+            other => panic!("style name not String: {other:?}"),
+        };
+        let segs = name.split('-').count();
+        assert!((2..=3).contains(&segs), "style name has 2–3 template segments: {name}");
 
-    // name: a non-empty template string (2 or 3 dash-segments — the middle
-    // acoustic/electric term is omitted for mid-acousticness communities).
-    let name = match resolve_node_property(node_a, "name", &a) {
-        Value::String(s) => s,
-        other => panic!("style name not String: {other:?}"),
-    };
-    let segs = name.split('-').count();
-    assert!((2..=3).contains(&segs), "style name has 2–3 template segments: {name}");
+        // exemplar_titles: a non-empty list, at most 5, deterministic across builds.
+        let ex_a = resolve_node_property(node_a, "exemplar_titles", &a);
+        let ex_len = match &ex_a {
+            Value::List(v) => v.len(),
+            other => panic!("exemplar_titles not List: {other:?}"),
+        };
+        assert!((1..=5).contains(&ex_len), "exemplar_titles len in [1,5]: {ex_len}");
 
-    // exemplar_titles: non-empty, at most 5, deterministic across builds.
-    let ex_a = resolve_node_property(node_a, "exemplar_titles", &a);
-    let ex_len = match &ex_a {
-        Value::List(v) => v.len(),
-        other => panic!("exemplar_titles not List: {other:?}"),
-    };
-    assert!((1..=5).contains(&ex_len), "exemplar_titles len in [1,5]: {ex_len}");
+        let ni_b = b
+            .lookup_by_id_readonly("Style", &Value::String(id.to_string()))
+            .unwrap();
+        let ex_b = resolve_node_property(b.get_node(ni_b).unwrap(), "exemplar_titles", &b);
+        assert_eq!(ex_a, ex_b, "exemplar_titles deterministic for {id}");
 
-    let ni_b = b
-        .lookup_by_id_readonly("Style", &Value::String(id.to_string()))
-        .unwrap();
-    let ex_b = resolve_node_property(b.get_node(ni_b).unwrap(), "exemplar_titles", &b);
-    assert_eq!(ex_a, ex_b, "exemplar_titles deterministic for {id}");
-
-    // n_tracks == IN_STYLE member count.
-    let n = match resolve_node_property(node_a, "n_tracks", &a) {
-        Value::Int64(v) => v,
-        other => panic!("n_tracks not Int64: {other:?}"),
-    };
-    let members = edges_of(&a, "IN_STYLE")
-        .into_iter()
-        .filter(|(_, tgt, _)| tgt == id)
-        .count() as i64;
-    assert_eq!(n, 3, "the trio's style has 3 tracks");
-    assert_eq!(n, members, "n_tracks == IN_STYLE members for {id}");
+        // n_tracks matches the IN_STYLE member count for this style.
+        let n = match resolve_node_property(node_a, "n_tracks", &a) {
+            Value::Int64(v) => v,
+            other => panic!("n_tracks not Int64: {other:?}"),
+        };
+        let members = edges_of(&a, "IN_STYLE")
+            .into_iter()
+            .filter(|(_, tgt, _)| tgt == id)
+            .count() as i64;
+        assert_eq!(n, members, "n_tracks == IN_STYLE members for {id}");
+    }
 }

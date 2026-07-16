@@ -74,13 +74,11 @@ fn str_prop(graph: &DirGraph, node_type: &str, hash: &str, prop: &str) -> String
 }
 
 // Expected cardinalities, computed independently from the fixture JSON.
-// `Style` (P10b): **0** communities over the 15 fixtures at the subset-calibrated
-// `STYLE_SCORE_THRESHOLD = 0.85`. The 15 committed fixtures are maximally
-// diverse — their top mutual-kNN pair-score is only ~0.78 — so none clears the
-// 0.85 bar the real library needs to fragment its mega-community (see the
-// `graph_derive::style_threshold_tuning` diagnostic and GRAPH-GATE.md P10b row).
-// Fixtures and the real library have non-overlapping score distributions; when
-// no component survives, the `Style` node type is never registered (count 0).
+// `Style` (P10c): **2** communities over the 15 fixtures at the *adaptive*
+// threshold this build chooses from the fixtures' own score distribution
+// (measured chosen threshold ≈0.747, cap = style_cap(15) = 5). P10b's fixed 0.85
+// produced zero fixture styles; P10c's per-build adaptive selection restores them
+// (see the `graph_derive::style_threshold_tuning` diagnostic + GRAPH-GATE.md).
 const EXPECT_NODES: &[(&str, usize)] = &[
     ("Library", 1),
     ("Track", 15),
@@ -91,13 +89,13 @@ const EXPECT_NODES: &[(&str, usize)] = &[
     ("TempoBand", 7),
     ("EnergyLevel", 10),
     ("Decade", 4),
-    ("Style", 0),
+    ("Style", 2),
 ];
 
 // BY_ARTIST carries both Track→Artist (15) and Album→Artist (15) = 30.
-// P6/P10b derived edges: SIMILAR_TO = 15 tracks × min(10, 14) = 150 (dense, all
-// 15 carry embeddings); CAMELOT_ADJACENT = 24 keys × 3 = 72; IN_STYLE = 0 (no
-// style community survives the 0.85 bar over the diverse fixtures — see above).
+// P6/P10c derived edges: SIMILAR_TO = 15 tracks × min(10, 14) = 150 (dense, all
+// 15 carry embeddings); CAMELOT_ADJACENT = 24 keys × 3 = 72; IN_STYLE = 4 + 4 = 8
+// (the two adaptive-threshold communities' members).
 const EXPECT_EDGES: &[(&str, usize)] = &[
     ("BY_ARTIST", 30),
     ("ON_ALBUM", 15),
@@ -108,7 +106,7 @@ const EXPECT_EDGES: &[(&str, usize)] = &[
     ("FROM_DECADE", 15),
     ("SIMILAR_TO", 150),
     ("CAMELOT_ADJACENT", 72),
-    ("IN_STYLE", 0),
+    ("IN_STYLE", 8),
 ];
 
 #[test]
