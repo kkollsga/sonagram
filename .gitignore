@@ -1,0 +1,73 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.whl
+*.so
+*.dylib
+*.pyd
+.venv/
+venv/
+env/
+
+# Generated graphs / scan artifacts (never committed — rebuilt from fixtures)
+*.kgl
+/scan-out/
+
+# Audio — NEVER committed (copyright + size). The gate's fixtures are frozen
+# TrackAnalysis records; the real music library is maintainer-machine-only.
+*.mp3
+*.flac
+*.wav
+*.m4a
+*.ogg
+*.aac
+
+# Secrets / Environment
+.env
+.env.*
+*.pem
+*.key
+*.secret
+credentials.json
+secrets.toml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude / AI tooling (local only)
+.claude/
+CLAUDE.md
+AGENTS.md
+
+# Local dev working folder + cross-project coordination channel — never committed.
+# See dev-docs/README.md and inbox/README.md for the canonical layouts, and the
+# dev-docs-cleanup / read-inbox skills for the auto-purged time-boxed tiers within.
+/dev-docs/
+/inbox/
+
+# Coverage / profiling
+*.profraw
+*.profdata
+lcov.info
+htmlcov/
+flamegraph.svg
+perf.data
