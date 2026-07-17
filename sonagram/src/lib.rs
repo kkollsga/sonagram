@@ -34,6 +34,8 @@ pub mod pipeline;
 
 pub mod playlist;
 
+pub mod curation;
+
 pub mod progress;
 
 pub mod skill;
