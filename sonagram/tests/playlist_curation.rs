@@ -5,7 +5,10 @@
 //! case-variant artists/albums and are arranged with weak pairwise continuity.
 //! It is built from a frozen TrackAnalysis record; no audio is committed.
 
-use sonagram::curation::{audit_playlist, explain_playlist, profile_library, PlaylistPolicy};
+use sonagram::curation::{
+    audit_playlist, curate_playlist, explain_playlist, profile_library, PlaylistBrief,
+    PlaylistPolicy, PlaylistPreset,
+};
 use sonagram::graph::{self, LibraryInfo};
 use sonagram::record::AnalysisRecord;
 
@@ -43,13 +46,19 @@ fn records() -> Vec<AnalysisRecord> {
             }
             .to_string());
             record.analysis.embedding = Some(vec![if i % 2 == 0 { 0.0 } else { 1.0 }; 48]);
+            record.analysis.energy = Some(i as f32 / (artists.len() - 1) as f32);
+            record.analysis.duration_sec = 90.0 + i as f32 * 20.0;
+            record.analysis.vocalness = Some(0.1);
             record
         })
         .collect()
 }
 
 fn graph() -> std::sync::Arc<kglite::api::DirGraph> {
-    let records = records();
+    graph_from(records())
+}
+
+fn graph_from(records: Vec<AnalysisRecord>) -> std::sync::Arc<kglite::api::DirGraph> {
     graph::build_graph(
         &records,
         &LibraryInfo {
@@ -110,4 +119,133 @@ fn missing_and_duplicate_ids_are_hard_failures() {
     assert!(!audit.passed);
     assert!(codes.contains(&"duplicate_track"));
     assert!(codes.contains(&"missing_track"));
+}
+
+#[test]
+fn constrained_selection_breaks_the_legacy_artist_album_collapse() {
+    let graph = graph();
+    let brief = PlaylistBrief {
+        target_tracks: 6,
+        ..PlaylistBrief::default()
+    };
+    let mut policy = PlaylistPolicy::default();
+    policy.audit.max_artist_share = 2.0 / 6.0;
+    policy.audit.max_album_share = 2.0 / 6.0;
+    policy.audit.min_mean_transition_score = 0.0;
+    policy.audit.min_worst_transition_score = 0.0;
+    policy.audit.max_mean_arc_error = 1.0;
+    let result = curate_playlist(&graph, &brief, &policy).unwrap();
+    assert!(result.exportable, "{:?}", result.audit.issues);
+    assert_eq!(result.track_ids.len(), 6);
+    assert!(result.audit.max_artist_share <= 2.0 / 6.0 + f64::EPSILON);
+    assert!(result.audit.max_album_share <= 2.0 / 6.0 + f64::EPSILON);
+}
+
+#[test]
+fn presets_choose_different_tracks_and_results_are_deterministic() {
+    let graph = graph();
+    let focus_brief = PlaylistBrief {
+        preset: PlaylistPreset::Focus,
+        target_tracks: 3,
+        ..PlaylistBrief::default()
+    };
+    let party_brief = PlaylistBrief {
+        preset: PlaylistPreset::Party,
+        target_tracks: 3,
+        ..PlaylistBrief::default()
+    };
+    let mut focus = PlaylistPolicy::for_preset(PlaylistPreset::Focus);
+    let mut party = PlaylistPolicy::for_preset(PlaylistPreset::Party);
+    focus.eligibility.max_vocalness = None;
+    focus.eligibility.max_energy = None;
+    focus.eligibility.max_arousal = None;
+    for policy in [&mut focus, &mut party] {
+        policy.audit.min_mean_transition_score = 0.0;
+        policy.audit.min_worst_transition_score = 0.0;
+        policy.audit.max_mean_arc_error = 1.0;
+        policy.audit.min_unique_artist_ratio = 0.0;
+    }
+    let first = curate_playlist(&graph, &focus_brief, &focus).unwrap();
+    let second = curate_playlist(&graph, &focus_brief, &focus).unwrap();
+    let party_result = curate_playlist(&graph, &party_brief, &party).unwrap();
+    assert!(first.exportable, "{:?}", first.audit.issues);
+    assert!(party_result.exportable, "{:?}", party_result.audit.issues);
+    assert_eq!(first.track_ids.len(), 3);
+    assert_eq!(party_result.track_ids.len(), 3);
+    assert_eq!(first.track_ids, second.track_ids);
+    assert_ne!(first.track_ids, party_result.track_ids);
+
+    drop(graph);
+    let mut reversed = records();
+    reversed.reverse();
+    let reversed_result = curate_playlist(&graph_from(reversed), &focus_brief, &focus).unwrap();
+    assert_eq!(first.track_ids, reversed_result.track_ids);
+}
+
+#[test]
+fn infeasible_hard_caps_return_no_exportable_playlist() {
+    let graph = graph();
+    let brief = PlaylistBrief {
+        target_tracks: 10,
+        ..PlaylistBrief::default()
+    };
+    let mut policy = PlaylistPolicy::default();
+    policy.diversity.max_per_artist = 1;
+    policy.diversity.max_per_album = 1;
+    let result = curate_playlist(&graph, &brief, &policy).unwrap();
+    assert!(!result.exportable);
+    assert!(result.audit.issues.iter().any(|issue| issue.code == "infeasible_selection"));
+}
+
+#[test]
+fn mismatched_preset_and_excess_seeds_are_structured_failures() {
+    let graph = graph();
+    let brief = PlaylistBrief {
+        preset: PlaylistPreset::Focus,
+        target_tracks: 1,
+        seed_ids: ids()[..2].to_vec(),
+        ..PlaylistBrief::default()
+    };
+    let result = curate_playlist(&graph, &brief, &PlaylistPolicy::default()).unwrap();
+    let codes: Vec<&str> = result.audit.issues.iter().map(|issue| issue.code.as_str()).collect();
+    assert!(!result.exportable);
+    assert!(codes.contains(&"too_many_seeds"));
+    assert!(codes.contains(&"preset_mismatch"));
+}
+
+#[test]
+fn independent_audit_enforces_hard_artist_and_album_caps() {
+    let graph = graph();
+    let mut policy = PlaylistPolicy::default();
+    policy.audit.min_unique_artist_ratio = 0.0;
+    policy.audit.max_artist_share = 1.0;
+    policy.audit.max_album_share = 1.0;
+    policy.audit.min_mean_transition_score = 0.0;
+    policy.audit.min_worst_transition_score = 0.0;
+    policy.audit.max_mean_arc_error = 1.0;
+    let audit = audit_playlist(&graph, &ids()[..6], &policy).unwrap();
+    let codes: Vec<&str> = audit.issues.iter().map(|issue| issue.code.as_str()).collect();
+    assert!(!audit.passed);
+    assert!(codes.contains(&"artist_cap"));
+    assert!(codes.contains(&"album_cap"));
+}
+
+#[test]
+fn duration_target_influences_selection_and_is_met_when_feasible() {
+    let graph = graph();
+    let brief = PlaylistBrief {
+        target_tracks: 3,
+        target_duration_sec: Some(740),
+        ..PlaylistBrief::default()
+    };
+    let mut policy = PlaylistPolicy::default();
+    policy.targets.energy = Some(0.0);
+    policy.audit.min_unique_artist_ratio = 0.0;
+    policy.audit.min_mean_transition_score = 0.0;
+    policy.audit.min_worst_transition_score = 0.0;
+    policy.audit.max_mean_arc_error = 1.0;
+    let result = curate_playlist(&graph, &brief, &policy).unwrap();
+    assert!(result.exportable, "{:?}", result.audit.issues);
+    assert!(result.audit.total_duration_sec >= 740.0);
+    assert_eq!(result.repair_attempts, 1);
 }

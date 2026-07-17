@@ -64,6 +64,33 @@ pub fn audit_playlist(
     let max_artist_share = artists.values().copied().max().unwrap_or(0) as f64 / denominator;
     let max_album_share = albums.values().copied().max().unwrap_or(0) as f64 / denominator;
 
+    for (artist, count) in &artists {
+        if *count > policy.diversity.max_per_artist {
+            issues.push(issue(
+                AuditSeverity::Error,
+                "artist_cap",
+                format!(
+                    "artist {artist} occurs {count} times; maximum is {}",
+                    policy.diversity.max_per_artist
+                ),
+                Vec::new(),
+            ));
+        }
+    }
+    for (album, count) in &albums {
+        if *count > policy.diversity.max_per_album {
+            issues.push(issue(
+                AuditSeverity::Error,
+                "album_cap",
+                format!(
+                    "album {album} occurs {count} times; maximum is {}",
+                    policy.diversity.max_per_album
+                ),
+                Vec::new(),
+            ));
+        }
+    }
+
     if unique_artist_ratio + f64::EPSILON < policy.audit.min_unique_artist_ratio {
         issues.push(issue(
             AuditSeverity::Error,
@@ -75,24 +102,32 @@ pub fn audit_playlist(
             Vec::new(),
         ));
     }
-    if max_artist_share > policy.audit.max_artist_share + f64::EPSILON {
+    let effective_artist_share = policy
+        .audit
+        .max_artist_share
+        .max(1.0 / denominator);
+    if max_artist_share > effective_artist_share + f64::EPSILON {
         issues.push(issue(
             AuditSeverity::Error,
             "artist_concentration",
             format!(
                 "largest artist share {:.3} exceeds {:.3}",
-                max_artist_share, policy.audit.max_artist_share
+                max_artist_share, effective_artist_share
             ),
             Vec::new(),
         ));
     }
-    if max_album_share > policy.audit.max_album_share + f64::EPSILON {
+    let effective_album_share = policy
+        .audit
+        .max_album_share
+        .max(1.0 / denominator);
+    if max_album_share > effective_album_share + f64::EPSILON {
         issues.push(issue(
             AuditSeverity::Error,
             "album_concentration",
             format!(
                 "largest album share {:.3} exceeds {:.3}",
-                max_album_share, policy.audit.max_album_share
+                max_album_share, effective_album_share
             ),
             Vec::new(),
         ));
