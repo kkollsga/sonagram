@@ -161,6 +161,12 @@ jobs:
           manylinux: ${{ matrix.manylinux || 'auto' }}
           command: build
           args: --release -m sonagram-python/Cargo.toml --out dist
+          # The manylinux build runs in a container that mounts only the
+          # workspace — bind the ../sonara + ../KGLite siblings in at the same
+          # paths so the path deps resolve. Ignored by non-container builds.
+          docker-options: >-
+            -v ${{ github.workspace }}/../sonara:${{ github.workspace }}/../sonara
+            -v ${{ github.workspace }}/../KGLite:${{ github.workspace }}/../KGLite
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
