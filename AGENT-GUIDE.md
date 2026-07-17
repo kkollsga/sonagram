@@ -196,9 +196,16 @@ playlist. A hash matching no Track is reported, not silently dropped.
   (0.55–0.85): the heuristic keys on pitched voice-band content.
   `instrumentalness` is exactly `1 − vocalness` (collinear — no added signal).
   For "instrumental / no vocals": lead with genre/compilation tags +
-  `acousticness`, then eyeball artists. Within vocal-forward pop, higher
-  `vocalness` (~0.6–0.85) does track "singable" — it's usable *there*, as a
-  ranking signal.
+  `acousticness`, then eyeball artists. Within vocal-forward pop, use
+  `vocalness >= ~0.55` only as a FLOOR to exclude instrumentals — it does not
+  rank "singability" (One Love 0.72 vs Our Lips Are Sealed 0.56, both massive
+  singalongs).
+- **`mood_aggressive` inverts on genuinely extreme material** (same heuristic
+  family): scalar-top "aggressive" tracks were Bros and Paula Abdul while
+  Slayer reads 0.25–0.34. For hard/metal asks lead with artist knowledge +
+  **`loudness_lufs`** (−9 to −11 = modern brickwalled extreme vs −15 vintage)
+  + `energy` + `onset_density`. `mood_happy`, by contrast, has proven a
+  trustworthy primary sorter for feel-good pool ranking.
 - **`genre_tag` is spotty real-world data** — it's whatever the file's ID3 tag
   says (or null). It is not an audio-derived classification. Expect missing,
   inconsistent, and idiosyncratic values (`"rap & hip-hop"` vs `"hip-hop"`).
@@ -259,9 +266,33 @@ playlist. A hash matching no Track is reported, not silently dropped.
   cuts (7–8 min) hide in compilations and derail pacing.
 - **Vibe-over-time recipe**: cross-tab Genre × Decade to find a vibe spanning
   eras, hold it with a tight `acousticness`/`energy` band, and read
-  `avg(loudness_lufs)` per decade for production evolution. Caveat: `year` (→
-  `Decade`) is the file's tag — on compilations it may be the compilation's
-  release year, not the recording's.
+  `avg(loudness_lufs)` per decade for production evolution. HARD RULE:
+  `year`/`Decade` is the year printed on the FILE — on real libraries that's
+  the compilation/reissue date by DEFAULT for pre-2000 material (whole reissue
+  blocks get tagged 2015+). `FROM_DECADE` answers "what's on the file", not
+  "when was it made" — date era claims from your own artist/recording
+  knowledge, always.
+- **Finding versions/covers**: identical audio deduplicates to ONE Track node
+  (id = content-hash of the audio), so two Track nodes sharing a song title
+  are GUARANTEED different recordings. Recipe: pull title+artist+scalars,
+  normalize titles client-side (case, parentheticals, "- Live/Remaster"
+  suffixes), group, keep groups with 2+ nodes; `duration_sec` deltas are the
+  cleanest version-discriminator (halved = solo cover, doubled =
+  live/extended). Do string work in Python, not Cypher.
+- **Read the folder structure early** (`RETURN t.path`): compilation/folder
+  names ("29 Disco Fever", "Deep Focus") are often the strongest single
+  signal for vibe grouping — stronger than any scalar.
+- **Energy is a filter, not an ordering axis, for mood playlists** — feel-good
+  pop clusters at 0.50–0.63, too flat to carry an arc; build arcs from musical
+  character. And the scalar UNDERSELLS sparse guitar-band anthems (Mr.
+  Brightside 0.58, Don't Stop Me Now 0.55 — the biggest felt peaks in the
+  room): hand-rank the critical peak slots. For intra-track builds
+  ("a song that swells"), cross high `dynamic_range_db` (>20) with your own
+  knowledge of the song — whole-track energy averages hide crescendos.
+- **`duration_sec` is the trustworthy workhorse** — reliable everywhere, the
+  cleanest pacing and version signal. On slow/acoustic material `bpm` is
+  actively misleading (a fingerpicked ballad reads 157) — never sequence calm
+  material by bpm.
 - **Compilation folders can beat scalars**: `genre_tag` and album names often
   encode pre-curated mood buckets ("Deep Focus", "Morning Coffee") — exploit
   them deliberately for mood/focus asks.
