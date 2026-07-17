@@ -23,6 +23,7 @@
 //! Progress and stage lines go to stderr; results (reports, paths, counts) go
 //! to stdout, so the CLI composes in a pipeline.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
@@ -479,16 +480,32 @@ fn cmd_build_multi() -> Result<()> {
     Ok(())
 }
 
-/// Fold `src`'s enrichment maps into `dst`, first-writer-wins per key.
+/// Fold `src`'s enrichment maps into `dst`. Source order remains the stable
+/// tiebreak, but a usable fetched record replaces an earlier failed/unfetched
+/// duplicate so content-hash dedup cannot hide successful enrichment.
 fn merge_enrichment(dst: &mut EnrichmentData, src: EnrichmentData) {
-    for (k, v) in src.artists {
-        dst.artists.entry(k).or_insert(v);
-    }
-    for (k, v) in src.tracks {
-        dst.tracks.entry(k).or_insert(v);
-    }
-    for (k, v) in src.albums {
-        dst.albums.entry(k).or_insert(v);
+    merge_map_preferring_usable(&mut dst.artists, src.artists, |v| v.fetched && !v.failed);
+    merge_map_preferring_usable(&mut dst.tracks, src.tracks, |v| v.fetched && !v.failed);
+    merge_map_preferring_usable(&mut dst.albums, src.albums, |v| v.fetched && !v.failed);
+}
+
+fn merge_map_preferring_usable<T>(
+    dst: &mut BTreeMap<String, T>,
+    src: BTreeMap<String, T>,
+    usable: impl Fn(&T) -> bool,
+) {
+    use std::collections::btree_map::Entry;
+
+    for (key, value) in src {
+        match dst.entry(key) {
+            Entry::Vacant(entry) => {
+                entry.insert(value);
+            }
+            Entry::Occupied(mut entry) if !usable(entry.get()) && usable(&value) => {
+                entry.insert(value);
+            }
+            Entry::Occupied(_) => {}
+        }
     }
 }
 
@@ -1473,6 +1490,7 @@ fn path_str(p: &Path) -> Result<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::enrich::TrackEnrich;
     use crate::scan::FreshnessReport;
 
     fn report(
@@ -1514,5 +1532,58 @@ mod tests {
         assert_eq!(status_exit_code(&report(true, 5, 0, 1, 0)), 1); // unindexed
         assert_eq!(status_exit_code(&report(true, 5, 0, 0, 1)), 1); // deleted
         assert_eq!(status_label(1), "needs_scan");
+    }
+
+    #[test]
+    fn enrichment_merge_replaces_failed_duplicate_with_usable_record() {
+        let mut dst = EnrichmentData::default();
+        dst.tracks.insert(
+            "same-hash".to_string(),
+            TrackEnrich {
+                fetched: true,
+                failed: true,
+                reason: Some("not found".to_string()),
+                ..TrackEnrich::default()
+            },
+        );
+        let mut src = EnrichmentData::default();
+        src.tracks.insert(
+            "same-hash".to_string(),
+            TrackEnrich {
+                fetched: true,
+                listeners: Some(42),
+                ..TrackEnrich::default()
+            },
+        );
+
+        merge_enrichment(&mut dst, src);
+        let merged = dst.tracks.get("same-hash").expect("merged track");
+        assert!(!merged.failed);
+        assert_eq!(merged.listeners, Some(42));
+    }
+
+    #[test]
+    fn enrichment_merge_keeps_first_when_both_records_are_usable() {
+        let mut dst = EnrichmentData::default();
+        dst.tracks.insert(
+            "same-hash".to_string(),
+            TrackEnrich {
+                fetched: true,
+                listeners: Some(1),
+                ..TrackEnrich::default()
+            },
+        );
+        let mut src = EnrichmentData::default();
+        src.tracks.insert(
+            "same-hash".to_string(),
+            TrackEnrich {
+                fetched: true,
+                listeners: Some(2),
+                ..TrackEnrich::default()
+            },
+        );
+
+        merge_enrichment(&mut dst, src);
+        assert_eq!(dst.tracks["same-hash"].listeners, Some(1));
     }
 }
