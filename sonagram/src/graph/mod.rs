@@ -59,8 +59,10 @@ use normalize::{
 /// `tension_index`, `recording_quality`, `quality_tier`), and the Stage-C version
 /// layer: an `is_canonical` bool on every `Track`, plus a `Song` node per version
 /// group (≥2 recordings sharing `(artist_id, normalized_title)`) with
-/// `Track -[:VERSION_OF]-> Song` edges. Pure mapper change (Stage C extends the
-/// same v2 schema — no bump).
+/// `Track -[:VERSION_OF]-> Song` edges. P21b extends the same unreleased v2 with
+/// always-present `lastfm_listeners`, `lastfm_playcount`, `has_lastfm_match`, and
+/// listener-percentile `popularity` Track columns; Last.fm recognition precedes
+/// audio quality when choosing the canonical recording.
 pub const GRAPH_SCHEMA_VERSION: u32 = 2;
 
 /// The embedding-store model identity, **derived** from sonara's
@@ -328,10 +330,20 @@ pub fn build_graph_from_sources(
         sorted.iter().map(|r| features::curve_features(r)).collect();
     let axes = features::composite_axes(&sorted, &feats);
     let quality: Vec<Option<f64>> = axes.iter().map(|a| a.recording_quality).collect();
-    let grouping = song::group_songs(&sorted, &quality);
+    let popularity = track_popularity_columns(&sorted, enrichment);
+    let grouping = song::group_songs(&sorted, &quality, &popularity.has_lastfm_match);
 
     // ── Stage 3: Track nodes (single full-width pass) ───────────────────────
-    add_tracks(&mut graph, &sorted, &source_of, enrichment, &feats, &axes, &grouping.is_canonical)?;
+    add_tracks(
+        &mut graph,
+        &sorted,
+        &source_of,
+        enrichment,
+        &feats,
+        &axes,
+        &popularity,
+        &grouping.is_canonical,
+    )?;
 
     // ── Stage 3b: Song version nodes + VERSION_OF edges (endpoints = Tracks) ─
     song::add_songs(&mut graph, &grouping)?;
@@ -413,6 +425,86 @@ pub fn build_graph_from_sources(
     add(&mut graph, build_df(lib_cols), LIBRARY, "id", "path")?;
 
     Ok(Arc::new(graph))
+}
+
+/// Always-present Track popularity columns derived from the optional Last.fm
+/// cache. A usable match is a fetched, non-failed record; listener/playcount
+/// values remain nullable because Last.fm may resolve a track without returning
+/// those statistics.
+struct TrackPopularityColumns {
+    listeners: Vec<Option<i64>>,
+    playcount: Vec<Option<i64>>,
+    has_lastfm_match: Vec<bool>,
+    popularity: Vec<Option<f64>>,
+}
+
+/// Project Last.fm track records onto the content-hash-sorted input and rank
+/// listener counts within the library. Equal listener counts receive the same
+/// midrank percentile, so song-level Last.fm statistics do not invent a false
+/// ordering between versions of the same song.
+fn track_popularity_columns(
+    sorted: &[&AnalysisRecord],
+    enrichment: Option<&EnrichmentData>,
+) -> TrackPopularityColumns {
+    let mut listeners = Vec::with_capacity(sorted.len());
+    let mut playcount = Vec::with_capacity(sorted.len());
+    let mut has_lastfm_match = Vec::with_capacity(sorted.len());
+
+    for r in sorted {
+        let matched = enrichment
+            .and_then(|enr| enr.tracks.get(&r.source.content_hash))
+            .filter(|record| record.fetched && !record.failed);
+        listeners.push(matched.and_then(|record| record.listeners));
+        playcount.push(matched.and_then(|record| record.playcount));
+        has_lastfm_match.push(matched.is_some());
+    }
+
+    let popularity = listener_percentile_rank(&listeners, sorted);
+    TrackPopularityColumns {
+        listeners,
+        playcount,
+        has_lastfm_match,
+        popularity,
+    }
+}
+
+/// Percentile rank non-null listener counts into `[0, 1]`; unmatched or
+/// statistic-less tracks stay null, and a single ranked track sits at `0.5`.
+fn listener_percentile_rank(
+    listeners: &[Option<i64>],
+    sorted: &[&AnalysisRecord],
+) -> Vec<Option<f64>> {
+    let mut ranked: Vec<(usize, i64, &str)> = listeners
+        .iter()
+        .enumerate()
+        .filter_map(|(i, value)| {
+            value.map(|v| (i, v, sorted[i].source.content_hash.as_str()))
+        })
+        .collect();
+    ranked.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.2.cmp(b.2)));
+
+    let mut out = vec![None; listeners.len()];
+    match ranked.len() {
+        0 => {}
+        1 => out[ranked[0].0] = Some(0.5),
+        n => {
+            let denominator = (n - 1) as f64;
+            let mut start = 0usize;
+            while start < n {
+                let mut end = start + 1;
+                while end < n && ranked[end].1 == ranked[start].1 {
+                    end += 1;
+                }
+                let midrank = (start + end - 1) as f64 / 2.0;
+                let percentile = midrank / denominator;
+                for (index, _, _) in &ranked[start..end] {
+                    out[*index] = Some(percentile);
+                }
+                start = end;
+            }
+        }
+    }
+    out
 }
 
 /// Persist a built graph to `path` as a `.kgl` file.
@@ -627,6 +719,7 @@ fn add_tracks(
     enrichment: Option<&EnrichmentData>,
     feats: &[features::CurveFeatures],
     axes: &[features::CompositeAxes],
+    popularity: &TrackPopularityColumns,
     is_canonical: &[bool],
 ) -> Result<()> {
     if sorted.is_empty() {
@@ -759,6 +852,18 @@ fn add_tracks(
     let recording_quality: Vec<Option<f64>> = axes.iter().map(|a| a.recording_quality).collect();
     let quality_tier: Vec<Option<String>> =
         axes.iter().map(|a| a.quality_tier.clone()).collect();
+
+    // P21b: Last.fm popularity columns are part of the Track schema even for a
+    // plain build. Counts and percentile stay null without a usable match;
+    // `has_lastfm_match` is always a concrete boolean.
+    let lastfm_listeners = popularity.listeners.clone();
+    let lastfm_playcount = popularity.playcount.clone();
+    let popularity_rank = popularity.popularity.clone();
+    let has_lastfm_match: Vec<Option<bool>> = popularity
+        .has_lastfm_match
+        .iter()
+        .map(|&matched| Some(matched))
+        .collect();
     let is_music: Vec<Option<bool>> = axes.iter().map(|a| Some(a.is_music)).collect();
 
     // P21 Stage C: `is_canonical` is non-null on every Track (all singletons and
@@ -845,6 +950,11 @@ fn add_tracks(
         ("tension_index", ColumnType::Float64, ColumnData::Float64(tension_index)),
         ("recording_quality", ColumnType::Float64, ColumnData::Float64(recording_quality)),
         ("quality_tier", ColumnType::String, ColumnData::String(quality_tier)),
+        // P21b: recognition/popularity (always-present columns).
+        ("lastfm_listeners", ColumnType::Int64, ColumnData::Int64(lastfm_listeners)),
+        ("lastfm_playcount", ColumnType::Int64, ColumnData::Int64(lastfm_playcount)),
+        ("has_lastfm_match", ColumnType::Boolean, ColumnData::Boolean(has_lastfm_match)),
+        ("popularity", ColumnType::Float64, ColumnData::Float64(popularity_rank)),
         // P21 Stage C: canonical-take flag (non-null bool).
         ("is_canonical", ColumnType::Boolean, ColumnData::Boolean(is_canonical_col)),
         ("time_signature", ColumnType::String, ColumnData::String(time_signature)),
@@ -853,25 +963,20 @@ fn add_tracks(
         ("predominant_chord", ColumnType::String, ColumnData::String(predominant_chord)),
     ];
 
-    // P12: enrichment properties, joined by content_hash. Only appended when
-    // enrichment is present, so the plain build's Track table (and golden
-    // digest) is byte-unchanged. Null cells for tracks with no (or failed)
-    // enrichment record, so an un-enriched track renders exactly as before.
+    // P12: optional enrichment metadata, joined by content_hash. The P21b
+    // popularity columns above are always present; these older metadata columns
+    // remain conditional to preserve their existing schema contract.
     if let Some(enr) = enrichment {
         let get = |r: &AnalysisRecord| {
             enr.tracks
                 .get(&r.source.content_hash)
                 .filter(|e| e.fetched && !e.failed)
         };
-        let lastfm_playcount = int_opt_col(sorted, |r| get(r).and_then(|e| e.playcount));
-        let lastfm_listeners = int_opt_col(sorted, |r| get(r).and_then(|e| e.listeners));
         let mbid = str_opt_col(sorted, |r| get(r).and_then(|e| e.mbid.clone()));
         let lastfm_url = str_opt_col(sorted, |r| get(r).and_then(|e| e.url.clone()));
         let original_album = str_opt_col(sorted, |r| get(r).and_then(|e| e.album_title.clone()));
         let original_album_position =
             int_opt_col(sorted, |r| get(r).and_then(|e| e.album_position));
-        cols.push(("lastfm_playcount", ColumnType::Int64, ColumnData::Int64(lastfm_playcount)));
-        cols.push(("lastfm_listeners", ColumnType::Int64, ColumnData::Int64(lastfm_listeners)));
         cols.push(("mbid", ColumnType::String, ColumnData::String(mbid)));
         cols.push(("lastfm_url", ColumnType::String, ColumnData::String(lastfm_url)));
         cols.push(("original_album", ColumnType::String, ColumnData::String(original_album)));

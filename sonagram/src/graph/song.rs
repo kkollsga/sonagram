@@ -12,10 +12,11 @@
 //! inferior takes" filter.
 //!
 //! ## What "best" means
-//! Within a group the canonical member is the one with the highest
-//! `recording_quality` (the Stage-B composite; nulls sort **lowest** so a track
-//! with no quality signal never wins over one that has it), tie-broken by
-//! `content_hash` ascending — a total, input-order-independent order.
+//! Within a group a usable Last.fm match wins first (a recognized release beats
+//! an unmatched outtake), then the highest `recording_quality` wins (nulls sort
+//! **lowest**), and `content_hash` ascending breaks any remaining tie. A plain
+//! build has no matches and therefore degrades exactly to the audio-quality
+//! ordering.
 //!
 //! ## Grouping is title+artist only — by design
 //! This iteration keys purely on normalized title + artist; embeddings and
@@ -29,9 +30,9 @@
 //! ## Determinism
 //! Groups are keyed in a `BTreeMap`, so iteration is sorted-key order; members
 //! within a group inherit the caller's `content_hash`-sorted record order; the
-//! canonical pick is a total order over `(recording_quality, content_hash)`. Song
-//! nodes and `VERSION_OF` edges are therefore emitted identically across runs and
-//! input permutations.
+//! canonical pick is a total order over `(has_lastfm_match, recording_quality,
+//! content_hash)`. Song nodes and `VERSION_OF` edges are therefore emitted
+//! identically across runs and input permutations.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -74,9 +75,13 @@ pub(super) struct SongGrouping {
 }
 
 /// Group `sorted` (already `content_hash`-ordered) into songs by version key,
-/// selecting the canonical member of each group from `quality` (the per-track
-/// `recording_quality`, parallel to `sorted`).
-pub(super) fn group_songs(sorted: &[&AnalysisRecord], quality: &[Option<f64>]) -> SongGrouping {
+/// selecting the canonical member of each group from the parallel Last.fm-match
+/// and `recording_quality` inputs.
+pub(super) fn group_songs(
+    sorted: &[&AnalysisRecord],
+    quality: &[Option<f64>],
+    has_lastfm_match: &[bool],
+) -> SongGrouping {
     let hashes: Vec<&str> = sorted.iter().map(|r| r.source.content_hash.as_str()).collect();
 
     // Version key → member indices (kept in the caller's sorted order).
@@ -94,7 +99,14 @@ pub(super) fn group_songs(sorted: &[&AnalysisRecord], quality: &[Option<f64>]) -
         let best = *members
             .iter()
             .reduce(|acc, idx| {
-                if is_better(quality[*idx], hashes[*idx], quality[*acc], hashes[*acc]) {
+                if is_better(
+                    has_lastfm_match[*idx],
+                    quality[*idx],
+                    hashes[*idx],
+                    has_lastfm_match[*acc],
+                    quality[*acc],
+                    hashes[*acc],
+                ) {
                     idx
                 } else {
                     acc
@@ -136,10 +148,22 @@ fn version_key(r: &AnalysisRecord) -> String {
     format!("{artist}|{}", normalized_title(&raw_title))
 }
 
-/// Whether candidate `(q_a, h_a)` is a strictly better canonical pick than the
-/// incumbent `(q_b, h_b)`: higher `recording_quality` wins (nulls lowest), ties
-/// broken by the smaller `content_hash`.
-fn is_better(q_a: Option<f64>, h_a: &str, q_b: Option<f64>, h_b: &str) -> bool {
+/// Whether candidate `(matched_a, q_a, h_a)` is a strictly better canonical
+/// pick than the incumbent: a Last.fm match wins first, then higher
+/// `recording_quality` (nulls lowest), then the smaller `content_hash`.
+fn is_better(
+    matched_a: bool,
+    q_a: Option<f64>,
+    h_a: &str,
+    matched_b: bool,
+    q_b: Option<f64>,
+    h_b: &str,
+) -> bool {
+    match matched_a.cmp(&matched_b) {
+        Ordering::Greater => return true,
+        Ordering::Less => return false,
+        Ordering::Equal => {}
+    }
     match cmp_quality(q_a, q_b) {
         Ordering::Greater => true,
         Ordering::Less => false,
@@ -301,7 +325,17 @@ mod tests {
 
     fn group(recs: &[AnalysisRecord], quality: &[Option<f64>]) -> SongGrouping {
         let refs: Vec<&AnalysisRecord> = recs.iter().collect();
-        group_songs(&refs, quality)
+        let has_lastfm_match = vec![false; recs.len()];
+        group_songs(&refs, quality, &has_lastfm_match)
+    }
+
+    fn group_with_matches(
+        recs: &[AnalysisRecord],
+        quality: &[Option<f64>],
+        has_lastfm_match: &[bool],
+    ) -> SongGrouping {
+        let refs: Vec<&AnalysisRecord> = recs.iter().collect();
+        group_songs(&refs, quality, has_lastfm_match)
     }
 
     #[test]
@@ -355,6 +389,18 @@ mod tests {
         // Equal non-null quality → smallest content_hash wins.
         let g3 = group(&recs, &[Some(0.5), Some(0.5)]);
         assert_eq!(g3.songs[0].canonical_hash, "aaa");
+    }
+
+    #[test]
+    fn lastfm_match_precedes_quality_then_plain_build_falls_back() {
+        let recs = vec![
+            rec("aaa", Some("X"), Some("Song")),
+            rec("zzz", Some("X"), Some("Song")),
+        ];
+        let enriched = group_with_matches(&recs, &[Some(0.1), Some(0.9)], &[true, false]);
+        assert_eq!(enriched.songs[0].canonical_hash, "aaa");
+        let plain = group_with_matches(&recs, &[Some(0.1), Some(0.9)], &[false, false]);
+        assert_eq!(plain.songs[0].canonical_hash, "zzz");
     }
 
     #[test]

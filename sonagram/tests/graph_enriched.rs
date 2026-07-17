@@ -4,8 +4,8 @@
 //! Last.fm enrichment (`tests/fixtures/lastfm/*.json`) and asserts the exact
 //! new shape — popularity/MBID/original-album props, folksonomy `IN_GENRE`
 //! edges, and weighted/attributed `CROWD_SIMILAR` edges — then proves the
-//! un-enriched build is byte-for-byte the old graph (no leakage into the plain
-//! path).
+//! un-enriched build carries no enrichment values or edges while retaining the
+//! always-present `has_lastfm_match = false` contract.
 //!
 //! Expected cardinalities were computed from the enrichment fixtures by hand
 //! (4 artists / 4 tracks / 4 albums enriched) and cross-checked against the
@@ -108,6 +108,11 @@ fn track_gains_lastfm_and_original_album_props() {
     // ABBA "On and on and on" — full enrichment.
     assert_eq!(prop(&g, "Track", ABBA_HASH, "lastfm_playcount"), Value::Int64(1_800_000));
     assert_eq!(prop(&g, "Track", ABBA_HASH, "lastfm_listeners"), Value::Int64(320_000));
+    assert_eq!(prop(&g, "Track", ABBA_HASH, "has_lastfm_match"), Value::Boolean(true));
+    match prop(&g, "Track", ABBA_HASH, "popularity") {
+        Value::Float64(v) => assert!((v - 1.0 / 3.0).abs() < 1e-12, "ABBA percentile: {v}"),
+        other => panic!("popularity is not Float64: {other:?}"),
+    }
     assert_eq!(
         prop(&g, "Track", ABBA_HASH, "mbid"),
         Value::String("1a1b1c1d-0000-4000-8000-000000000001".to_string())
@@ -146,8 +151,59 @@ fn non_enriched_track_has_no_lastfm_props() {
     // A null-cell property does not materialize — the un-enriched track carries
     // no lastfm_* / original_* / mbid property at all.
     assert_eq!(prop(&g, "Track", &hash, "lastfm_playcount"), Value::Null);
+    assert_eq!(prop(&g, "Track", &hash, "lastfm_listeners"), Value::Null);
+    assert_eq!(prop(&g, "Track", &hash, "has_lastfm_match"), Value::Boolean(false));
+    assert_eq!(prop(&g, "Track", &hash, "popularity"), Value::Null);
     assert_eq!(prop(&g, "Track", &hash, "original_album"), Value::Null);
     assert_eq!(prop(&g, "Track", &hash, "mbid"), Value::Null);
+}
+
+#[test]
+fn matched_track_without_listener_count_has_null_popularity() {
+    let mut enrichment = enrichment();
+    enrichment.tracks.get_mut(ABBA_HASH).expect("ABBA fixture").listeners = None;
+    let g = graph::build_graph_with_enrichment(&load_records(), Some(&enrichment), &library())
+        .unwrap();
+    assert_eq!(prop(&g, "Track", ABBA_HASH, "has_lastfm_match"), Value::Boolean(true));
+    assert_eq!(prop(&g, "Track", ABBA_HASH, "lastfm_listeners"), Value::Null);
+    assert_eq!(prop(&g, "Track", ABBA_HASH, "popularity"), Value::Null);
+}
+
+#[test]
+fn popularity_is_stable_under_input_reordering() {
+    let records = load_records();
+    let mut reversed = records.clone();
+    reversed.reverse();
+    let enrichment = enrichment();
+    let base = graph::build_graph_with_enrichment(&records, Some(&enrichment), &library()).unwrap();
+    let other = graph::build_graph_with_enrichment(&reversed, Some(&enrichment), &library()).unwrap();
+    for hash in [ABBA_HASH, BRUNO_HASH] {
+        assert_eq!(
+            prop(&base, "Track", hash, "popularity"),
+            prop(&other, "Track", hash, "popularity")
+        );
+    }
+}
+
+#[test]
+fn equal_listener_counts_receive_equal_popularity() {
+    let mut enrichment = enrichment();
+    let listeners = enrichment
+        .tracks
+        .get(ABBA_HASH)
+        .and_then(|record| record.listeners)
+        .expect("ABBA listener fixture");
+    enrichment
+        .tracks
+        .get_mut(BRUNO_HASH)
+        .expect("Bruno fixture")
+        .listeners = Some(listeners);
+    let g = graph::build_graph_with_enrichment(&load_records(), Some(&enrichment), &library())
+        .unwrap();
+    assert_eq!(
+        prop(&g, "Track", ABBA_HASH, "popularity"),
+        prop(&g, "Track", BRUNO_HASH, "popularity")
+    );
 }
 
 #[test]
@@ -246,14 +302,17 @@ fn crowd_similar_edges_weighted_and_attributed_and_dropped() {
 // ─────────────────── plain build is unchanged by the feature ─────────────────
 
 #[test]
-fn plain_build_is_unaffected_by_enrichment_code() {
+fn plain_build_has_no_enrichment_values_or_edges() {
     let plain = graph::build_graph(&load_records(), &library()).unwrap();
     // No enrichment node/edge shapes leak into the plain build.
     assert_eq!(node_count(&plain, "Genre"), 10, "plain Genre count unchanged");
     let counts = plain.get_edge_type_counts();
     assert_eq!(counts.get("IN_GENRE").copied().unwrap_or(0), 14, "plain IN_GENRE unchanged");
     assert_eq!(counts.get("CROWD_SIMILAR").copied().unwrap_or(0), 0, "no CROWD_SIMILAR in plain");
-    // No lastfm props on any track in the plain build.
+    // Counts/rank stay null, while the recognition flag is always false.
     assert_eq!(prop(&plain, "Track", ABBA_HASH, "lastfm_playcount"), Value::Null);
+    assert_eq!(prop(&plain, "Track", ABBA_HASH, "lastfm_listeners"), Value::Null);
+    assert_eq!(prop(&plain, "Track", ABBA_HASH, "has_lastfm_match"), Value::Boolean(false));
+    assert_eq!(prop(&plain, "Track", ABBA_HASH, "popularity"), Value::Null);
     assert_eq!(prop(&plain, "Track", ABBA_HASH, "original_album"), Value::Null);
 }

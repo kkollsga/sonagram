@@ -13,6 +13,7 @@
 
 use kglite::api::cypher::resolve_node_property;
 use kglite::api::{DirGraph, Value};
+use sonagram::enrich::{EnrichmentData, TrackEnrich};
 use sonagram::graph::{self, LibraryInfo};
 use sonagram::record::{AnalysisDto, AnalysisRecord, ProvenanceDto, SourceInfo, TagsDto};
 
@@ -191,6 +192,30 @@ fn song_layer_is_order_independent() {
         );
     }
     assert_eq!(version_of_edges(&g0), version_of_edges(&g1));
+}
+
+#[test]
+fn recognized_release_beats_higher_quality_unmatched_take() {
+    let records = records();
+    let mut enrichment = EnrichmentData::default();
+    enrichment.tracks.insert(
+        LIVE_HASH.to_string(),
+        TrackEnrich {
+            listeners: Some(1_000),
+            playcount: Some(5_000),
+            fetched: true,
+            ..TrackEnrich::default()
+        },
+    );
+    let graph = graph::build_graph_with_enrichment(&records, Some(&enrichment), &library()).unwrap();
+    assert_eq!(
+        str_prop(&graph, "Song", "The Beatles|yesterday", "canonical_hash"),
+        LIVE_HASH
+    );
+    assert!(bool_prop(&graph, "Track", LIVE_HASH, "has_lastfm_match"));
+    assert!(!bool_prop(&graph, "Track", MASTER_HASH, "has_lastfm_match"));
+    assert!(bool_prop(&graph, "Track", LIVE_HASH, "is_canonical"));
+    assert!(!bool_prop(&graph, "Track", MASTER_HASH, "is_canonical"));
 }
 
 /// A record with every optional analysis field left None/empty (the identity +
