@@ -2,6 +2,9 @@
 /target/
 **/*.rs.bk
 
+# Docs (Sphinx / Read the Docs build output)
+/docs/_build/
+
 # Python
 __pycache__/
 *.py[cod]
