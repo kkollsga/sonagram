@@ -265,3 +265,22 @@ playlist. A hash matching no Track is reported, not silently dropped.
 - **Compilation folders can beat scalars**: `genre_tag` and album names often
   encode pre-curated mood buckets ("Deep Focus", "Morning Coffee") — exploit
   them deliberately for mood/focus asks.
+
+## Quality bar (every playlist, before you export)
+QC audits grade on these; treat them as requirements, not suggestions:
+1. **Duration check every pick.** Casual/mood playlists default to
+   radio-length cuts (`duration_sec <= 330`) unless the brief wants epics —
+   a 8:15 LP cut mid-road-trip reads as a pacing defect. Always `RETURN
+   t.duration_sec` in your candidate query.
+2. **Era claims need YOUR knowledge, not the tag.** `year` is the file tag —
+   on compilations/reissues it's the reissue date (a 1958 Sinatra recording
+   tagged 2011). If the brief's premise depends on era, validate each pick
+   against what you know about the artist/recording; drop picks you can't
+   vouch for.
+3. **Critical slots need style-world cohesion, not just scalar fit.** The
+   finale of a singalong set, the seed-side of a "like this" set, the peak of
+   a genre set: check the pick belongs to the brief's musical world (genre
+   family + your own knowledge of the track), because scalars will happily
+   pass a rap track into a disco set.
+4. **Sanity-read the final tracklist as a human would** — artist/title, in
+   order, out loud. If any pick needs a defensive explanation, swap it.
