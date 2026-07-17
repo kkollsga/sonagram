@@ -7,7 +7,7 @@
 
 use sonagram::curation::{
     audit_playlist, curate_playlist, explain_playlist, profile_library, PlaylistBrief,
-    PlaylistPolicy, PlaylistPreset,
+    PlaylistArc, PlaylistPolicy, PlaylistPreset,
 };
 use sonagram::graph::{self, LibraryInfo};
 use sonagram::record::AnalysisRecord;
@@ -248,4 +248,130 @@ fn duration_target_influences_selection_and_is_met_when_feasible() {
     assert!(result.exportable, "{:?}", result.audit.issues);
     assert!(result.audit.total_duration_sec >= 740.0);
     assert_eq!(result.repair_attempts, 1);
+}
+
+fn six_track_policy() -> PlaylistPolicy {
+    let mut policy = PlaylistPolicy::default();
+    policy.eligibility.allow_low_quality = true;
+    policy.audit.max_artist_share = 2.0 / 6.0;
+    policy.audit.max_album_share = 2.0 / 6.0;
+    policy.audit.min_mean_transition_score = 0.0;
+    policy.audit.min_worst_transition_score = 0.0;
+    policy.audit.max_mean_arc_error = 1.0;
+    policy
+}
+
+fn id_index(id: &str) -> usize {
+    usize::from_str_radix(&id[id.len() - 2..], 16).unwrap()
+}
+
+#[test]
+fn sequencing_improves_weak_hash_order_and_holds_artist_spacing() {
+    let graph = graph();
+    let brief = PlaylistBrief {
+        target_tracks: 6,
+        ..PlaylistBrief::default()
+    };
+    let mut policy = six_track_policy();
+    policy.audit.min_mean_transition_score = 0.50;
+    policy.audit.min_worst_transition_score = 0.20;
+    policy.transition.arc = PlaylistArc::Rise;
+    policy.audit.max_mean_arc_error = 0.25;
+    let first = curate_playlist(&graph, &brief, &policy).unwrap();
+    let second = curate_playlist(&graph, &brief, &policy).unwrap();
+    assert!(first.exportable, "{:?}", first.audit.issues);
+    assert_eq!(first, second);
+    assert!(
+        first.repair_attempts > 0,
+        "expected the arc gate to exercise repair: mean={:?} worst={:?} arc={:?}",
+        first.audit.mean_transition_score,
+        first.audit.worst_transition_score,
+        first.audit.mean_arc_error
+    );
+    assert!(first.audit.mean_arc_error.unwrap() <= policy.audit.max_mean_arc_error);
+    assert!(!first.audit.issues.iter().any(|issue| issue.code == "artist_gap"));
+
+    let mut hash_order = first.track_ids.clone();
+    hash_order.sort();
+    let naive = audit_playlist(&graph, &hash_order, &policy).unwrap();
+    assert!(
+        first.audit.mean_transition_score.unwrap() > naive.mean_transition_score.unwrap(),
+        "sequenced={:?} hash_order={:?}",
+        first.audit.mean_transition_score,
+        naive.mean_transition_score
+    );
+}
+
+#[test]
+fn rise_and_fall_arcs_order_the_same_pool_differently() {
+    let graph = graph();
+    let brief = PlaylistBrief {
+        target_tracks: 6,
+        ..PlaylistBrief::default()
+    };
+    let mut rise = six_track_policy();
+    rise.targets.energy = Some(0.5);
+    rise.transition.arc = PlaylistArc::Rise;
+    rise.audit.max_mean_arc_error = 0.35;
+    let mut fall = rise.clone();
+    fall.transition.arc = PlaylistArc::Fall;
+
+    let rising = curate_playlist(&graph, &brief, &rise).unwrap();
+    let falling = curate_playlist(&graph, &brief, &fall).unwrap();
+    assert!(rising.exportable, "{:?}", rising.audit.issues);
+    assert!(falling.exportable, "{:?}", falling.audit.issues);
+    assert_eq!(
+        rising.track_ids.iter().cloned().collect::<std::collections::BTreeSet<_>>(),
+        falling.track_ids.iter().cloned().collect()
+    );
+    assert_ne!(rising.track_ids, falling.track_ids);
+    assert!(id_index(rising.track_ids.first().unwrap()) < id_index(rising.track_ids.last().unwrap()));
+    assert!(id_index(falling.track_ids.first().unwrap()) > id_index(falling.track_ids.last().unwrap()));
+    assert!(rising.audit.mean_arc_error.unwrap() <= rise.audit.max_mean_arc_error);
+    assert!(falling.audit.mean_arc_error.unwrap() <= fall.audit.max_mean_arc_error);
+    assert!(rising.explanation.tracks.iter().all(|track| {
+        track
+            .contributions
+            .iter()
+            .any(|contribution| contribution.component == "arc_fit")
+    }));
+}
+
+#[test]
+fn no_arc_sequence_is_independent_of_energy_target() {
+    let graph = graph();
+    let seed_ids = vec![ids()[0].clone(), ids()[6].clone(), ids()[9].clone()];
+    let brief = PlaylistBrief {
+        target_tracks: seed_ids.len(),
+        seed_ids,
+        ..PlaylistBrief::default()
+    };
+    let mut low = six_track_policy();
+    low.audit.max_artist_share = 1.0;
+    low.audit.max_album_share = 1.0;
+    low.audit.min_unique_artist_ratio = 0.0;
+    low.transition.arc = PlaylistArc::None;
+    low.targets.energy = Some(0.0);
+    let mut high = low.clone();
+    high.targets.energy = Some(1.0);
+    let low_result = curate_playlist(&graph, &brief, &low).unwrap();
+    let high_result = curate_playlist(&graph, &brief, &high).unwrap();
+    assert_eq!(low_result.track_ids, high_result.track_ids);
+}
+
+#[test]
+fn independent_audit_reports_artist_spacing_positions() {
+    let graph = graph();
+    let mut policy = six_track_policy();
+    policy.audit.min_unique_artist_ratio = 0.0;
+    policy.audit.max_artist_share = 1.0;
+    policy.audit.max_album_share = 1.0;
+    let selected = vec![ids()[0].clone(), ids()[6].clone(), ids()[1].clone()];
+    let audit = audit_playlist(&graph, &selected, &policy).unwrap();
+    let issue = audit
+        .issues
+        .iter()
+        .find(|issue| issue.code == "artist_gap")
+        .expect("artist gap must be enforced by independent audit");
+    assert_eq!(issue.positions, vec![1, 3]);
 }

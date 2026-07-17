@@ -7,6 +7,7 @@ mod audit;
 mod profile;
 mod project;
 mod select;
+mod sequence;
 mod types;
 
 pub use audit::{audit_playlist, explain_playlist};

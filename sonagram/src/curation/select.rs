@@ -1,10 +1,11 @@
-use std::collections::{BTreeMap, BTreeSet};
 use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
 
 use kglite::api::DirGraph;
 
 use super::audit::{audit_playlist, eligibility_issues, explain_playlist};
 use super::project::{embedding_similarity, project_tracks, TrackCandidate};
+use super::sequence::{compare_track_sequences, repair_tracks, sequence_tracks};
 use super::types::{
     AuditIssue, AuditSeverity, CuratedPlaylist, FamiliarityPreference, PlaylistBrief,
     PlaylistPolicy,
@@ -164,8 +165,29 @@ pub fn curate_playlist(
         }
     }
 
-    let track_ids: Vec<String> = selected.iter().map(|t| t.id.clone()).collect();
+    let selected_pool = selected.clone();
+    selected = sequence_tracks(&selected_pool, policy, 64);
+    let mut track_ids: Vec<String> = selected.iter().map(|t| t.id.clone()).collect();
     let mut audit = audit_playlist(graph, &track_ids, policy)?;
+    let mut sequence_repair_attempts = 0;
+    if sequencing_error_count(&audit) > 0 {
+        sequence_repair_attempts = 1;
+        let repaired = sequence_tracks(&selected_pool, policy, 256);
+        if compare_track_sequences(&repaired, &selected, policy) == Ordering::Greater {
+            selected = repaired;
+            track_ids = selected.iter().map(|track| track.id.clone()).collect();
+            audit = audit_playlist(graph, &track_ids, policy)?;
+        }
+        let (locally_repaired, local_attempts) = repair_tracks(&selected, policy, 8);
+        sequence_repair_attempts += local_attempts;
+        if local_attempts > 0
+            && compare_track_sequences(&locally_repaired, &selected, policy) == Ordering::Greater
+        {
+            selected = locally_repaired;
+            track_ids = selected.iter().map(|track| track.id.clone()).collect();
+            audit = audit_playlist(graph, &track_ids, policy)?;
+        }
+    }
     if track_ids.len() < brief.target_tracks {
         selection_issues.push(error(
             "infeasible_selection",
@@ -202,7 +224,7 @@ pub fn curate_playlist(
             .map(|issue| format!("{}: {}", issue.code, issue.message)),
     );
     explanation.summary.push(format!(
-        "deterministic constrained selection chose {} of {} requested tracks",
+        "deterministic constrained selection and sequencing chose {} of {} requested tracks",
         track_ids.len(), brief.target_tracks
     ));
     if duration_fallback_used {
@@ -217,8 +239,21 @@ pub fn curate_playlist(
         policy: policy.clone(),
         audit,
         explanation,
-        repair_attempts: usize::from(duration_fallback_used),
+        repair_attempts: usize::from(duration_fallback_used) + sequence_repair_attempts,
     })
+}
+
+fn sequencing_error_count(audit: &super::types::PlaylistAudit) -> usize {
+    audit
+        .issues
+        .iter()
+        .filter(|issue| {
+            matches!(
+                issue.code.as_str(),
+                "artist_gap" | "mean_transition" | "worst_transition" | "arc_deviation"
+            )
+        })
+        .count()
 }
 
 fn duration_first_selection<'a>(

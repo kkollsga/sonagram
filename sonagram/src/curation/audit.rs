@@ -90,6 +90,35 @@ pub fn audit_playlist(
             ));
         }
     }
+    if policy.diversity.min_artist_gap > 0 {
+        let mut artist_positions: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+        for (position, track) in selected.iter().enumerate() {
+            if !track.artist_key.is_empty() {
+                artist_positions
+                    .entry(track.artist_key.as_str())
+                    .or_default()
+                    .push(position + 1);
+            }
+        }
+        for (artist, positions) in artist_positions {
+            let too_close: BTreeSet<usize> = positions
+                .windows(2)
+                .filter(|pair| pair[1] - pair[0] < policy.diversity.min_artist_gap)
+                .flat_map(|pair| [pair[0], pair[1]])
+                .collect();
+            if !too_close.is_empty() {
+                issues.push(issue(
+                    AuditSeverity::Error,
+                    "artist_gap",
+                    format!(
+                        "artist {artist} repeats within the minimum gap of {} positions",
+                        policy.diversity.min_artist_gap
+                    ),
+                    too_close.into_iter().collect(),
+                ));
+            }
+        }
+    }
 
     if unique_artist_ratio + f64::EPSILON < policy.audit.min_unique_artist_ratio {
         issues.push(issue(
@@ -253,7 +282,7 @@ pub fn explain_playlist(
             artist: track.artist.clone(),
             album: track.album.clone(),
             title: track.title.clone(),
-            contributions: track_contributions(track, policy),
+            contributions: track_contributions(track, position, track_ids.len(), policy),
         })
         .collect();
     let mut summary = vec![format!(
@@ -361,7 +390,12 @@ pub(crate) fn arc_target(policy: &PlaylistPolicy, position: usize, len: usize) -
     }
 }
 
-fn track_contributions(track: &TrackCandidate, policy: &PlaylistPolicy) -> Vec<ScoreContribution> {
+fn track_contributions(
+    track: &TrackCandidate,
+    position: usize,
+    playlist_len: usize,
+    policy: &PlaylistPolicy,
+) -> Vec<ScoreContribution> {
     let mut out = Vec::new();
     for (name, actual, target) in [
         ("energy_fit", track.energy, policy.targets.energy),
@@ -378,6 +412,15 @@ fn track_contributions(track: &TrackCandidate, policy: &PlaylistPolicy) -> Vec<S
     }
     if let Some(quality) = track.recording_quality {
         out.push(ScoreContribution { component: "recording_quality".into(), value: quality });
+    }
+    if policy.transition.arc != PlaylistArc::None {
+        if let Some(energy) = track.energy {
+            out.push(ScoreContribution {
+                component: "arc_fit".into(),
+                value: (1.0 - (energy - arc_target(policy, position, playlist_len)).abs())
+                    .clamp(0.0, 1.0),
+            });
+        }
     }
     out
 }
