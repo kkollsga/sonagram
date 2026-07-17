@@ -15,6 +15,8 @@ blake3 = "1"
 walkdir = "2"
 thiserror = "2"
 rayon = "1.11"
+# HTTP for the Last.fm enrichment fetcher only (blocking, small).
+ureq = { version = "2", features = ["json"] }
 
 # Upstreams — consumed as cargo libraries, read-only here. `version` must be
 # satisfiable by the LOCAL path checkout: sonara 0.2.2 (needs the tags/mood

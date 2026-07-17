@@ -32,6 +32,14 @@ pub enum SonagramError {
     /// mapping from a graph answer to a `.m3u8` is sonagram's responsibility.
     #[error("playlist error: {0}")]
     Playlist(String),
+
+    /// A Last.fm enrichment failure that aborts the whole run — a missing API
+    /// key, or an unwritable `.sonagram/lastfm/` cache. A per-entity fetch
+    /// failure never surfaces here: it is soft-failed into the entity's cache
+    /// record (`failed: true`) so one bad artist/track/album never aborts the
+    /// run (see [`crate::enrich`]).
+    #[error("enrich error: {0}")]
+    Enrich(String),
 }
 
 /// The crate-wide result alias.

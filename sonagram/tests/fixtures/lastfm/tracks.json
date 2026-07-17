@@ -1,0 +1,108 @@
+{
+  "enrich_version": 1,
+  "entries": {
+    "110e51661c18afaea7f6bc906a06c531bc9b04027787f187c64e7d5cd3862625": {
+      "mbid": "1a1b1c1d-0000-4000-8000-000000000004",
+      "url": "https://www.last.fm/music/a-ha/_/Birthright",
+      "duration_ms": 268000,
+      "listeners": 41000,
+      "playcount": 155000,
+      "lastfm_artist": "a-ha",
+      "lastfm_title": "Birthright",
+      "album_title": "Analogue",
+      "album_mbid": "b2b2b2b2-0000-4000-8000-000000000004",
+      "album_url": "https://www.last.fm/music/a-ha/Analogue",
+      "album_position": 4,
+      "tags": [],
+      "similar": [
+        {
+          "artist": "Some Unowned Artist",
+          "title": "Unowned Song",
+          "match_weight": 0.6
+        }
+      ],
+      "fetched": true
+    },
+    "2221dee47329325ef2d35212fe370cf515e843d7257280ea25e30eca79d010ed": {
+      "mbid": "1a1b1c1d-0000-4000-8000-000000000001",
+      "url": "https://www.last.fm/music/ABBA/_/On+and+on+and+on",
+      "duration_ms": 273000,
+      "listeners": 320000,
+      "playcount": 1800000,
+      "lastfm_artist": "ABBA",
+      "lastfm_title": "On and On and On",
+      "album_title": "Super Trouper",
+      "album_mbid": "b2b2b2b2-0000-4000-8000-000000000001",
+      "album_url": "https://www.last.fm/music/ABBA/Super+Trouper",
+      "album_position": 7,
+      "tags": [
+        "pop",
+        "classic"
+      ],
+      "similar": [
+        {
+          "artist": "Bee Gees",
+          "title": "Jive Talkin'",
+          "match_weight": 0.95
+        },
+        {
+          "artist": "Bruno Mars",
+          "title": "Marry You",
+          "match_weight": 0.8
+        },
+        {
+          "artist": "Nonexistent Band",
+          "title": "Fake Song",
+          "match_weight": 0.5
+        }
+      ],
+      "fetched": true
+    },
+    "a204cc4055d23bf27a3659c2b28da5aad9c0769e6a6c587fa749ce5ad18b4419": {
+      "mbid": "1a1b1c1d-0000-4000-8000-000000000003",
+      "url": "https://www.last.fm/music/Bruno+Mars/_/Marry+You",
+      "duration_ms": 230000,
+      "listeners": 900000,
+      "playcount": 7200000,
+      "lastfm_artist": "Bruno Mars",
+      "lastfm_title": "Marry You",
+      "album_title": "Doo-Wops & Hooligans",
+      "album_mbid": "b2b2b2b2-0000-4000-8000-000000000003",
+      "album_url": "https://www.last.fm/music/Bruno+Mars/Doo-Wops+%26+Hooligans",
+      "album_position": 10,
+      "tags": [
+        "wedding"
+      ],
+      "similar": [
+        {
+          "artist": "A-ha",
+          "title": "Birthright",
+          "match_weight": 0.7
+        }
+      ],
+      "fetched": true
+    },
+    "c1f2b8a8c25f751431a53f8d856b0914e3de2a236011635f2c0292489d1549c1": {
+      "mbid": "1a1b1c1d-0000-4000-8000-000000000002",
+      "url": "https://www.last.fm/music/Bee+Gees/_/Jive+Talkin%27",
+      "duration_ms": 215000,
+      "listeners": 480000,
+      "playcount": 3100000,
+      "lastfm_artist": "Bee Gees",
+      "lastfm_title": "Jive Talkin'",
+      "album_title": "Main Course",
+      "album_mbid": "b2b2b2b2-0000-4000-8000-000000000002",
+      "album_url": "https://www.last.fm/music/Bee+Gees/Main+Course",
+      "album_position": 1,
+      "tags": [],
+      "similar": [
+        {
+          "artist": "ABBA",
+          "title": "On and on and on",
+          "match_weight": 0.9
+        }
+      ],
+      "fetched": true
+    }
+  }
+}

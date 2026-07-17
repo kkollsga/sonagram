@@ -1,0 +1,68 @@
+{
+  "enrich_version": 1,
+  "entries": {
+    "A-ha": {
+      "queried_name": "A-ha",
+      "correction": "a-ha",
+      "listeners": 2100000,
+      "playcount": 71000000,
+      "mbid": "d19bd59f-c216-4a0d-bedc-25a51f70b083",
+      "url": "https://www.last.fm/music/a-ha",
+      "tags": [
+        "synthpop"
+      ],
+      "similar": [
+        "ABBA",
+        "Nonexistent Sibling Band"
+      ],
+      "fetched": true
+    },
+    "ABBA": {
+      "queried_name": "ABBA",
+      "listeners": 3200000,
+      "playcount": 155000000,
+      "mbid": "d87e52c5-bb8d-4da8-b941-9f4928627dc8",
+      "url": "https://www.last.fm/music/ABBA",
+      "tags": [
+        "pop",
+        "swedish pop",
+        "disco"
+      ],
+      "similar": [
+        "Bee Gees",
+        "A-ha",
+        "Some Unowned Artist"
+      ],
+      "fetched": true
+    },
+    "Bee Gees": {
+      "queried_name": "Bee Gees",
+      "listeners": 2600000,
+      "playcount": 98000000,
+      "mbid": "bf0f7e29-dfe1-416c-b5c6-f9ebc19ea810",
+      "url": "https://www.last.fm/music/Bee+Gees",
+      "tags": [
+        "disco"
+      ],
+      "similar": [
+        "ABBA"
+      ],
+      "fetched": true
+    },
+    "Bruno Mars": {
+      "queried_name": "Bruno Mars",
+      "listeners": 4800000,
+      "playcount": 210000000,
+      "mbid": "afb680f2-b6eb-4cd7-a70b-a63b25c763d5",
+      "url": "https://www.last.fm/music/Bruno+Mars",
+      "tags": [
+        "pop",
+        "funk"
+      ],
+      "similar": [
+        "Some Nonexistent Peer"
+      ],
+      "fetched": true
+    }
+  }
+}

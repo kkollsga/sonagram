@@ -33,6 +33,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use kglite::api::DirGraph;
+use sonagram::enrich::{self, EnrichOptions, EnrichReport, EnrichmentData};
 use sonagram::graph::{self, LibraryInfo};
 use sonagram::playlist;
 use sonagram::scan as core_scan;
@@ -151,6 +152,8 @@ fn run_scan(
 }
 
 /// Load the cached records for `root` and build the graph, GIL released.
+/// Auto-loads the Last.fm enrichment cache under `<root>/.sonagram/lastfm/` when
+/// present, so a build after `enrich()` is enriched with no extra argument.
 fn build_graph_from_lib(py: Python<'_>, root: &Path) -> PyResult<Arc<DirGraph>> {
     let root = root.to_path_buf();
     py.detach(move || {
@@ -161,11 +164,12 @@ fn build_graph_from_lib(py: Python<'_>, root: &Path) -> PyResult<Arc<DirGraph>> 
                 root.display()
             )));
         }
+        let enrichment = EnrichmentData::load(&root)?;
         let library = LibraryInfo {
             root: library_label(&root),
             n_tracks: records.len(),
         };
-        graph::build_graph(&records, &library)
+        graph::build_graph_with_enrichment(&records, enrichment.as_ref(), &library)
     })
     .map_err(to_pyerr)
 }
@@ -214,6 +218,23 @@ fn load_via_kglite(py: Python<'_>, path: &Path) -> PyResult<Py<PyAny>> {
     Ok(graph.unbind())
 }
 
+/// Build the `dict` form of an [`EnrichReport`] — per-entity fetched/skipped/
+/// failed counts and `elapsed_sec`.
+fn enrich_report_to_dict<'py>(py: Python<'py>, r: &EnrichReport) -> PyResult<Bound<'py, PyDict>> {
+    let d = PyDict::new(py);
+    d.set_item("artists_fetched", r.artists_fetched)?;
+    d.set_item("artists_skipped", r.artists_skipped)?;
+    d.set_item("artists_failed", r.artists_failed)?;
+    d.set_item("tracks_fetched", r.tracks_fetched)?;
+    d.set_item("tracks_skipped", r.tracks_skipped)?;
+    d.set_item("tracks_failed", r.tracks_failed)?;
+    d.set_item("albums_fetched", r.albums_fetched)?;
+    d.set_item("albums_skipped", r.albums_skipped)?;
+    d.set_item("albums_failed", r.albums_failed)?;
+    d.set_item("elapsed_sec", r.elapsed.as_secs_f64())?;
+    Ok(d)
+}
+
 /// Build the `dict` form of a [`ScanReport`] — plain counts, a `failed` list of
 /// `(path, message)` tuples, and `elapsed_sec`.
 fn report_to_dict<'py>(py: Python<'py>, report: &ScanReport) -> PyResult<Bound<'py, PyDict>> {
@@ -248,6 +269,33 @@ fn report_to_dict<'py>(py: Python<'py>, report: &ScanReport) -> PyResult<Bound<'
 fn scan(py: Python<'_>, library_root: PathBuf, progress: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
     let report = run_scan(py, &library_root, progress)?;
     Ok(report_to_dict(py, &report)?.into_any().unbind())
+}
+
+/// Fetch Last.fm enrichment for a library and cache it under
+/// `<library_root>/.sonagram/lastfm/`.
+///
+/// Resolves the API key from `api_key=` (if given), else the `LASTFM_API_KEY`
+/// env var, else a `.env` file in the current dir or the library root; a missing
+/// key raises `RuntimeError`. Fetches popularity, folksonomy tags, MBIDs,
+/// similar artists/tracks (with match weights), and original-album mapping for
+/// every artist/track/album not already cached (incremental). Per-entity
+/// failures are soft (recorded in the cache), never fatal.
+///
+/// Returns a dict of per-entity `*_fetched` / `*_skipped` / `*_failed` counts
+/// plus `elapsed_sec`. After this, `build()` / `scan_and_build()` pick the cache
+/// up automatically.
+#[pyfunction]
+#[pyo3(name = "enrich", signature = (library_root, *, api_key=None))]
+fn enrich_(py: Python<'_>, library_root: PathBuf, api_key: Option<String>) -> PyResult<Py<PyAny>> {
+    let opts = EnrichOptions {
+        api_key,
+        progress: None,
+    };
+    // The fetch is blocking IO/network pure Rust — release the GIL.
+    let report = py
+        .detach(|| enrich::enrich_library(&library_root, &opts))
+        .map_err(to_pyerr)?;
+    Ok(enrich_report_to_dict(py, &report)?.into_any().unbind())
 }
 
 /// Build the knowledge graph from a library's cached analysis records and
@@ -329,6 +377,7 @@ fn _sonagram(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // kept in lockstep with the core crate and pyproject.toml.
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_function(wrap_pyfunction!(scan, m)?)?;
+    m.add_function(wrap_pyfunction!(enrich_, m)?)?;
     m.add_function(wrap_pyfunction!(build, m)?)?;
     m.add_function(wrap_pyfunction!(scan_and_build, m)?)?;
     m.add_function(wrap_pyfunction!(export_m3u, m)?)?;

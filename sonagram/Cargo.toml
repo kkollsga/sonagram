@@ -16,6 +16,7 @@ blake3 = { workspace = true }
 walkdir = { workspace = true }
 thiserror = { workspace = true }
 rayon = { workspace = true }
+ureq = { workspace = true }
 sonara = { workspace = true }
 kglite = { workspace = true }
 

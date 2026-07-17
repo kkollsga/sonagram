@@ -33,6 +33,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use sha2::{Digest, Sha256};
+use sonagram::enrich::EnrichmentData;
 use sonagram::graph::{self, LibraryInfo, GRAPH_SCHEMA_VERSION};
 use sonagram::record::AnalysisRecord;
 
@@ -73,6 +74,17 @@ fn library() -> LibraryInfo {
         root: "fixtures".to_string(),
         n_tracks: 15,
     }
+}
+
+/// The frozen Last.fm enrichment fixtures (P12) — hand-crafted, deterministic
+/// enrichment for a subset of the 15 tracks (4 artists / 4 tracks / 4 albums),
+/// including 2 owned CROWD_SIMILAR track pairs, similar entries pointing at
+/// non-owned tracks/artists (which must be dropped), and folksonomy tags that
+/// extend the Genre dimension.
+fn load_enrichment() -> EnrichmentData {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lastfm");
+    EnrichmentData::load_from_dir(&dir)
+        .unwrap_or_else(|e| panic!("load enrichment fixtures {}: {e}", dir.display()))
 }
 
 // ───────────────────────── canonical rendering ──────────────────────────────
@@ -222,8 +234,8 @@ fn graph_digest(g: &kglite::api::DirGraph) -> String {
         .collect()
 }
 
-fn read_golden() -> String {
-    let path = goldens_dir().join("library.sha256");
+fn read_golden_file(name: &str) -> String {
+    let path = goldens_dir().join(name);
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| {
             panic!(
@@ -233,6 +245,10 @@ fn read_golden() -> String {
         })
         .trim()
         .to_string()
+}
+
+fn read_golden() -> String {
+    read_golden_file("library.sha256")
 }
 
 // ──────────────────────────── part 1: golden ────────────────────────────────
@@ -282,6 +298,55 @@ fn first_diff(committed: &str, live: &str) -> String {
     } else {
         "  (no line-level difference found — check trailing bytes)".to_string()
     }
+}
+
+// ───────────────────── part 1b: enriched golden (P12) ───────────────────────
+
+/// Build the graph from the 15 fixtures **plus** the frozen Last.fm enrichment,
+/// digest it, and assert it matches the committed enriched golden. This is a
+/// SECOND golden (distinct from the plain one): the enrichment adds popularity /
+/// MBID / original-album props, folksonomy `IN_GENRE` edges, and `CROWD_SIMILAR`
+/// edges. The plain `golden_graph` above proves the un-enriched path is
+/// unchanged; this proves the enrichment mapping is stable.
+#[test]
+fn golden_graph_enriched() {
+    let enr = load_enrichment();
+    let graph =
+        graph::build_graph_with_enrichment(&load_records(), Some(&enr), &library()).unwrap();
+    let got = graph_digest(&graph);
+    let want = read_golden_file("library-enriched.sha256");
+
+    if got != want {
+        let live = canonical_graph_string(&graph);
+        let snap_path = goldens_dir().join("library-enriched.canonical.txt");
+        let diff = match std::fs::read_to_string(&snap_path) {
+            Ok(committed) => first_diff(&committed, &live),
+            Err(e) => format!("(could not read {}: {e})", snap_path.display()),
+        };
+        panic!(
+            "enriched golden digest mismatch\n  golden (committed) = {want}\n  live build         = {got}\n\
+             first canonical difference:\n{diff}\n\n\
+             If this enrichment mapping change is INTENTIONAL, regenerate the goldens in the SAME\n\
+             commit and explain why (GRAPH-GATE.md, THE RULE):\n\
+             `cargo test -p sonagram --test golden_graph -- --ignored capture_goldens`"
+        );
+    }
+}
+
+/// The enriched build is also deterministic across input reordering.
+#[test]
+fn determinism_enriched() {
+    let enr = load_enrichment();
+    let records = load_records();
+    let d0 = graph_digest(
+        &graph::build_graph_with_enrichment(&records, Some(&enr), &library()).unwrap(),
+    );
+    let mut reversed = records.clone();
+    reversed.reverse();
+    let dr = graph_digest(
+        &graph::build_graph_with_enrichment(&reversed, Some(&enr), &library()).unwrap(),
+    );
+    assert_eq!(d0, dr, "enriched build must be order-independent");
 }
 
 // ─────────────────────────── part 2: determinism ────────────────────────────
@@ -511,4 +576,16 @@ fn capture_goldens() {
         bytes < 2 * 1024 * 1024,
         "canonical snapshot exceeded 2MB ({bytes} bytes) — store counts+ids only instead"
     );
+
+    // P12: the enriched golden (built WITH the frozen Last.fm enrichment).
+    let enr = load_enrichment();
+    let egraph =
+        graph::build_graph_with_enrichment(&load_records(), Some(&enr), &library()).unwrap();
+    let ecanonical = canonical_graph_string(&egraph);
+    let edigest = graph_digest(&egraph);
+    std::fs::write(dir.join("library-enriched.sha256"), format!("{edigest}\n"))
+        .expect("write enriched digest golden");
+    std::fs::write(dir.join("library-enriched.canonical.txt"), &ecanonical)
+        .expect("write enriched canonical golden");
+    eprintln!("captured enriched golden -> {edigest}");
 }

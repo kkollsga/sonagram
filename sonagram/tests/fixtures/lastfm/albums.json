@@ -1,0 +1,51 @@
+{
+  "enrich_version": 1,
+  "entries": {
+    "A-ha|Analogue": {
+      "mbid": "c3c3c3c3-0000-4000-8000-000000000004",
+      "url": "https://www.last.fm/music/a-ha/Analogue",
+      "listeners": 120000,
+      "playcount": 640000,
+      "tags": [
+        "synthpop"
+      ],
+      "wiki_summary": "Analogue is the ninth studio album by a-ha, released in 2005.",
+      "fetched": true
+    },
+    "ABBA|Super Trouper": {
+      "mbid": "c3c3c3c3-0000-4000-8000-000000000001",
+      "url": "https://www.last.fm/music/ABBA/Super+Trouper",
+      "listeners": 410000,
+      "playcount": 2600000,
+      "tags": [
+        "pop",
+        "disco"
+      ],
+      "wiki_summary": "Super Trouper is the seventh studio album by ABBA, released in 1980.",
+      "fetched": true
+    },
+    "Bee Gees|Number Ones": {
+      "mbid": "c3c3c3c3-0000-4000-8000-000000000002",
+      "url": "https://www.last.fm/music/Bee+Gees/Number+Ones",
+      "listeners": 210000,
+      "playcount": 990000,
+      "tags": [
+        "disco",
+        "compilation"
+      ],
+      "wiki_summary": "Number Ones is a greatest-hits compilation by the Bee Gees, released in 2004.",
+      "fetched": true
+    },
+    "Bruno Mars|Doo-Wops & Hooligans": {
+      "mbid": "c3c3c3c3-0000-4000-8000-000000000003",
+      "url": "https://www.last.fm/music/Bruno+Mars/Doo-Wops+%26+Hooligans",
+      "listeners": 880000,
+      "playcount": 5400000,
+      "tags": [
+        "pop"
+      ],
+      "wiki_summary": "Doo-Wops & Hooligans is the debut studio album by Bruno Mars, released in 2010.",
+      "fetched": true
+    }
+  }
+}

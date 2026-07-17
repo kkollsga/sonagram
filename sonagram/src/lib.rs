@@ -24,6 +24,8 @@ pub mod scan;
 
 pub mod graph;
 
+pub mod enrich;
+
 pub mod playlist;
 
 pub use error::{Result, SonagramError};

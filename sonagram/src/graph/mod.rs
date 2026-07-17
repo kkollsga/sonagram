@@ -35,6 +35,7 @@ use kglite::api::{DirGraph, Value};
 use kglite::datatypes::values::{ColumnData, ColumnType, DataFrame};
 use sonara::similarity::{EMBEDDING_DIM, SIMILARITY_VERSION, WEIGHTS};
 
+use crate::enrich::{similar_key, EnrichmentData};
 use crate::record::AnalysisRecord;
 use crate::{Result, SonagramError};
 
@@ -89,6 +90,9 @@ const FROM_DECADE: &str = "FROM_DECADE";
 const SIMILAR_TO: &str = "SIMILAR_TO";
 const CAMELOT_ADJACENT: &str = "CAMELOT_ADJACENT";
 const IN_STYLE: &str = "IN_STYLE";
+// Phase 12 enrichment edge: human co-listening similarity from Last.fm. Carries
+// `score` (the match weight) on Track→Track; `source="lastfm"` on Artist→Artist.
+const CROWD_SIMILAR: &str = "CROWD_SIMILAR";
 
 /// Minimal library-root metadata for the `Library` root node.
 #[derive(Debug, Clone)]
@@ -107,6 +111,25 @@ pub struct LibraryInfo {
 /// edge references a node that was not built (which would be a mapping bug —
 /// `add_edges_from_specs` never vivifies endpoints).
 pub fn build_graph(records: &[AnalysisRecord], library: &LibraryInfo) -> Result<Arc<DirGraph>> {
+    build_graph_with_enrichment(records, None, library)
+}
+
+/// Build the graph, optionally folding in Last.fm [`EnrichmentData`] (P12).
+///
+/// With `enrichment == None` this is byte-identical to [`build_graph`] (the
+/// golden gate's plain path is untouched). With `Some`, the enrichment adds
+/// popularity/MBID/original-album properties to `Track`/`Artist`/`Album` nodes,
+/// folds folksonomy tags into the existing `Genre` dimension (extra `IN_GENRE`
+/// edges), and adds `CROWD_SIMILAR` human co-listening edges between owned
+/// tracks (weighted) and owned artists.
+///
+/// Determinism is preserved: enrichment maps are `BTreeMap`-iterated, every new
+/// edge set is deduped through a `BTreeSet` and grouped by `add_edges_from_specs`.
+pub fn build_graph_with_enrichment(
+    records: &[AnalysisRecord],
+    enrichment: Option<&EnrichmentData>,
+    library: &LibraryInfo,
+) -> Result<Arc<DirGraph>> {
     let mut graph = DirGraph::new();
 
     // Deterministic input order: sort references by content hash.
@@ -139,12 +162,35 @@ pub fn build_graph(records: &[AnalysisRecord], library: &LibraryInfo) -> Result<
         }
     }
 
+    // Fold folksonomy tags (owned tracks + owned artists) into the Genre
+    // dimension so the Genre nodes exist before any IN_GENRE edge is added.
+    if let Some(enr) = enrichment {
+        for r in &sorted {
+            if let Some(rec) = enr.tracks.get(&r.source.content_hash) {
+                for tag in &rec.tags {
+                    if let Some(g) = genre_id(Some(tag)) {
+                        genres.insert(g);
+                    }
+                }
+            }
+        }
+        for art in artists.keys() {
+            if let Some(rec) = enr.artists.get(art) {
+                for tag in &rec.tags {
+                    if let Some(g) = genre_id(Some(tag)) {
+                        genres.insert(g);
+                    }
+                }
+            }
+        }
+    }
+
     // ── Stage 1: dimension nodes ────────────────────────────────────────────
     // (The `Library` root is built LAST — Stage 9 — so it can carry the adaptive
     // `style_threshold` the Style pass chooses. It has no edges, so its build
     // order does not affect any endpoint.)
-    add_artists(&mut graph, &artists)?;
-    add_albums(&mut graph, &albums)?;
+    add_artists(&mut graph, &artists, enrichment)?;
+    add_albums(&mut graph, &albums, enrichment)?;
     add_genres(&mut graph, &genres)?;
     add_keys(&mut graph)?;
     add_tempo_bands(&mut graph)?;
@@ -152,7 +198,7 @@ pub fn build_graph(records: &[AnalysisRecord], library: &LibraryInfo) -> Result<
     add_decades(&mut graph, &decades)?;
 
     // ── Stage 3: Track nodes (single full-width pass) ───────────────────────
-    add_tracks(&mut graph, &sorted)?;
+    add_tracks(&mut graph, &sorted, enrichment)?;
 
     // ── Stage 4: edges (all endpoints now exist) ────────────────────────────
     let specs = build_edges(&sorted, &albums);
@@ -162,6 +208,13 @@ pub fn build_graph(records: &[AnalysisRecord], library: &LibraryInfo) -> Result<
             "{} edge(s) referenced a missing endpoint — a mapping bug",
             report.skipped_missing_endpoint
         )));
+    }
+
+    // ── Stage 4b: enrichment edges (folksonomy IN_GENRE + CROWD_SIMILAR) ─────
+    // After the base edges (so Track→Genre dedup can see them), before the
+    // derived similarity/style stages (which read only the embedding store).
+    if let Some(enr) = enrichment {
+        add_enrichment_edges(&mut graph, &sorted, &artists, enr)?;
     }
 
     // ── Stage 5: pre-weighted similarity embedding store ────────────────────
@@ -255,24 +308,40 @@ fn finite_or_zero(x: f32) -> f32 {
 
 // ─────────────────────────── Dimension node builders ────────────────────────
 
-fn add_artists(graph: &mut DirGraph, artists: &BTreeMap<String, i64>) -> Result<()> {
+fn add_artists(
+    graph: &mut DirGraph,
+    artists: &BTreeMap<String, i64>,
+    enrichment: Option<&EnrichmentData>,
+) -> Result<()> {
     if artists.is_empty() {
         return Ok(());
     }
     let ids: Vec<Option<String>> = artists.keys().map(|k| Some(k.clone())).collect();
     let names = ids.clone();
     let counts: Vec<Option<i64>> = artists.values().map(|c| Some(*c)).collect();
-    let df = build_df(vec![
+    let mut cols = vec![
         ("id", ColumnType::String, ColumnData::String(ids)),
         ("name", ColumnType::String, ColumnData::String(names)),
         ("n_tracks", ColumnType::Int64, ColumnData::Int64(counts)),
-    ]);
-    add(graph, df, ARTIST, "id", "name")
+    ];
+    // P12: enrichment properties. Only appended when enrichment is present, so
+    // the plain build's Artist table (and golden digest) is byte-unchanged.
+    if let Some(enr) = enrichment {
+        let get = |k: &String| enr.artists.get(k).filter(|r| r.fetched && !r.failed);
+        let playcount: Vec<Option<i64>> = artists.keys().map(|k| get(k).and_then(|r| r.playcount)).collect();
+        let listeners: Vec<Option<i64>> = artists.keys().map(|k| get(k).and_then(|r| r.listeners)).collect();
+        let mbid: Vec<Option<String>> = artists.keys().map(|k| get(k).and_then(|r| r.mbid.clone())).collect();
+        cols.push(("lastfm_playcount", ColumnType::Int64, ColumnData::Int64(playcount)));
+        cols.push(("lastfm_listeners", ColumnType::Int64, ColumnData::Int64(listeners)));
+        cols.push(("mbid", ColumnType::String, ColumnData::String(mbid)));
+    }
+    add(graph, build_df(cols), ARTIST, "id", "name")
 }
 
 fn add_albums(
     graph: &mut DirGraph,
     albums: &BTreeMap<String, (String, String, Option<i64>)>,
+    enrichment: Option<&EnrichmentData>,
 ) -> Result<()> {
     if albums.is_empty() {
         return Ok(());
@@ -281,13 +350,27 @@ fn add_albums(
     let names: Vec<Option<String>> = albums.values().map(|(n, _, _)| Some(n.clone())).collect();
     let artist: Vec<Option<String>> = albums.values().map(|(_, a, _)| Some(a.clone())).collect();
     let years: Vec<Option<i64>> = albums.values().map(|(_, _, y)| *y).collect();
-    let df = build_df(vec![
+    let mut cols = vec![
         ("id", ColumnType::String, ColumnData::String(ids)),
         ("name", ColumnType::String, ColumnData::String(names)),
         ("artist", ColumnType::String, ColumnData::String(artist)),
         ("year", ColumnType::Int64, ColumnData::Int64(years)),
-    ]);
-    add(graph, df, ALBUM, "id", "name")
+    ];
+    // P12: enrichment properties (null-safe; only when enrichment is present).
+    if let Some(enr) = enrichment {
+        let get = |k: &String| enr.albums.get(k).filter(|r| r.fetched && !r.failed);
+        let playcount: Vec<Option<i64>> = albums.keys().map(|k| get(k).and_then(|r| r.playcount)).collect();
+        let listeners: Vec<Option<i64>> = albums.keys().map(|k| get(k).and_then(|r| r.listeners)).collect();
+        let mbid: Vec<Option<String>> = albums.keys().map(|k| get(k).and_then(|r| r.mbid.clone())).collect();
+        let url: Vec<Option<String>> = albums.keys().map(|k| get(k).and_then(|r| r.url.clone())).collect();
+        let wiki: Vec<Option<String>> = albums.keys().map(|k| get(k).and_then(|r| r.wiki_summary.clone())).collect();
+        cols.push(("lastfm_playcount", ColumnType::Int64, ColumnData::Int64(playcount)));
+        cols.push(("lastfm_listeners", ColumnType::Int64, ColumnData::Int64(listeners)));
+        cols.push(("mbid", ColumnType::String, ColumnData::String(mbid)));
+        cols.push(("lastfm_url", ColumnType::String, ColumnData::String(url)));
+        cols.push(("wiki_summary", ColumnType::String, ColumnData::String(wiki)));
+    }
+    add(graph, build_df(cols), ALBUM, "id", "name")
 }
 
 fn add_genres(graph: &mut DirGraph, genres: &BTreeSet<String>) -> Result<()> {
@@ -358,7 +441,11 @@ fn add_decades(graph: &mut DirGraph, decades: &BTreeSet<String>) -> Result<()> {
 /// every row (missing optionals → null cells) so this is one `add_nodes` pass —
 /// a partial DataFrame would rebuild nodes from only its columns, dropping the
 /// rest.
-fn add_tracks(graph: &mut DirGraph, sorted: &[&AnalysisRecord]) -> Result<()> {
+fn add_tracks(
+    graph: &mut DirGraph,
+    sorted: &[&AnalysisRecord],
+    enrichment: Option<&EnrichmentData>,
+) -> Result<()> {
     if sorted.is_empty() {
         return Ok(());
     }
@@ -460,7 +547,7 @@ fn add_tracks(graph: &mut DirGraph, sorted: &[&AnalysisRecord]) -> Result<()> {
     let camelot = str_opt_col(sorted, |r| r.analysis.key_camelot.clone());
     let predominant_chord = str_opt_col(sorted, |r| r.analysis.predominant_chord.clone());
 
-    let df = build_df(vec![
+    let mut cols = vec![
         ("content_hash", ColumnType::String, ColumnData::String(unique_id)),
         ("title", ColumnType::String, ColumnData::String(title)),
         ("path", ColumnType::String, ColumnData::String(path)),
@@ -516,8 +603,38 @@ fn add_tracks(graph: &mut DirGraph, sorted: &[&AnalysisRecord]) -> Result<()> {
         ("key", ColumnType::String, ColumnData::String(key)),
         ("camelot", ColumnType::String, ColumnData::String(camelot)),
         ("predominant_chord", ColumnType::String, ColumnData::String(predominant_chord)),
-    ]);
-    add(graph, df, TRACK, "content_hash", "title")
+    ];
+
+    // P12: enrichment properties, joined by content_hash. Only appended when
+    // enrichment is present, so the plain build's Track table (and golden
+    // digest) is byte-unchanged. Null cells for tracks with no (or failed)
+    // enrichment record, so an un-enriched track renders exactly as before.
+    if let Some(enr) = enrichment {
+        let get = |r: &AnalysisRecord| {
+            enr.tracks
+                .get(&r.source.content_hash)
+                .filter(|e| e.fetched && !e.failed)
+        };
+        let lastfm_playcount = int_opt_col(sorted, |r| get(r).and_then(|e| e.playcount));
+        let lastfm_listeners = int_opt_col(sorted, |r| get(r).and_then(|e| e.listeners));
+        let mbid = str_opt_col(sorted, |r| get(r).and_then(|e| e.mbid.clone()));
+        let lastfm_url = str_opt_col(sorted, |r| get(r).and_then(|e| e.url.clone()));
+        let original_album = str_opt_col(sorted, |r| get(r).and_then(|e| e.album_title.clone()));
+        let original_album_position =
+            int_opt_col(sorted, |r| get(r).and_then(|e| e.album_position));
+        cols.push(("lastfm_playcount", ColumnType::Int64, ColumnData::Int64(lastfm_playcount)));
+        cols.push(("lastfm_listeners", ColumnType::Int64, ColumnData::Int64(lastfm_listeners)));
+        cols.push(("mbid", ColumnType::String, ColumnData::String(mbid)));
+        cols.push(("lastfm_url", ColumnType::String, ColumnData::String(lastfm_url)));
+        cols.push(("original_album", ColumnType::String, ColumnData::String(original_album)));
+        cols.push((
+            "original_album_position",
+            ColumnType::Int64,
+            ColumnData::Int64(original_album_position),
+        ));
+    }
+
+    add(graph, build_df(cols), TRACK, "content_hash", "title")
 }
 
 // ─────────────────────────────── Edge builder ───────────────────────────────
@@ -567,6 +684,168 @@ fn edge(src_type: &str, src_id: &str, tgt_type: &str, tgt_id: &str, edge_type: &
         edge_type: edge_type.to_string(),
         properties: HashMap::new(),
     }
+}
+
+fn edge_with(
+    src_type: &str,
+    src_id: &str,
+    tgt_type: &str,
+    tgt_id: &str,
+    edge_type: &str,
+    properties: HashMap<String, Value>,
+) -> EdgeSpec {
+    EdgeSpec {
+        source_type: src_type.to_string(),
+        source_id: Value::String(src_id.to_string()),
+        target_type: tgt_type.to_string(),
+        target_id: Value::String(tgt_id.to_string()),
+        edge_type: edge_type.to_string(),
+        properties,
+    }
+}
+
+// ───────────────────────── Enrichment edge builder (P12) ────────────────────
+
+/// Add the Last.fm enrichment edges, in deterministic, deduped order:
+///
+/// - **folksonomy `IN_GENRE`** — extra `Track→Genre` (from a track's Last.fm
+///   tags) and `Artist→Genre` (from an artist's Last.fm tags). Track→Genre edges
+///   are deduped against the base file-genre `IN_GENRE` edges (skip-safe); the
+///   `Genre` nodes already exist (folded into the dimension in Stage 1).
+/// - **`CROWD_SIMILAR` `Track→Track`** — for each owned track's Last.fm similar
+///   list, an edge to the resolved owned track (by normalized `artist::title`),
+///   carrying `score` = the preserved match weight. Similar entries that resolve
+///   to a non-owned track are dropped; self-loops are dropped.
+/// - **`CROWD_SIMILAR` `Artist→Artist`** — for each owned artist's Last.fm
+///   similar-artist names, an edge to the resolved owned artist (case-insensitive),
+///   carrying `source = "lastfm"` (no weight is available). Self-loops dropped.
+///
+/// Everything is `BTreeMap`/`BTreeSet`-derived, so the edge set is identical
+/// across runs and input orderings.
+fn add_enrichment_edges(
+    graph: &mut DirGraph,
+    sorted: &[&AnalysisRecord],
+    artists: &BTreeMap<String, i64>,
+    enr: &EnrichmentData,
+) -> Result<()> {
+    // Resolvers built from the owned records.
+    // track key ("artist-lower::title-lower") → content_hash.
+    let mut track_key_to_hash: BTreeMap<String, String> = BTreeMap::new();
+    // content_hash → its own track key (to skip self-loops by identity).
+    for r in sorted {
+        let t = r.tags.as_ref();
+        let art = artist_id(t.and_then(|t| t.artist.as_deref()));
+        if let Some(title) = t
+            .and_then(|t| t.title.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            track_key_to_hash
+                .entry(similar_key(&art, title))
+                .or_insert_with(|| r.source.content_hash.clone());
+        }
+    }
+    // lowercased artist id → artist id.
+    let artist_lower_to_id: BTreeMap<String, String> = artists
+        .keys()
+        .map(|a| (a.trim().to_lowercase(), a.clone()))
+        .collect();
+
+    // ── Folksonomy IN_GENRE ──
+    // Base Track→Genre edges (file genre), so folksonomy adds don't duplicate.
+    let mut base_track_genre: BTreeSet<(String, String)> = BTreeSet::new();
+    for r in sorted {
+        if let Some(g) = genre_id(r.tags.as_ref().and_then(|t| t.genre.as_deref())) {
+            base_track_genre.insert((r.source.content_hash.clone(), g));
+        }
+    }
+
+    let mut genre_specs: Vec<EdgeSpec> = Vec::new();
+    let mut emitted_track_genre: BTreeSet<(String, String)> = BTreeSet::new();
+    for r in sorted {
+        if let Some(rec) = enr.tracks.get(&r.source.content_hash) {
+            for tag in &rec.tags {
+                if let Some(g) = genre_id(Some(tag)) {
+                    let key = (r.source.content_hash.clone(), g.clone());
+                    if base_track_genre.contains(&key) || !emitted_track_genre.insert(key) {
+                        continue; // dedup vs base + within folksonomy
+                    }
+                    genre_specs.push(edge(TRACK, &r.source.content_hash, GENRE, &g, IN_GENRE));
+                }
+            }
+        }
+    }
+    let mut emitted_artist_genre: BTreeSet<(String, String)> = BTreeSet::new();
+    for art in artists.keys() {
+        if let Some(rec) = enr.artists.get(art) {
+            for tag in &rec.tags {
+                if let Some(g) = genre_id(Some(tag)) {
+                    if emitted_artist_genre.insert((art.clone(), g.clone())) {
+                        genre_specs.push(edge(ARTIST, art, GENRE, &g, IN_GENRE));
+                    }
+                }
+            }
+        }
+    }
+    check_edges(add_edges_from_specs(graph, genre_specs), "folksonomy IN_GENRE")?;
+
+    // ── CROWD_SIMILAR Track→Track (weighted) ──
+    let mut crowd_specs: Vec<EdgeSpec> = Vec::new();
+    let mut emitted_tt: BTreeSet<(String, String)> = BTreeSet::new();
+    for r in sorted {
+        let src = &r.source.content_hash;
+        if let Some(rec) = enr.tracks.get(src) {
+            for sim in &rec.similar {
+                let key = similar_key(&sim.artist, &sim.title);
+                let Some(tgt) = track_key_to_hash.get(&key) else {
+                    continue; // resolves to a non-owned track → drop
+                };
+                if tgt == src || !emitted_tt.insert((src.clone(), tgt.clone())) {
+                    continue; // self-loop / duplicate
+                }
+                let mut props = HashMap::new();
+                props.insert("score".to_string(), Value::Float64(sim.match_weight as f64));
+                crowd_specs.push(edge_with(TRACK, src, TRACK, tgt, CROWD_SIMILAR, props));
+            }
+        }
+    }
+
+    // ── CROWD_SIMILAR Artist→Artist (unweighted, source="lastfm") ──
+    let mut emitted_aa: BTreeSet<(String, String)> = BTreeSet::new();
+    for art in artists.keys() {
+        if let Some(rec) = enr.artists.get(art) {
+            for name in &rec.similar {
+                let Some(tgt) = artist_lower_to_id.get(&name.trim().to_lowercase()) else {
+                    continue; // non-owned artist → drop
+                };
+                if tgt == art || !emitted_aa.insert((art.clone(), tgt.clone())) {
+                    continue;
+                }
+                let mut props = HashMap::new();
+                props.insert("source".to_string(), Value::String("lastfm".to_string()));
+                crowd_specs.push(edge_with(ARTIST, art, ARTIST, tgt, CROWD_SIMILAR, props));
+            }
+        }
+    }
+    check_edges(add_edges_from_specs(graph, crowd_specs), "CROWD_SIMILAR")?;
+
+    Ok(())
+}
+
+/// Turn an `add_edges_from_specs` result into an error if any edge referenced a
+/// missing endpoint (a mapping bug — endpoints are never vivified here).
+fn check_edges(
+    result: std::result::Result<kglite::api::mutation::EdgeSpecReport, String>,
+    what: &str,
+) -> Result<()> {
+    let report = result.map_err(SonagramError::Graph)?;
+    if report.skipped_missing_endpoint != 0 {
+        return Err(SonagramError::Graph(format!(
+            "{} {} edge(s) referenced a missing endpoint — a mapping bug",
+            report.skipped_missing_endpoint, what
+        )));
+    }
+    Ok(())
 }
 
 // ───────────────────────────── DataFrame helpers ────────────────────────────

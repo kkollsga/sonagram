@@ -17,6 +17,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use sonagram::enrich::{self, EnrichOptions, EnrichmentData};
 use sonagram::graph::{self, LibraryInfo};
 use sonagram::playlist;
 use sonagram::scan::{scan_library, ScanOptions, ScanProgress, ScanStage};
@@ -48,6 +49,7 @@ fn main() -> ExitCode {
 
     let result = match args[0].as_str() {
         "scan" => cmd_scan(&args[1..]),
+        "enrich" => cmd_enrich(&args[1..]),
         "build" => cmd_build(&args[1..]),
         "playlist" => cmd_playlist(&args[1..]),
         other => Err(SonagramError::Playlist(format!(
@@ -77,9 +79,17 @@ SUBCOMMANDS:\n\
              per-track analysis under <library_root>/.sonagram/. Prints a\n\
              scan report.\n\
 \n\
+    enrich   <library_root>\n\
+             Fetch Last.fm metadata (popularity, folksonomy tags, MBIDs,\n\
+             similar artists/tracks, original-album mapping) for the library's\n\
+             artists/tracks/albums and cache it under\n\
+             <library_root>/.sonagram/lastfm/. Needs LASTFM_API_KEY (env or a\n\
+             .env file). Re-runs skip already-fetched entities (incremental).\n\
+\n\
     build    <library_root> <out.kgl>\n\
              Build the knowledge graph from the cached analysis records and\n\
-             save it to <out.kgl>. Run `scan` first.\n\
+             save it to <out.kgl>. Run `scan` first. Auto-loads the Last.fm\n\
+             enrichment cache when present (run `enrich` to populate it).\n\
 \n\
     playlist <library_root> <graph.kgl> --out <file.m3u8>\n\
              (--cypher '<query>' | --ids <hash1,hash2,...>)\n\
@@ -124,6 +134,38 @@ fn cmd_scan(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn cmd_enrich(args: &[String]) -> Result<()> {
+    let root = positional(args, 0, "enrich", "<library_root>")?;
+    let root = PathBuf::from(root);
+
+    let opts = EnrichOptions {
+        api_key: None,
+        progress: Some(Box::new(|p: enrich::EnrichProgress| {
+            // One line per kind boundary, so a large library stays readable.
+            if p.done == p.total || p.done == 1 {
+                eprintln!("[enrich] {:?} {}/{}", p.kind, p.done, p.total);
+            }
+        })),
+    };
+    let report = enrich::enrich_library(&root, &opts)?;
+
+    println!("enrich report for {}", root.display());
+    println!(
+        "  artists: {} fetched, {} skipped, {} failed",
+        report.artists_fetched, report.artists_skipped, report.artists_failed
+    );
+    println!(
+        "  tracks:  {} fetched, {} skipped, {} failed",
+        report.tracks_fetched, report.tracks_skipped, report.tracks_failed
+    );
+    println!(
+        "  albums:  {} fetched, {} skipped, {} failed",
+        report.albums_fetched, report.albums_skipped, report.albums_failed
+    );
+    println!("  elapsed: {:.2?}", report.elapsed);
+    Ok(())
+}
+
 fn cmd_build(args: &[String]) -> Result<()> {
     let root = positional(args, 0, "build", "<library_root>")?;
     let out = positional(args, 1, "build", "<out.kgl>")?;
@@ -138,12 +180,22 @@ fn cmd_build(args: &[String]) -> Result<()> {
             root.display()
         )));
     }
+    // Auto-load the Last.fm enrichment cache when present.
+    let enrichment = EnrichmentData::load(&root)?;
+    match &enrichment {
+        Some(e) if !e.is_empty() => eprintln!(
+            "[build] enriched build: {} artists, {} tracks",
+            e.artists_present(),
+            e.tracks_present()
+        ),
+        _ => eprintln!("[build] no enrichment cache — plain build"),
+    }
     eprintln!("[build] {} records → building graph", records.len());
     let library = LibraryInfo {
         root: library_label(&root),
         n_tracks: records.len(),
     };
-    let mut g = graph::build_graph(&records, &library)?;
+    let mut g = graph::build_graph_with_enrichment(&records, enrichment.as_ref(), &library)?;
     graph::save(&mut g, &out)?;
     println!(
         "built graph from {} tracks → {}",
