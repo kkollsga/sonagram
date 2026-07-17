@@ -28,11 +28,12 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use crate::config::Config;
-use crate::enrich::{self, EnrichOptions, EnrichmentData};
+use crate::enrich::{self, EnrichOptions, EnrichProgress, EnrichmentData};
 use crate::graph::{self, LibraryInfo, SourceInput};
+use crate::pipeline;
 use crate::playlist;
 use crate::record::AnalysisRecord;
-use crate::scan::{self, scan_library, FreshnessReport, ScanOptions, ScanProgress, ScanStage};
+use crate::scan::{self, scan_library, FreshnessReport, ScanOptions, ScanProgress};
 use crate::{Result, SonagramError, VERSION};
 
 /// Run the CLI over `args` — the argument vector **without** the program name
@@ -70,6 +71,7 @@ pub fn run(args: &[String]) -> i32 {
         "sources" => finish(cmd_sources(&args[1..])),
         "config" => finish(cmd_config(&args[1..])),
         "skill" => finish(cmd_skill(&args[1..])),
+        "progress" => finish(cmd_progress(&args[1..])),
         // `status` owns its exit code (0 fresh / 1 needs-scan / 2 no-cache), so
         // it is not funnelled through `finish`.
         "status" => cmd_status(&args[1..]),
@@ -99,10 +101,19 @@ USAGE:\n\
     sonagram <SUBCOMMAND>\n\
 \n\
 SUBCOMMANDS:\n\
-    scan     <library_root>\n\
+    scan     <library_root> [--no-enrich]\n\
              Scan a library (walk, hash, analyze unseen files) and cache\n\
-             per-track analysis under <library_root>/.sonagram/. Prints a\n\
-             scan report.\n\
+             per-track analysis under <library_root>/.sonagram/. Analysis\n\
+             streams: records persist as they complete (a killed scan resumes\n\
+             where it stopped) and Last.fm enrichment runs IN PARALLEL by\n\
+             default when a key is configured (--no-enrich opts out; a missing\n\
+             key just skips it). Prints a scan report.\n\
+\n\
+    progress [<library_root>] [--format json]\n\
+             Read the live on-disk progress snapshots (scan_progress.json /\n\
+             enrich_progress.json, written by every scan/enrich regardless of\n\
+             entry point) with derived %, rate, ETA, and staleness. No args =\n\
+             every configured source.\n\
 \n\
     enrich   <library_root>\n\
              Fetch Last.fm metadata (popularity, folksonomy tags, MBIDs,\n\
@@ -197,17 +208,41 @@ EXAMPLES:\n\
 }
 
 fn cmd_scan(args: &[String]) -> Result<()> {
+    // P20: scan and Last.fm enrichment run in PARALLEL by default (scan is
+    // CPU-heavy, enrichment network-heavy). --no-enrich opts out; a missing
+    // API key degrades to a plain scan with a note, never an error.
+    let mut with_enrich = true;
+    let mut root: Option<&str> = None;
+    for a in args {
+        match a.as_str() {
+            "--no-enrich" => with_enrich = false,
+            other if other.starts_with("--") => {
+                return Err(SonagramError::Config(format!(
+                    "scan: unexpected argument '{other}' — try [<library_root>] [--no-enrich]"
+                )))
+            }
+            other => {
+                if root.is_some() {
+                    return Err(SonagramError::Config(format!(
+                        "scan: unexpected extra argument '{other}'"
+                    )));
+                }
+                root = Some(other);
+            }
+        }
+    }
+
     // Explicit `scan <library_root>` (backward-compatible) vs config-driven
     // `scan` (every configured source, sequentially).
-    match optional_positional(args, 0) {
+    match root {
         Some(root) => {
-            scan_one(&PathBuf::from(root))?;
+            scan_one(&PathBuf::from(root), with_enrich)?;
         }
         None => {
             let sources = configured_source_paths(&Config::load()?)?;
             let mut totals = (0usize, 0usize, 0usize, 0usize, 0usize); // files, analyzed, hash, stat, failed
             for src in &sources {
-                let r = scan_one(src)?;
+                let r = scan_one(src, with_enrich)?;
                 totals.0 += r.total_files;
                 totals.1 += r.analyzed;
                 totals.2 += r.reused_hash_match;
@@ -225,13 +260,30 @@ fn cmd_scan(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Scan one library root and print its per-source report; return the report.
-fn scan_one(root: &Path) -> Result<crate::scan::ScanReport> {
+/// Scan one library root (with concurrent Last.fm enrichment unless opted
+/// out), print its per-source report, and return the scan report.
+fn scan_one(root: &Path, with_enrich: bool) -> Result<crate::scan::ScanReport> {
     let opts = ScanOptions {
         progress: Some(Box::new(stage_line)),
         ..Default::default()
     };
-    let report = scan_library(root, &opts)?;
+    let report = if with_enrich {
+        let enrich_opts = EnrichOptions {
+            api_key: None,
+            progress: Some(Box::new(enrich_line)),
+        };
+        let combined = pipeline::scan_and_enrich_library(root, &opts, &enrich_opts)?;
+        match &combined.enrich {
+            Some(e) => print_enrich_report(root, e),
+            None => eprintln!(
+                "[enrich] no LASTFM_API_KEY configured — scanned without enrichment \
+                 (see `sonagram enrich --help`)"
+            ),
+        }
+        combined.scan
+    } else {
+        scan_library(root, &opts)?
+    };
 
     println!("scan report for {}", root.display());
     println!("  total files:        {}", report.total_files);
@@ -263,15 +315,16 @@ fn cmd_enrich(args: &[String]) -> Result<()> {
 fn enrich_one(root: &Path) -> Result<()> {
     let opts = EnrichOptions {
         api_key: None,
-        progress: Some(Box::new(|p: enrich::EnrichProgress| {
-            // One line per kind boundary, so a large library stays readable.
-            if p.done == p.total || p.done == 1 {
-                eprintln!("[enrich] {:?} {}/{}", p.kind, p.done, p.total);
-            }
-        })),
+        progress: Some(Box::new(enrich_line)),
     };
     let report = enrich::enrich_library(root, &opts)?;
+    print_enrich_report(root, &report);
+    Ok(())
+}
 
+/// Print the enrich report block for one source (shared by `enrich` and the
+/// parallel `scan` pipeline).
+fn print_enrich_report(root: &Path, report: &enrich::EnrichReport) {
     println!("enrich report for {}", root.display());
     println!(
         "  artists: {} fetched, {} skipped, {} failed",
@@ -286,7 +339,6 @@ fn enrich_one(root: &Path) -> Result<()> {
         report.albums_fetched, report.albums_skipped, report.albums_failed
     );
     println!("  elapsed: {:.2?}", report.elapsed);
-    Ok(())
 }
 
 fn cmd_build(args: &[String]) -> Result<()> {
@@ -1053,8 +1105,19 @@ fn status_json_obj(
     has_enrichment: bool,
     exit_code: i32,
 ) -> serde_json::Value {
+    // P20: attach any live (or interrupted) progress snapshot, so one status
+    // probe answers "is something running / how far did it get" too.
+    let now = crate::progress::unix_now();
+    let scan_progress = scan::load_scan_progress(root)
+        .filter(|p| p.stage != "done")
+        .map(|p| scan_progress_json(&p, now));
+    let enrich_progress = enrich::load_enrich_progress(root)
+        .filter(|p| p.kind != "done")
+        .map(|p| enrich_progress_json(&p, now));
     json!({
         "library_root": root.to_string_lossy(),
+        "scan_progress": scan_progress,
+        "enrich_progress": enrich_progress,
         "has_cache": report.has_cache,
         "total_files": report.total_files,
         "fresh": report.fresh,
@@ -1090,6 +1153,13 @@ fn print_status_human(root: &Path, report: &FreshnessReport, has_enrichment: boo
         "  enrichment cache:   {}",
         if has_enrichment { "present" } else { "absent" }
     );
+    let now = crate::progress::unix_now();
+    if let Some(p) = scan::load_scan_progress(root).filter(|p| p.stage != "done") {
+        println!("  scan progress:      {}", scan_progress_human(&p, now));
+    }
+    if let Some(p) = enrich::load_enrich_progress(root).filter(|p| p.kind != "done") {
+        println!("  enrich progress:    {}", enrich_progress_human(&p, now));
+    }
     match exit_code {
         0 => println!("  => fresh"),
         2 => println!("  => no cache (run `sonagram scan {}`)", root.display()),
@@ -1130,14 +1200,211 @@ fn playlist_name(out: Option<&Path>, dest_dir: &Path) -> String {
 
 // ───────────────────────────── helpers ──────────────────────────────
 
-/// Print a coarse stage line to stderr — one per stage boundary (plus the
-/// start of analysis), not per file, so a 10k-track scan stays readable.
+/// Print a scan stage line to stderr roughly every 1% (at least every 500
+/// items) plus every stage boundary — the multi-hour analyze phase must never
+/// go silent (the old boundary-only rule left it stuck on `Analyze 0/N`).
+/// The on-disk snapshot (`sonagram progress`) is the machine-readable view.
 fn stage_line(p: ScanProgress) {
-    let at_boundary = p.done == p.total;
-    let analyze_start = p.stage == ScanStage::Analyze && p.done == 0;
-    if at_boundary || analyze_start {
+    let step = (p.total / 100).clamp(1, 500);
+    if p.done == p.total || p.done % step == 0 {
         eprintln!("[scan] {:?} {}/{}", p.stage, p.done, p.total);
     }
+}
+
+/// Print an enrich progress line to stderr, throttled like [`stage_line`].
+fn enrich_line(p: EnrichProgress) {
+    let step = (p.total / 100).clamp(1, 500);
+    if p.done == p.total || p.done == 1 || p.done % step == 0 {
+        eprintln!("[enrich] {:?} {}/{}", p.kind, p.done, p.total);
+    }
+}
+
+/// `sonagram progress [<library_root>] [--format json]` — read the on-disk
+/// scan/enrich progress snapshots (written live by any scan/enrich, whatever
+/// the entry point) and render them with derived rate / ETA / staleness.
+fn cmd_progress(args: &[String]) -> Result<()> {
+    let mut as_json = false;
+    let mut root: Option<&str> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--format" => {
+                i += 1;
+                match args.get(i).map(String::as_str) {
+                    Some("json") => as_json = true,
+                    Some("human") => as_json = false,
+                    other => {
+                        return Err(SonagramError::Config(format!(
+                            "progress: --format expects 'json' or 'human', got {other:?}"
+                        )))
+                    }
+                }
+            }
+            "--json" => as_json = true,
+            other if other.starts_with("--") => {
+                return Err(SonagramError::Config(format!(
+                    "progress: unexpected argument '{other}'"
+                )))
+            }
+            other => root = Some(other),
+        }
+        i += 1;
+    }
+
+    let roots: Vec<PathBuf> = match root {
+        Some(r) => vec![PathBuf::from(r)],
+        None => configured_source_paths(&Config::load()?)?,
+    };
+
+    let now = crate::progress::unix_now();
+    let mut objs: Vec<serde_json::Value> = Vec::new();
+    for root in &roots {
+        let scan_p = scan::load_scan_progress(root);
+        let enrich_p = enrich::load_enrich_progress(root);
+        if as_json {
+            objs.push(json!({
+                "library_root": root.to_string_lossy(),
+                "scan": scan_p.as_ref().map(|p| scan_progress_json(p, now)),
+                "enrich": enrich_p.as_ref().map(|p| enrich_progress_json(p, now)),
+            }));
+            continue;
+        }
+        println!("progress for {}", root.display());
+        match &scan_p {
+            None => println!("  scan:    no scan has run"),
+            Some(p) => println!("  scan:    {}", scan_progress_human(p, now)),
+        }
+        match &enrich_p {
+            None => println!("  enrich:  no enrichment has run"),
+            Some(p) => println!("  enrich:  {}", enrich_progress_human(p, now)),
+        }
+    }
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string(&json!({ "sources": objs })).expect("JSON value")
+        );
+    }
+    Ok(())
+}
+
+/// `(pct, rate/sec, eta_sec)` for a counter that started at `started_unix` and
+/// was last updated at `updated_unix`. Rate/ETA are `None` until measurable.
+fn derive_rate(done: usize, total: usize, started_unix: i64, updated_unix: i64) -> (f64, Option<f64>, Option<i64>) {
+    let pct = if total > 0 {
+        100.0 * done as f64 / total as f64
+    } else {
+        100.0
+    };
+    let elapsed = (updated_unix - started_unix).max(0) as f64;
+    let rate = (elapsed > 0.0 && done > 0).then(|| done as f64 / elapsed);
+    let eta = rate
+        .filter(|r| *r > 0.0)
+        .map(|r| ((total.saturating_sub(done)) as f64 / r).round() as i64);
+    (pct, rate, eta)
+}
+
+/// `"3m20s"`-style rendering of a second count.
+fn human_secs(s: i64) -> String {
+    if s >= 3600 {
+        format!("{}h{:02}m", s / 3600, (s % 3600) / 60)
+    } else if s >= 60 {
+        format!("{}m{:02}s", s / 60, s % 60)
+    } else {
+        format!("{s}s")
+    }
+}
+
+/// A staleness marker for a snapshot that claims to be live but has not been
+/// updated recently — the writing process is likely gone.
+fn staleness(now: i64, updated_unix: i64, finished: bool) -> &'static str {
+    if !finished && now - updated_unix > 120 {
+        " [STALE — writer gone?]"
+    } else {
+        ""
+    }
+}
+
+fn scan_progress_human(p: &scan::ScanProgressSnapshot, now: i64) -> String {
+    if p.stage == "done" {
+        return format!(
+            "complete — {} files ({} analyzed, {} reused, {} failed)",
+            p.total,
+            p.analyzed,
+            p.reused_stat + p.reused_hash,
+            p.failed
+        );
+    }
+    // ETA from the analysis counters — the dominant cost. While hashing is
+    // still discovering (`stage == "hash"`), analyze_total is a lower bound,
+    // so the ETA is one too; say so.
+    let (pct, rate, eta) = derive_rate(p.analyze_done, p.analyze_total, p.started_unix, p.updated_unix);
+    let discovering = p.stage == "hash";
+    let mut line = format!(
+        "{} — {}/{} files decided; analysis {}/{}{} ({:.0}%)",
+        p.stage,
+        p.done,
+        p.total,
+        p.analyze_done,
+        p.analyze_total,
+        if discovering { "+" } else { "" },
+        pct
+    );
+    if let Some(r) = rate {
+        line.push_str(&format!(", {:.1}/min", r * 60.0));
+    }
+    if let Some(e) = eta {
+        line.push_str(&format!(
+            ", eta {}{}",
+            human_secs(e),
+            if discovering { "+" } else { "" }
+        ));
+    }
+    line.push_str(staleness(now, p.updated_unix, false));
+    line
+}
+
+fn scan_progress_json(p: &scan::ScanProgressSnapshot, now: i64) -> serde_json::Value {
+    let (pct, rate, eta) = derive_rate(p.analyze_done, p.analyze_total, p.started_unix, p.updated_unix);
+    let mut obj = serde_json::to_value(p).expect("snapshot serializes");
+    obj["analyze_pct"] = json!(pct);
+    obj["analyze_per_sec"] = json!(rate);
+    obj["eta_sec"] = json!(eta);
+    obj["age_sec"] = json!(now - p.updated_unix);
+    obj["live"] = json!(p.stage != "done" && now - p.updated_unix <= 120);
+    obj
+}
+
+fn enrich_progress_human(p: &enrich::EnrichProgressSnapshot, now: i64) -> String {
+    let fetched = p.artists_fetched + p.tracks_fetched + p.albums_fetched;
+    let failed = p.artists_failed + p.tracks_failed + p.albums_failed;
+    if p.kind == "done" {
+        return format!("complete — {fetched} fetched, {failed} failed this run");
+    }
+    let (pct, rate, eta) = derive_rate(p.done, p.total, p.started_unix, p.updated_unix);
+    let mut line = format!(
+        "fetching {}s {}/{} ({:.0}%); run total {fetched} fetched, {failed} failed",
+        p.kind, p.done, p.total, pct
+    );
+    if let Some(r) = rate {
+        line.push_str(&format!(", {:.1}/min", r * 60.0));
+    }
+    if let Some(e) = eta {
+        line.push_str(&format!(", eta {}", human_secs(e)));
+    }
+    line.push_str(staleness(now, p.updated_unix, false));
+    line
+}
+
+fn enrich_progress_json(p: &enrich::EnrichProgressSnapshot, now: i64) -> serde_json::Value {
+    let (pct, rate, eta) = derive_rate(p.done, p.total, p.started_unix, p.updated_unix);
+    let mut obj = serde_json::to_value(p).expect("snapshot serializes");
+    obj["pct"] = json!(pct);
+    obj["per_sec"] = json!(rate);
+    obj["eta_sec"] = json!(eta);
+    obj["age_sec"] = json!(now - p.updated_unix);
+    obj["live"] = json!(p.kind != "done" && now - p.updated_unix <= 120);
+    obj
 }
 
 /// A short library label for the `Library` root node — the last path component

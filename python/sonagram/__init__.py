@@ -3,7 +3,13 @@
 Public API (all implemented in the compiled `_sonagram` extension):
 
 - ``scan(library_root, *, progress=None) -> dict`` — scan a library, returning
-  a report of counts + failures.
+  a report of counts + failures. Analysis streams to disk (a killed scan
+  resumes), and live progress is mirrored to
+  ``<library_root>/.sonagram/scan_progress.json`` whatever the entry point.
+- ``scan_and_enrich(library_root, *, api_key=None, progress=None) -> dict`` —
+  scan while fetching Last.fm enrichment IN PARALLEL (scan is CPU-heavy,
+  enrichment network-heavy). Returns ``{"scan": ..., "enrich": ...}``;
+  ``enrich`` is ``None`` when no key is configured.
 - ``enrich(library_root, *, api_key=None) -> dict`` — fetch Last.fm metadata
   (popularity, folksonomy tags, MBIDs, similar artists/tracks, original-album
   mapping) and cache it under ``<library_root>/.sonagram/lastfm/``. Needs a
@@ -24,10 +30,19 @@ Public API (all implemented in the compiled `_sonagram` extension):
 from sonagram._sonagram import (  # noqa: F401 — re-exported native surface
     __version__,
     scan,
+    scan_and_enrich,
     enrich,
     build,
     scan_and_build,
     export_m3u,
 )
 
-__all__ = ["__version__", "scan", "enrich", "build", "scan_and_build", "export_m3u"]
+__all__ = [
+    "__version__",
+    "scan",
+    "scan_and_enrich",
+    "enrich",
+    "build",
+    "scan_and_build",
+    "export_m3u",
+]

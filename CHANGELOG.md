@@ -4,6 +4,45 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.0] - 2026-07-17
+
+Streaming scan pipeline (P20). Graph schema unchanged (v1); the golden-graph
+gate is untouched.
+
+### Added
+
+- **Streaming, resumable scans** — analysis results now persist one record at
+  a time the moment each file completes (previously the whole batch was held
+  in memory and flushed only at the end: a killed 33k-file cold scan lost
+  hours of work). The index is checkpointed every 30 s, so an interrupted scan
+  resumes from roughly where it stopped via the existing stat/hash fast paths.
+- **Hash/analyze overlap** — the decision loop (stat, hash, queue) feeds a
+  worker pool that starts analyzing the first unseen file immediately, instead
+  of hashing the entire library first while every core idles. On a large cold
+  scan the hash pass now costs no separate wall-clock.
+- **On-disk progress snapshots** — every scan writes
+  `<lib>/.sonagram/scan_progress.json` and every enrichment
+  `<lib>/.sonagram/enrich_progress.json` (atomic, throttled to 1/s), so
+  progress is observable from ANY entry point — CLI, Python, or an outside
+  probe — regardless of how stdout is wired. New `sonagram progress
+  [<root>] [--format json]` renders them with derived %, rate, ETA, and a
+  staleness marker; `sonagram status` inlines live snapshots.
+- **Parallel scan + enrichment** — `sonagram scan` now runs Last.fm
+  enrichment concurrently with analysis by default (scan is CPU-bound,
+  enrichment network-bound; `--no-enrich` opts out, a missing API key
+  degrades to a plain scan). New `sonagram.scan_and_enrich()` in the Python
+  API. The enrich loop re-passes the growing analysis cache and a final pass
+  catches the tail; per-entity fetches were already incremental and cached.
+- CLI scan/enrich stderr progress now prints roughly every 1 % (the old
+  boundary-only rule left multi-hour analyze phases stuck on `Analyze 0/N`).
+
+### Changed
+
+- `scan::Analyzer` (Rust API) is now a per-file seam: `analyze_one(&self,
+  &AnalyzeRequest) -> Result<AnalysisRecord>` replaces the batch `analyze`
+  method — the scanner owns fan-out and persistence. External implementations
+  must migrate (trivially); hence the minor version bump.
+
 ## [0.1.0] - 2026-07-17
 
 Initial release.

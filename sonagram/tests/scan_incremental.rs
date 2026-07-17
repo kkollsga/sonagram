@@ -40,23 +40,42 @@ impl CountingAnalyzer {
 }
 
 impl Analyzer for CountingAnalyzer {
-    fn analyze(
-        &self,
-        requests: &[AnalyzeRequest],
-        on_done: &(dyn Fn(usize, usize) + Sync),
-    ) -> Vec<sonagram::Result<AnalysisRecord>> {
-        self.calls.fetch_add(requests.len(), Ordering::SeqCst);
-        let total = requests.len();
-        requests
-            .iter()
-            .enumerate()
-            .map(|(i, req)| {
-                let mut rec = self.template.clone();
-                rec.source = req.source.clone();
-                on_done(i + 1, total);
-                Ok(rec)
-            })
-            .collect()
+    fn analyze_one(&self, request: &AnalyzeRequest) -> sonagram::Result<AnalysisRecord> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let mut rec = self.template.clone();
+        rec.source = request.source.clone();
+        Ok(rec)
+    }
+}
+
+/// A mock analyzer that fails exactly one relative path and succeeds (with the
+/// fixture template) everywhere else — the seam for interrupted/partial-scan
+/// tests.
+struct SelectiveAnalyzer {
+    template: AnalysisRecord,
+    fail_path: String,
+    calls: AtomicUsize,
+}
+
+impl SelectiveAnalyzer {
+    fn failing(rel_path: &str) -> Self {
+        SelectiveAnalyzer {
+            template: load_a_fixture(),
+            fail_path: rel_path.to_string(),
+            calls: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl Analyzer for SelectiveAnalyzer {
+    fn analyze_one(&self, request: &AnalyzeRequest) -> sonagram::Result<AnalysisRecord> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if request.source.path == self.fail_path {
+            return Err(sonagram::SonagramError::Cache("mock failure".to_string()));
+        }
+        let mut rec = self.template.clone();
+        rec.source = request.source.clone();
+        Ok(rec)
     }
 }
 
@@ -298,6 +317,52 @@ fn stale_records_reanalyzed_fresh_untouched() {
     assert_eq!(r2.analyzed, 0, "all records fresh again → no-op analyzes nothing");
     assert_eq!(r2.reused_stat_match, 3);
     assert_eq!(analyzer.count(), 5, "no further analyses on the no-op rescan");
+}
+
+/// P20 streaming persistence: results that completed before a failure are on
+/// disk and survive — a follow-up scan re-analyzes ONLY what is missing.
+#[test]
+fn partial_scan_resumes_only_missing_work() {
+    let lib = build_library("resume");
+    let analyzer = SelectiveAnalyzer::failing("b.mp3");
+
+    let r1 = scan_library_with(&lib, &opts(), &analyzer).unwrap();
+    assert_eq!(r1.analyzed, 2, "the two passing files are analyzed");
+    assert_eq!(r1.failed.len(), 1, "the failing file is isolated");
+    assert_eq!(
+        load_records(&lib).unwrap().len(),
+        2,
+        "completed records are persisted individually"
+    );
+
+    // Next scan: the two persisted files ride the stat fast-path; only the
+    // missing one is analyzed.
+    let analyzer2 = CountingAnalyzer::new();
+    let r2 = scan_library_with(&lib, &opts(), &analyzer2).unwrap();
+    assert_eq!(r2.analyzed, 1, "only the previously failed file re-analyzes");
+    assert_eq!(r2.reused_stat_match, 2);
+    assert_eq!(analyzer2.count(), 1);
+    assert_eq!(load_records(&lib).unwrap().len(), 3);
+}
+
+/// P20 observable progress: every scan (whatever the entry point) leaves a
+/// final `scan_progress.json` snapshot with stage `"done"` and true counts.
+#[test]
+fn progress_snapshot_written_and_finalized() {
+    let lib = build_library("progress");
+    let analyzer = CountingAnalyzer::new();
+    scan_library_with(&lib, &opts(), &analyzer).unwrap();
+
+    let p = sonagram::scan::load_scan_progress(&lib).expect("progress snapshot exists");
+    assert_eq!(p.stage, "done");
+    assert_eq!(p.total, 3);
+    assert_eq!(p.done, 3, "every file passed the decision loop");
+    assert_eq!(p.analyzed, 3);
+    assert_eq!(p.analyze_done, 3);
+    assert_eq!(p.analyze_total, 3);
+    assert_eq!(p.failed, 0);
+    assert!(p.updated_unix >= p.started_unix);
+    assert_eq!(p.pid, std::process::id());
 }
 
 #[test]

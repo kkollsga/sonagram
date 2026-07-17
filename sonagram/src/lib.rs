@@ -30,7 +30,11 @@ pub mod graph;
 
 pub mod enrich;
 
+pub mod pipeline;
+
 pub mod playlist;
+
+pub mod progress;
 
 pub mod skill;
 
@@ -50,7 +54,8 @@ mod tests {
 
     #[test]
     fn version_is_pinned() {
-        // The three lockstep version fields must all read 0.1.0 at bootstrap.
-        assert_eq!(VERSION, "0.1.0");
+        // The lockstep version fields (Cargo.toml workspace, pyproject.toml,
+        // this constant) must all agree on the release version.
+        assert_eq!(VERSION, "0.2.0");
     }
 }

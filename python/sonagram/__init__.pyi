@@ -9,6 +9,12 @@ def scan(
     *,
     progress: Optional[Callable[[str, int, int], None]] = ...,
 ) -> dict[str, Any]: ...
+def scan_and_enrich(
+    library_root: str,
+    *,
+    api_key: Optional[str] = ...,
+    progress: Optional[Callable[[str, int, int], None]] = ...,
+) -> dict[str, Any]: ...
 def enrich(
     library_root: str,
     *,

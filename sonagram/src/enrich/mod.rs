@@ -28,12 +28,14 @@
 pub mod store;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
 
 use crate::graph::normalize::{album_id, album_name, artist_id};
+use crate::progress::{load_progress, unix_now, ProgressWriter};
 use crate::record::AnalysisRecord;
 use crate::scan::load_records;
 use crate::{Result, SonagramError};
@@ -573,6 +575,68 @@ pub enum EnrichKind {
     Album,
 }
 
+/// The stable string form of an [`EnrichKind`] used in the progress file.
+fn kind_name(kind: EnrichKind) -> &'static str {
+    match kind {
+        EnrichKind::Artist => "artist",
+        EnrichKind::Track => "track",
+        EnrichKind::Album => "album",
+    }
+}
+
+/// The on-disk enrich progress snapshot (P20):
+/// `<lib>/.sonagram/enrich_progress.json`. Written atomically and throttled by
+/// [`enrich_library_with`] itself — every entry point (CLI, Python, a
+/// concurrent scan-and-enrich pipeline) produces the same observable progress.
+/// `kind = "done"` marks a completed run; a stale `updated_unix` with any other
+/// kind means the enriching process died.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EnrichProgressSnapshot {
+    /// PID of the enriching process.
+    pub pid: u32,
+    /// What is being fetched: `"artist"`, `"track"`, `"album"`, `"done"`.
+    pub kind: String,
+    /// Entities fetched in this kind so far (this run).
+    pub done: usize,
+    /// Total to fetch in this kind (this run).
+    pub total: usize,
+    /// Artists fetched / failed / skipped-as-cached this run.
+    pub artists_fetched: usize,
+    /// See `artists_fetched`.
+    pub artists_failed: usize,
+    /// See `artists_fetched`.
+    pub artists_skipped: usize,
+    /// Tracks fetched / failed / skipped-as-cached this run.
+    pub tracks_fetched: usize,
+    /// See `tracks_fetched`.
+    pub tracks_failed: usize,
+    /// See `tracks_fetched`.
+    pub tracks_skipped: usize,
+    /// Albums fetched / failed / skipped-as-cached this run.
+    pub albums_fetched: usize,
+    /// See `albums_fetched`.
+    pub albums_failed: usize,
+    /// See `albums_fetched`.
+    pub albums_skipped: usize,
+    /// When this run started (unix seconds).
+    pub started_unix: i64,
+    /// When this snapshot was written (unix seconds).
+    pub updated_unix: i64,
+}
+
+/// Path of a library's enrich progress file.
+pub fn enrich_progress_path(library_root: &Path) -> PathBuf {
+    library_root.join(".sonagram").join("enrich_progress.json")
+}
+
+/// Load a library's enrich progress snapshot, `None` when absent or unreadable.
+pub fn load_enrich_progress(library_root: &Path) -> Option<EnrichProgressSnapshot> {
+    load_progress(&enrich_progress_path(library_root))
+}
+
+/// How often the enrich progress snapshot is refreshed (unforced writes).
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
+
 /// Options controlling an enrichment run.
 #[derive(Default)]
 pub struct EnrichOptions {
@@ -635,11 +699,37 @@ pub fn enrich_library_with(
     client: &dyn LastfmApi,
 ) -> Result<EnrichReport> {
     let start = Instant::now();
+    let started_unix = unix_now();
     let records = load_records(library_root)?;
     let sets = distinct_entities(&records);
     let store = EnrichStore::new(library_root);
 
     let mut report = EnrichReport::default();
+    let progress_file =
+        ProgressWriter::new(enrich_progress_path(library_root), PROGRESS_INTERVAL);
+    let write_progress =
+        |report: &EnrichReport, kind: &str, done: usize, total: usize, force: bool| {
+            progress_file.write(
+                &EnrichProgressSnapshot {
+                    pid: std::process::id(),
+                    kind: kind.to_string(),
+                    done,
+                    total,
+                    artists_fetched: report.artists_fetched,
+                    artists_failed: report.artists_failed,
+                    artists_skipped: report.artists_skipped,
+                    tracks_fetched: report.tracks_fetched,
+                    tracks_failed: report.tracks_failed,
+                    tracks_skipped: report.tracks_skipped,
+                    albums_fetched: report.albums_fetched,
+                    albums_failed: report.albums_failed,
+                    albums_skipped: report.albums_skipped,
+                    started_unix,
+                    updated_unix: unix_now(),
+                },
+                force,
+            );
+        };
 
     // ── Artists ──
     let mut artists = store.load_artists()?;
@@ -650,6 +740,7 @@ pub fn enrich_library_with(
         .collect();
     report.artists_skipped = sets.artists.len() - todo.len();
     let total = todo.len();
+    write_progress(&report, kind_name(EnrichKind::Artist), 0, total, true);
     let mut since_save = 0usize;
     for (i, (id, name)) in todo.iter().enumerate() {
         let rec = fetch_artist(client, name);
@@ -660,6 +751,7 @@ pub fn enrich_library_with(
         report.artists_fetched += 1;
         since_save += 1;
         opts.report(EnrichKind::Artist, i + 1, total);
+        write_progress(&report, kind_name(EnrichKind::Artist), i + 1, total, false);
         if since_save >= SAVE_EVERY {
             store.save_artists(&artists)?;
             since_save = 0;
@@ -676,6 +768,7 @@ pub fn enrich_library_with(
         .collect();
     report.tracks_skipped = sets.tracks.len() - todo.len();
     let total = todo.len();
+    write_progress(&report, kind_name(EnrichKind::Track), 0, total, true);
     since_save = 0;
     for (i, (hash, (artist, title))) in todo.iter().enumerate() {
         let rec = fetch_track(client, artist, title);
@@ -686,6 +779,7 @@ pub fn enrich_library_with(
         report.tracks_fetched += 1;
         since_save += 1;
         opts.report(EnrichKind::Track, i + 1, total);
+        write_progress(&report, kind_name(EnrichKind::Track), i + 1, total, false);
         if since_save >= SAVE_EVERY {
             store.save_tracks(&tracks)?;
             since_save = 0;
@@ -702,6 +796,7 @@ pub fn enrich_library_with(
         .collect();
     report.albums_skipped = sets.albums.len() - todo.len();
     let total = todo.len();
+    write_progress(&report, kind_name(EnrichKind::Album), 0, total, true);
     since_save = 0;
     for (i, (id, (artist, album))) in todo.iter().enumerate() {
         let rec = fetch_album(client, artist, album);
@@ -712,6 +807,7 @@ pub fn enrich_library_with(
         report.albums_fetched += 1;
         since_save += 1;
         opts.report(EnrichKind::Album, i + 1, total);
+        write_progress(&report, kind_name(EnrichKind::Album), i + 1, total, false);
         if since_save >= SAVE_EVERY {
             store.save_albums(&albums)?;
             since_save = 0;
@@ -719,6 +815,7 @@ pub fn enrich_library_with(
     }
     store.save_albums(&albums)?;
 
+    write_progress(&report, "done", 0, 0, true);
     report.elapsed = start.elapsed();
     Ok(report)
 }

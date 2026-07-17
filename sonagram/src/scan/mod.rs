@@ -37,16 +37,26 @@ pub mod hash;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use sonara::analyze::{AnalysisConfig, AnalysisMode};
 use walkdir::WalkDir;
 
+use crate::progress::{load_progress, unix_now, ProgressWriter};
 use crate::record::{AnalysisRecord, SourceInfo};
 use crate::Result;
 
 use cache::{Cache, IndexEntry};
 pub use hash::{audio_content_hash, hash_kind};
+
+/// How often the scan's on-disk progress snapshot is refreshed (unforced
+/// writes; stage transitions always land).
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
+/// How often the index is flushed mid-scan, making an interrupted cold scan
+/// resumable at ~this granularity via the stat fast-path.
+const INDEX_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
 
 /// The default sonara feature set the scanner requests — every feature the music
 /// graph schema consumes.
@@ -142,6 +152,66 @@ pub enum ScanStage {
     Done,
 }
 
+/// The stable string form of a [`ScanStage`], used in progress files and the
+/// Python callback contract: `"walk"`, `"hash"`, `"analyze"`, `"done"`.
+pub fn stage_name(stage: ScanStage) -> &'static str {
+    match stage {
+        ScanStage::Walk => "walk",
+        ScanStage::Hash => "hash",
+        ScanStage::Analyze => "analyze",
+        ScanStage::Done => "done",
+    }
+}
+
+/// The on-disk scan progress snapshot (P20): `<lib>/.sonagram/scan_progress.json`.
+///
+/// Written atomically (throttled to [`PROGRESS_INTERVAL`]) by
+/// [`scan_library_with`] itself, so every entry point — CLI, Python, tests —
+/// produces the same observable progress. Read it with [`load_scan_progress`]
+/// (or `sonagram progress` / `sonagram status`). `updated_unix` going stale
+/// while `stage != "done"` means the scanning process died or was killed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScanProgressSnapshot {
+    /// PID of the scanning process (staleness diagnosis, not liveness proof).
+    pub pid: u32,
+    /// Current stage: `"walk"`, `"hash"` (deciding/hashing, analysis workers
+    /// already running), `"analyze"` (hashing finished, draining the queue),
+    /// `"done"`.
+    pub stage: String,
+    /// Files that have passed the decision loop (stat/hash/queue) so far —
+    /// the primary "x of y files processed" scan counter.
+    pub done: usize,
+    /// Total files discovered by the walk.
+    pub total: usize,
+    /// Analyses completed so far (success or failure).
+    pub analyze_done: usize,
+    /// Analyses queued so far. Grows while `stage == "hash"` (discovery is
+    /// still running); final once the stage moves to `"analyze"`.
+    pub analyze_total: usize,
+    /// Files analyzed (new records saved) so far this scan.
+    pub analyzed: usize,
+    /// Files served from the stat fast-path so far.
+    pub reused_stat: usize,
+    /// Files served from the hash-reuse path so far.
+    pub reused_hash: usize,
+    /// Per-file failures so far.
+    pub failed: usize,
+    /// When this scan started (unix seconds).
+    pub started_unix: i64,
+    /// When this snapshot was written (unix seconds).
+    pub updated_unix: i64,
+}
+
+/// Path of a library's scan progress file.
+pub fn scan_progress_path(library_root: &Path) -> PathBuf {
+    library_root.join(".sonagram").join("scan_progress.json")
+}
+
+/// Load a library's scan progress snapshot, `None` when absent or unreadable.
+pub fn load_scan_progress(library_root: &Path) -> Option<ScanProgressSnapshot> {
+    load_progress(&scan_progress_path(library_root))
+}
+
 /// Options controlling a scan.
 pub struct ScanOptions {
     /// sonara features to request for new files. Defaults to [`default_features`].
@@ -197,23 +267,20 @@ pub struct AnalyzeRequest {
 /// The analysis backend, factored out so tests can substitute a call-counting
 /// mock for the real (slow, audio-requiring) sonara path.
 ///
-/// Returns one result per request, in the same order. A per-file `Err` is
-/// isolated to that file — it must not abort the batch. `on_done(done, total)`
-/// is invoked once per completed file (completion order, possibly on worker
-/// threads — keep it cheap and non-blocking), so the scanner can report real
-/// per-file [`ScanStage::Analyze`] progress.
+/// **Streaming contract (P20):** the scanner owns all fan-out — it runs a
+/// worker pool that pulls files off the hash loop's queue *while hashing is
+/// still discovering more* and calls `analyze_one` from those workers
+/// concurrently. Implementations therefore only analyze a single file, must be
+/// `Send + Sync`, and must stamp the returned record with the request's
+/// `source`. A per-file `Err` is isolated to that file.
 pub trait Analyzer: Send + Sync {
-    /// Analyze every request, returning records stamped with each request's
-    /// `source`, calling `on_done(done, total)` after each file completes.
-    fn analyze(
-        &self,
-        requests: &[AnalyzeRequest],
-        on_done: &(dyn Fn(usize, usize) + Sync),
-    ) -> Vec<Result<AnalysisRecord>>;
+    /// Analyze one file, returning the record stamped with `request.source`.
+    fn analyze_one(&self, request: &AnalyzeRequest) -> Result<AnalysisRecord>;
 }
 
-/// The production analyzer: one batched
-/// [`sonara::analyze::analyze_batch_with`] call.
+/// The production analyzer: one [`sonara::analyze::analyze_file`] call per
+/// request (the scanner's worker pool provides the cross-file parallelism that
+/// `analyze_batch_with` used to supply internally).
 pub struct SonaraAnalyzer {
     config: AnalysisConfig,
 }
@@ -228,25 +295,12 @@ impl SonaraAnalyzer {
 }
 
 impl Analyzer for SonaraAnalyzer {
-    fn analyze(
-        &self,
-        requests: &[AnalyzeRequest],
-        on_done: &(dyn Fn(usize, usize) + Sync),
-    ) -> Vec<Result<AnalysisRecord>> {
-        let paths: Vec<&Path> = requests.iter().map(|r| r.abs_path.as_path()).collect();
-        // sr = 0 → native sample rate. analyze_batch_with isolates per-file
-        // failures and drives `on_done` per completed file for real progress.
-        let results = sonara::analyze::analyze_batch_with(&paths, 0, &self.config, |done, total| {
-            on_done(done, total)
-        });
-        results
-            .into_iter()
-            .zip(requests)
-            .map(|(res, req)| {
-                res.map(|ta| AnalysisRecord::from_analysis(ta, req.source.clone()))
-                    .map_err(Into::into)
-            })
-            .collect()
+    fn analyze_one(&self, request: &AnalyzeRequest) -> Result<AnalysisRecord> {
+        // sr = 0 → native sample rate (matches every record in existing caches;
+        // a change here would fork analysis semantics mid-library).
+        sonara::analyze::analyze_file(&request.abs_path, 0, &self.config)
+            .map(|ta| AnalysisRecord::from_analysis(ta, request.source.clone()))
+            .map_err(Into::into)
     }
 }
 
@@ -464,153 +518,304 @@ pub fn probe_freshness(library_root: &Path) -> Result<FreshnessReport> {
 }
 
 /// Scan `library_root` using an injected [`Analyzer`] (the seam tests drive).
+///
+/// **Streaming pipeline (P20).** The decision loop (stat fast-path / hash /
+/// queue) runs on the calling thread while a pool of analysis workers drains
+/// the queue concurrently — analysis starts the moment the first unseen file
+/// is hashed, so a cold scan pays no separate hash-pass wall-clock and a
+/// freshly-hashed file is often still in the page cache when analyzed.
+///
+/// **Persistence discipline:** every new record is saved the moment its
+/// analysis completes, and the index is flushed (merged over the previous
+/// index) every [`INDEX_FLUSH_INTERVAL`] — so a killed cold scan resumes from
+/// roughly where it stopped instead of losing the whole batch. Live progress is
+/// mirrored to `scan_progress.json` throughout (see [`ScanProgressSnapshot`]).
 pub fn scan_library_with(
     library_root: &Path,
     opts: &ScanOptions,
     analyzer: &dyn Analyzer,
 ) -> Result<ScanReport> {
     let start = Instant::now();
+    let started_unix = unix_now();
     let cache = Cache::new(library_root);
     let old_index = cache.load_index()?;
+    let progress_file = ProgressWriter::new(scan_progress_path(library_root), PROGRESS_INTERVAL);
 
     // -- Walk: discover *.mp3, deterministically ordered --
     let files = discover_mp3s(library_root, &cache);
-    opts.report(ScanStage::Walk, files.len(), files.len());
-
-    // The fresh index we will persist: only files that currently exist end up in
-    // it, so deleted files are pruned automatically.
-    let mut new_index = cache::Index::new();
-    let mut reused_stat_match = 0usize;
-    let mut reused_hash_match = 0usize;
-    let mut failed: Vec<(PathBuf, String)> = Vec::new();
-
-    // New work gathered for one batched analyze call. `pending_meta` runs
-    // parallel to `requests` and carries the index bookkeeping for each.
-    let mut requests: Vec<AnalyzeRequest> = Vec::new();
-    let mut pending_meta: Vec<(String, IndexEntry)> = Vec::new();
-
-    // Per-scan memo of record freshness by content hash (see
-    // [`cached_record_is_fresh`]) — avoids reloading a record shared by several
-    // index entries when checking the stat fast-path.
-    let mut fresh_memo: HashMap<String, bool> = HashMap::new();
-
-    let mut hashed = 0usize;
-    for abs_path in &files {
-        let rel = match relative_path(library_root, abs_path) {
-            Some(r) => r,
-            None => {
-                failed.push((abs_path.clone(), "path not under library root".to_string()));
-                continue;
-            }
-        };
-
-        let meta = match std::fs::metadata(abs_path) {
-            Ok(m) => m,
-            Err(e) => {
-                failed.push((abs_path.clone(), format!("stat: {e}")));
-                continue;
-            }
-        };
-        let size = meta.len();
-        let mtime = mtime_unix(&meta);
-
-        // Tier 1: stat fast-path. Requires the record to still exist AND be
-        // fresh: a deleted record self-heals instead of leaving a hole in the
-        // graph, and a stale record (older sonara schema/embedding) is
-        // re-analyzed instead of silently trusted. The freshness check loads the
-        // record's two version ints once per hash (memoized).
-        if let Some(old) = old_index.get(&rel) {
-            if old.size == size
-                && old.mtime_unix == mtime
-                && cached_record_is_fresh(&cache, &old.content_hash, &mut fresh_memo)?
-            {
-                new_index.insert(rel, old.clone());
-                reused_stat_match += 1;
-                continue;
-            }
-        }
-
-        // Tier 2/3: hash the file.
-        hashed += 1;
-        opts.report(ScanStage::Hash, hashed, files.len());
-        let content_hash = match audio_content_hash(abs_path) {
-            Ok(h) => h,
-            Err(e) => {
-                failed.push((abs_path.clone(), format!("hash: {e}")));
-                continue;
-            }
-        };
-        let source = SourceInfo {
-            content_hash: content_hash.clone(),
-            hash_kind: hash_kind(abs_path).to_string(),
-            path: rel.clone(),
-            file_size: size,
-            format: file_format(abs_path),
-        };
-        let entry = IndexEntry {
-            size,
-            mtime_unix: mtime,
-            content_hash: content_hash.clone(),
-        };
-
-        // Tier 2: known, FRESH hash → reuse the analysis (retag/move path). A
-        // record that vanished between the stat and the load (→ None) or one that
-        // is stale falls through to re-analyze, overwriting the stale record with
-        // current-schema output.
-        if let Some(mut rec) = cache.load_record(&content_hash)? {
-            if record_is_fresh(&rec) {
-                // Refresh mutable identity (path/size) and re-save if changed.
-                if rec.source != source {
-                    rec.source = source;
-                    cache.save_record(&rec)?;
-                }
-                new_index.insert(rel, entry);
-                reused_hash_match += 1;
-                continue;
-            }
-        }
-
-        // Tier 3: unseen hash → queue for analysis.
-        requests.push(AnalyzeRequest {
-            abs_path: abs_path.clone(),
-            source,
-        });
-        pending_meta.push((rel, entry));
-    }
-
-    // -- Analyze all new files in one batch --
-    let mut analyzed = 0usize;
-    if !requests.is_empty() {
-        let total = requests.len();
-        opts.report(ScanStage::Analyze, 0, total);
-        // Real per-file progress: sonara's analyze_batch_with drives this once
-        // per completed file (completion order, on worker threads).
-        let results = analyzer.analyze(&requests, &|done, n| {
-            opts.report(ScanStage::Analyze, done, n)
-        });
-        for ((res, req), (rel, entry)) in results.into_iter().zip(&requests).zip(pending_meta) {
-            match res {
-                Ok(record) => {
-                    cache.save_record(&record)?;
-                    new_index.insert(rel, entry);
-                    analyzed += 1;
-                }
-                Err(e) => failed.push((req.abs_path.clone(), e.to_string())),
-            }
-        }
-        opts.report(ScanStage::Analyze, total, total);
-    }
-
-    cache.save_index(&new_index)?;
     let total_files = files.len();
+    opts.report(ScanStage::Walk, total_files, total_files);
+
+    // All mutable scan state, shared between the decision loop and the
+    // analysis workers. Records are saved OUTSIDE this lock (they are distinct
+    // files, written atomically, and the write is the expensive part); the
+    // lock guards counters, the growing index, and flush/progress decisions.
+    struct ScanState {
+        /// The fresh index to persist: only files that currently exist end up
+        /// in it, so deleted files are pruned automatically.
+        new_index: cache::Index,
+        failed: Vec<(PathBuf, String)>,
+        reused_stat: usize,
+        reused_hash: usize,
+        /// Files through the decision loop so far.
+        decided: usize,
+        /// True once the decision loop has seen every file.
+        deciding_complete: bool,
+        analyze_done: usize,
+        analyze_total: usize,
+        analyzed: usize,
+        last_flush: Instant,
+    }
+    let state = Mutex::new(ScanState {
+        new_index: cache::Index::new(),
+        failed: Vec::new(),
+        reused_stat: 0,
+        reused_hash: 0,
+        decided: 0,
+        deciding_complete: false,
+        analyze_done: 0,
+        analyze_total: 0,
+        analyzed: 0,
+        last_flush: Instant::now(),
+    });
+    let poisoned = || crate::SonagramError::Cache("scan state poisoned".to_string());
+    let snapshot = |s: &ScanState, stage: ScanStage| ScanProgressSnapshot {
+        pid: std::process::id(),
+        stage: stage_name(stage).to_string(),
+        done: s.decided,
+        total: total_files,
+        analyze_done: s.analyze_done,
+        analyze_total: s.analyze_total,
+        analyzed: s.analyzed,
+        reused_stat: s.reused_stat,
+        reused_hash: s.reused_hash,
+        failed: s.failed.len(),
+        started_unix,
+        updated_unix: unix_now(),
+    };
+    // The live stage under the streaming pipeline: `"hash"` while the decision
+    // loop is still discovering work, `"analyze"` while the queue drains.
+    let live_stage = |s: &ScanState| {
+        if s.deciding_complete {
+            ScanStage::Analyze
+        } else {
+            ScanStage::Hash
+        }
+    };
+    // Merged mid-scan flush: decisions made so far survive a kill without
+    // dropping not-yet-revisited old entries. Best-effort by design (the final
+    // save below is the authoritative, pruning write).
+    let flush_index_locked = |s: &mut ScanState| {
+        if s.last_flush.elapsed() >= INDEX_FLUSH_INTERVAL {
+            let mut merged = old_index.clone();
+            merged.extend(s.new_index.iter().map(|(k, v)| (k.clone(), v.clone())));
+            s.last_flush = Instant::now();
+            let _ = cache.save_index(&merged);
+        }
+    };
+    {
+        let s = state.lock().map_err(|_| poisoned())?;
+        progress_file.write(&snapshot(&s, ScanStage::Walk), true);
+    }
+
+    // -- Streaming pipeline: the decision loop feeds an analysis worker pool --
+    let (tx, rx) = std::sync::mpsc::channel::<(AnalyzeRequest, String, IndexEntry)>();
+    let rx = Mutex::new(rx);
+    let n_workers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+
+    std::thread::scope(|scope| -> Result<()> {
+        for _ in 0..n_workers {
+            scope.spawn(|| loop {
+                // Take one queued file; a closed-and-drained queue ends the
+                // worker. Holding the rx lock across the blocking recv is the
+                // standard shared-receiver pattern: dequeue is serialized,
+                // analysis is not.
+                let msg = match rx.lock() {
+                    Ok(g) => g.recv(),
+                    Err(_) => break,
+                };
+                let Ok((req, rel, entry)) = msg else { break };
+                // Analyze + persist first (no lock held): a record on disk is
+                // the unit of resumability. A failed save demotes the result
+                // to a per-file failure.
+                let outcome = analyzer
+                    .analyze_one(&req)
+                    .and_then(|rec| cache.save_record(&rec));
+                let Ok(mut s) = state.lock() else { break };
+                match outcome {
+                    Ok(()) => {
+                        s.new_index.insert(rel, entry);
+                        s.analyzed += 1;
+                    }
+                    Err(e) => s.failed.push((req.abs_path, e.to_string())),
+                }
+                s.analyze_done += 1;
+                opts.report(ScanStage::Analyze, s.analyze_done, s.analyze_total);
+                let stage = live_stage(&s);
+                progress_file.write(&snapshot(&s, stage), false);
+                flush_index_locked(&mut s);
+            });
+        }
+
+        // The decision loop (this thread): stat fast-path / hash reuse /
+        // queue-for-analysis. Every arm ends in one short `tick` lock that
+        // applies the outcome and advances the shared counters.
+        let tick = |mutate: &dyn Fn(&mut ScanState)| -> Result<()> {
+            let mut s = state.lock().map_err(|_| poisoned())?;
+            mutate(&mut s);
+            s.decided += 1;
+            let stage = live_stage(&s);
+            progress_file.write(&snapshot(&s, stage), false);
+            flush_index_locked(&mut s);
+            Ok(())
+        };
+
+        // Per-scan memo of record freshness by content hash (see
+        // [`cached_record_is_fresh`]) — avoids reloading a record shared by
+        // several index entries when checking the stat fast-path.
+        let mut fresh_memo: HashMap<String, bool> = HashMap::new();
+        let mut hashed = 0usize;
+        for abs_path in &files {
+            let rel = match relative_path(library_root, abs_path) {
+                Some(r) => r,
+                None => {
+                    tick(&|s| {
+                        s.failed
+                            .push((abs_path.clone(), "path not under library root".to_string()));
+                    })?;
+                    continue;
+                }
+            };
+
+            let meta = match std::fs::metadata(abs_path) {
+                Ok(m) => m,
+                Err(e) => {
+                    let msg = format!("stat: {e}");
+                    tick(&|s| s.failed.push((abs_path.clone(), msg.clone())))?;
+                    continue;
+                }
+            };
+            let size = meta.len();
+            let mtime = mtime_unix(&meta);
+
+            // Tier 1: stat fast-path. Requires the record to still exist AND be
+            // fresh: a deleted record self-heals instead of leaving a hole in the
+            // graph, and a stale record (older sonara schema/embedding) is
+            // re-analyzed instead of silently trusted. The freshness check loads
+            // the record's two version ints once per hash (memoized).
+            if let Some(old) = old_index.get(&rel) {
+                if old.size == size
+                    && old.mtime_unix == mtime
+                    && cached_record_is_fresh(&cache, &old.content_hash, &mut fresh_memo)?
+                {
+                    let entry = old.clone();
+                    tick(&|s| {
+                        s.new_index.insert(rel.clone(), entry.clone());
+                        s.reused_stat += 1;
+                    })?;
+                    continue;
+                }
+            }
+
+            // Tier 2/3: hash the file.
+            hashed += 1;
+            opts.report(ScanStage::Hash, hashed, total_files);
+            let content_hash = match audio_content_hash(abs_path) {
+                Ok(h) => h,
+                Err(e) => {
+                    let msg = format!("hash: {e}");
+                    tick(&|s| s.failed.push((abs_path.clone(), msg.clone())))?;
+                    continue;
+                }
+            };
+            let source = SourceInfo {
+                content_hash: content_hash.clone(),
+                hash_kind: hash_kind(abs_path).to_string(),
+                path: rel.clone(),
+                file_size: size,
+                format: file_format(abs_path),
+            };
+            let entry = IndexEntry {
+                size,
+                mtime_unix: mtime,
+                content_hash: content_hash.clone(),
+            };
+
+            // Tier 2: known, FRESH hash → reuse the analysis (retag/move path).
+            // A record that vanished between the stat and the load (→ None) or
+            // one that is stale falls through to re-analyze, overwriting the
+            // stale record with current-schema output.
+            if let Some(mut rec) = cache.load_record(&content_hash)? {
+                if record_is_fresh(&rec) {
+                    // Refresh mutable identity (path/size) and re-save if changed.
+                    if rec.source != source {
+                        rec.source = source;
+                        cache.save_record(&rec)?;
+                    }
+                    tick(&|s| {
+                        s.new_index.insert(rel.clone(), entry.clone());
+                        s.reused_hash += 1;
+                    })?;
+                    continue;
+                }
+            }
+
+            // Tier 3: unseen hash → queue for the analysis workers (the total
+            // grows before the send so a worker's report never overtakes it).
+            tick(&|s| s.analyze_total += 1)?;
+            let request = AnalyzeRequest {
+                abs_path: abs_path.clone(),
+                source,
+            };
+            if tx.send((request, rel, entry)).is_err() {
+                return Err(crate::SonagramError::Cache(
+                    "analysis workers exited early".to_string(),
+                ));
+            }
+        }
+
+        // Close the queue: workers drain what remains, then exit (the scope
+        // joins them). From here the live stage reads "analyze".
+        drop(tx);
+        {
+            let mut s = state.lock().map_err(|_| poisoned())?;
+            s.deciding_complete = true;
+            let stage = live_stage(&s);
+            progress_file.write(&snapshot(&s, stage), true);
+        }
+        Ok(())
+    })?;
+
+    // Workers are joined; the authoritative index prunes deleted files.
+    let s = state.into_inner().map_err(|_| poisoned())?;
+    cache.save_index(&s.new_index)?;
     opts.report(ScanStage::Done, total_files, total_files);
+    progress_file.write(
+        &ScanProgressSnapshot {
+            pid: std::process::id(),
+            stage: stage_name(ScanStage::Done).to_string(),
+            done: s.decided,
+            total: total_files,
+            analyze_done: s.analyze_done,
+            analyze_total: s.analyze_total,
+            analyzed: s.analyzed,
+            reused_stat: s.reused_stat,
+            reused_hash: s.reused_hash,
+            failed: s.failed.len(),
+            started_unix,
+            updated_unix: unix_now(),
+        },
+        true,
+    );
 
     Ok(ScanReport {
         total_files,
-        analyzed,
-        reused_hash_match,
-        reused_stat_match,
-        failed,
+        analyzed: s.analyzed,
+        reused_hash_match: s.reused_hash,
+        reused_stat_match: s.reused_stat,
+        failed: s.failed,
         elapsed: start.elapsed(),
     })
 }

@@ -74,16 +74,21 @@ sharpen playlist curation.
    that never leaves the machine except in requests to Last.fm. For any other kind
    of credential, do **not** use this flow.
 5. Then run `sonagram enrich` (all sources; ~30–60 min first run, resumable, safe
-   to background — tell the user the ETA).
+   to background — tell the user the ETA). Note: a plain `sonagram scan` already
+   runs enrichment in parallel when a key is configured, so a separate `enrich`
+   is only needed to backfill an already-scanned library.
 
 ## Workflow
 1. **Freshness**: `sonagram status --format json` (probes every configured
    source; exit = worst-of). Exit 0 → skip to step 3. Exit 1/2 → warn the user a
-   cold scan is ~1h / incremental is minutes, then `sonagram scan` (all sources,
-   shows progress).
-2. **(Re)build**: `sonagram build` (multi-source → the configured graph). If a
-   Last.fm key is configured and there's no enrichment cache yet, offer
-   `sonagram enrich` first (see above).
+   cold scan is hours-scale on a big library / incremental is minutes, then
+   `sonagram scan` (all sources; enriches from Last.fm in parallel when a key is
+   configured — `--no-enrich` opts out). Scans stream results to disk: a killed
+   scan resumes where it stopped, and `sonagram progress [--format json]` shows
+   live per-source %, rate, and ETA from any shell while it runs.
+2. **(Re)build**: `sonagram build` (multi-source → the configured graph). If the
+   scan ran without a Last.fm key and one is configured later, run
+   `sonagram enrich` before building (see above).
 3. **Understand the request** → pick the archetype(s) from AGENT-GUIDE
    (filter / discover / similarity / sequence / mood / vibe-over-time /
    versions). Calibrate thresholds against library averages before filtering.

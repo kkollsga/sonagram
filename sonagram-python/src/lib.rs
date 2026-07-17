@@ -35,6 +35,7 @@ use pyo3::types::{PyDict, PyList};
 use kglite::api::DirGraph;
 use sonagram::enrich::{self, EnrichOptions, EnrichReport, EnrichmentData};
 use sonagram::graph::{self, LibraryInfo, SourceInput};
+use sonagram::pipeline;
 use sonagram::playlist;
 use sonagram::scan as core_scan;
 use sonagram::scan::{ScanOptions, ScanProgress, ScanReport, ScanStage};
@@ -286,6 +287,57 @@ fn scan(py: Python<'_>, library_root: PathBuf, progress: Option<Py<PyAny>>) -> P
     Ok(report_to_dict(py, &report)?.into_any().unbind())
 }
 
+/// Scan a library while enriching it from Last.fm **in parallel** (P20).
+///
+/// The scan (CPU-heavy) runs on this thread's worker pool; an enrich loop
+/// (network-heavy) concurrently re-passes the growing analysis cache, then a
+/// final pass catches the tail. Without a resolvable Last.fm key the run
+/// degrades to a plain scan and `enrich` is `None`. `progress` receives the
+/// scan callbacks only — enrichment progress is observable via the on-disk
+/// `enrich_progress.json` (`sonagram progress`).
+///
+/// Returns `{"scan": <scan report dict>, "enrich": <enrich report dict>|None}`.
+#[pyfunction]
+#[pyo3(signature = (library_root, *, api_key=None, progress=None))]
+fn scan_and_enrich(
+    py: Python<'_>,
+    library_root: PathBuf,
+    api_key: Option<String>,
+    progress: Option<Py<PyAny>>,
+) -> PyResult<Py<PyAny>> {
+    if let Some(cb) = &progress {
+        if !cb.bind(py).is_callable() {
+            return Err(PyValueError::new_err(
+                "progress must be callable: progress(stage: str, done: int, total: int) -> None",
+            ));
+        }
+    }
+    let scan_opts = ScanOptions {
+        features: core_scan::default_features(),
+        progress: progress.map(|cb| {
+            Box::new(move |p: ScanProgress| {
+                Python::attach(|py| {
+                    let _ = cb.call1(py, (stage_name(p.stage), p.done, p.total));
+                });
+            }) as Box<dyn Fn(ScanProgress) + Send + Sync>
+        }),
+    };
+    let enrich_opts = EnrichOptions {
+        api_key,
+        progress: None,
+    };
+    let combined = py
+        .detach(|| pipeline::scan_and_enrich_library(&library_root, &scan_opts, &enrich_opts))
+        .map_err(to_pyerr)?;
+    let d = PyDict::new(py);
+    d.set_item("scan", report_to_dict(py, &combined.scan)?)?;
+    match &combined.enrich {
+        Some(e) => d.set_item("enrich", enrich_report_to_dict(py, e)?)?,
+        None => d.set_item("enrich", py.None())?,
+    }
+    Ok(d.into_any().unbind())
+}
+
 /// Fetch Last.fm enrichment for a library and cache it under
 /// `<library_root>/.sonagram/lastfm/`.
 ///
@@ -426,6 +478,7 @@ fn _sonagram(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // kept in lockstep with the core crate and pyproject.toml.
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_function(wrap_pyfunction!(scan, m)?)?;
+    m.add_function(wrap_pyfunction!(scan_and_enrich, m)?)?;
     m.add_function(wrap_pyfunction!(enrich_, m)?)?;
     m.add_function(wrap_pyfunction!(build, m)?)?;
     m.add_function(wrap_pyfunction!(scan_and_build, m)?)?;
