@@ -1206,7 +1206,7 @@ fn playlist_name(out: Option<&Path>, dest_dir: &Path) -> String {
 /// The on-disk snapshot (`sonagram progress`) is the machine-readable view.
 fn stage_line(p: ScanProgress) {
     let step = (p.total / 100).clamp(1, 500);
-    if p.done == p.total || p.done % step == 0 {
+    if p.done == p.total || p.done.is_multiple_of(step) {
         eprintln!("[scan] {:?} {}/{}", p.stage, p.done, p.total);
     }
 }
@@ -1214,7 +1214,7 @@ fn stage_line(p: ScanProgress) {
 /// Print an enrich progress line to stderr, throttled like [`stage_line`].
 fn enrich_line(p: EnrichProgress) {
     let step = (p.total / 100).clamp(1, 500);
-    if p.done == p.total || p.done == 1 || p.done % step == 0 {
+    if p.done == p.total || p.done == 1 || p.done.is_multiple_of(step) {
         eprintln!("[enrich] {:?} {}/{}", p.kind, p.done, p.total);
     }
 }

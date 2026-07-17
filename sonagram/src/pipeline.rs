@@ -126,10 +126,12 @@ mod tests {
     #[test]
     fn accumulate_sums_fetches_and_keeps_latest_skips() {
         let mut acc = EnrichReport::default();
-        let mut pass = EnrichReport::default();
-        pass.artists_fetched = 3;
-        pass.artists_skipped = 1;
-        pass.tracks_failed = 2;
+        let mut pass = EnrichReport {
+            artists_fetched: 3,
+            artists_skipped: 1,
+            tracks_failed: 2,
+            ..EnrichReport::default()
+        };
         accumulate(&mut acc, &pass);
         pass.artists_fetched = 2;
         pass.artists_skipped = 4;
