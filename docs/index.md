@@ -1,13 +1,24 @@
 # sonagram
 
-Scan a music library, analyze every track with
-[sonara](https://github.com/kkollsga/sonara), and structure the results into a
-queryable [kglite](https://github.com/kkollsga/kglite) knowledge graph — so AI
-agents can reason over a music collection: filter it, group it, find what's
-*similar but calmer*, detect styles nobody tagged, and materialize the answer as
-a playable `.m3u8` playlist.
+**Ask your AI assistant for a playlist from your own music collection — and get
+a file any music app can play.**
 
-## What sonagram is
+sonagram listens to every track you own (tempo, energy, mood, key — how songs
+*feel*), organizes what it learns into a fast, searchable map of your library,
+and hands that map to an AI agent. From there, playlists are a sentence: *"make
+me a deep-focus work playlist"*, *"a party mix that builds"*, *"songs like this
+one, but calmer"*. Your files are never modified or uploaded — everything runs
+on your machine.
+
+```{tip}
+**Just want playlists?** You don't need most of this documentation. Install
+(`pip install sonagram`), register your music
+(`sonagram sources add ~/Music`), give your agent the bundled skill
+(`sonagram skill install`) — and ask. The [Quickstart](quickstart.md) walks
+through it; everything below the fold is for people building on top.
+```
+
+## What sonagram is (for the technically curious)
 
 sonagram is a **graph builder over two upstreams**. It owns the mapping and the
 schema between them, and nothing else:
@@ -73,7 +84,7 @@ python-api
 
 ```{toctree}
 :maxdepth: 1
-:caption: The graph
+:caption: Under the hood (for developers)
 
 graph-schema
 agent-guide

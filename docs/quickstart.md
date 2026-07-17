@@ -1,10 +1,16 @@
 # Quickstart
 
-sonagram is **config-driven by convention**: every command operates on a
-`<library_root>` directory and keeps all of its state under
-`<library_root>/.sonagram/`. There is no separate config file to edit — point a
-command at your music folder and it caches, builds, and reads from that one
-place.
+The short version: **install, register your music once, hand your agent the
+skill, and ask for playlists.** The first request analyzes your collection
+(roughly an hour per 10,000 songs, once); everything after that takes seconds,
+because sonagram only re-reads what changed.
+
+sonagram is **config-driven**: register your music folders once
+(`sonagram sources add`) and every command knows where to look — the registry,
+the central graph, and your saved playlists all live under `~/.sonagram/`
+(`sonagram config` shows the resolved paths). Per-library analysis caches live
+next to the music itself, under `<library_root>/.sonagram/`. Explicit-path
+command forms also exist for scripting a single folder without any registration.
 
 ## Install
 
