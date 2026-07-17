@@ -63,3 +63,4 @@ land.)
 | 2026-07-17 | `7ca12b8ac3bd`    | P6: +SIMILAR_TO/+CAMELOT_ADJACENT/+Style (intended) |
 | 2026-07-17 | `9fa521068300`    | P10b: mutual-kNN style communities + unique names (intended) |
 | 2026-07-17 | `fa5531c899d6`    | P10c: adaptive style threshold (intended) |
+| 2026-07-17 | `acf45a46d51a`    | P11: sonara 0.2.3 sync — chroma fix + schema v2 (intended) |

@@ -33,7 +33,7 @@ use kglite::api::mutation::{add_edges_from_specs, add_nodes, EdgeSpec};
 use kglite::api::storage::EmbeddingStore;
 use kglite::api::{DirGraph, Value};
 use kglite::datatypes::values::{ColumnData, ColumnType, DataFrame};
-use sonara::similarity::{EMBEDDING_DIM, WEIGHTS};
+use sonara::similarity::{EMBEDDING_DIM, SIMILARITY_VERSION, WEIGHTS};
 
 use crate::record::AnalysisRecord;
 use crate::{Result, SonagramError};
@@ -48,9 +48,15 @@ use normalize::{
 /// changes shape.
 pub const GRAPH_SCHEMA_VERSION: u32 = 1;
 
-/// The embedding-store model identity. Bumps in lockstep with sonara's
-/// `SIMILARITY_VERSION` so a stored vector is never silently reinterpreted.
-pub const EMBEDDING_MODEL_ID: &str = "sonara-similarity-v1";
+/// The embedding-store model identity, **derived** from sonara's
+/// [`SIMILARITY_VERSION`] (format `"sonara-similarity-v{N}"`) rather than
+/// hardcoded. It stamps every similarity store's `model_id`, so a stored vector
+/// is never silently reinterpreted under a different similarity version: bump
+/// `SIMILARITY_VERSION` upstream and this id — and thus the golden digest — moves
+/// with it automatically. This is the whole point of the upstream contract.
+pub fn embedding_model_id() -> String {
+    format!("sonara-similarity-v{SIMILARITY_VERSION}")
+}
 
 /// The `(node_type, property)` key under which the similarity embedding store is
 /// registered, and its distance metric.
@@ -160,7 +166,7 @@ pub fn build_graph(records: &[AnalysisRecord], library: &LibraryInfo) -> Result<
 
     // ── Stage 5: pre-weighted similarity embedding store ────────────────────
     let mut store = EmbeddingStore::with_metric(EMBEDDING_DIM, EMBEDDING_METRIC);
-    store.model_id = Some(EMBEDDING_MODEL_ID.to_string());
+    store.model_id = Some(embedding_model_id());
     for r in &sorted {
         if let Some(emb) = &r.analysis.embedding {
             if emb.len() != EMBEDDING_DIM {
@@ -629,6 +635,18 @@ fn fo_col(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embedding_model_id_derives_from_similarity_version() {
+        // The id must be computed from sonara's live SIMILARITY_VERSION, not a
+        // hardcoded string — so an upstream bump moves it (and the golden) here.
+        assert_eq!(
+            embedding_model_id(),
+            format!("sonara-similarity-v{SIMILARITY_VERSION}")
+        );
+        // Guards the exact wire format the golden pins.
+        assert_eq!(embedding_model_id(), "sonara-similarity-v2");
+    }
 
     #[test]
     fn preweight_matches_sonara_distance_ranking() {

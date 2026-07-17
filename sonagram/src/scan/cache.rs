@@ -223,6 +223,7 @@ mod tests {
                 mood_sad: None,
                 instrumentalness: None,
                 genre: None,
+                genre_confidence: None,
                 grid_offset_sec: None,
                 downbeats: None,
                 grid_stability: None,

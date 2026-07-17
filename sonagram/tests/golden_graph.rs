@@ -382,6 +382,7 @@ fn _track_analysis_fields_present(a: sonara::analyze::TrackAnalysis) {
         mood_sad: _,
         instrumentalness: _,
         genre: _,
+        genre_confidence: _,
         grid_offset_sec: _,
         downbeats: _,
         grid_stability: _,
@@ -408,18 +409,25 @@ fn contract_sonara() {
 
     // AnalysisConfig / AnalysisMode construction: the scanner builds these to
     // request features. WHY: a field/variant rename breaks `scan::analysis_config`.
+    // `genre_model: None` is the sonara-0.2.3 config field — sonara ships no
+    // model, and sonagram stays a pure mapper, so it is always None here. WHY:
+    // omitting it (or a rename) breaks `scan::analysis_config`, and a non-None
+    // value would pull genre inference into sonagram (analysis belongs upstream).
     let _cfg = AnalysisConfig {
         mode: AnalysisMode::Playlist,
         features: None,
         bpm_min: None,
         bpm_max: None,
+        genre_model: None,
     };
 
     // WHY: each Track carries `analysis_schema_version`. If sonara bumps its
-    // schema, the frozen fixtures (captured at v1) no longer describe the same
-    // analysis semantics — the goldens must be recaptured, not silently trusted.
+    // schema, previously captured fixtures no longer describe the same analysis
+    // semantics — the goldens must be recaptured, not silently trusted. Pinned to
+    // 2 as of sonara 0.2.3 (the chroma sr>22050 filterbank fix); a future bump
+    // must recapture the 15 fixtures + regen the golden in the same commit.
     assert_eq!(
-        ANALYSIS_SCHEMA_VERSION, 1,
+        ANALYSIS_SCHEMA_VERSION, 2,
         "sonara ANALYSIS_SCHEMA_VERSION changed — recapture fixtures + goldens"
     );
 
@@ -433,11 +441,13 @@ fn contract_sonara() {
         "sonara WEIGHTS length changed — `preweight` zips weights against the 48-dim vector"
     );
 
-    // WHY: EMBEDDING_MODEL_ID is pinned to similarity v1; a bump means a stored
-    // vector would be silently reinterpreted under new normalization constants.
+    // WHY: `graph::embedding_model_id()` derives the store's model_id from this
+    // (format "sonara-similarity-v{N}"); a bump re-tags every stored vector and
+    // moves the golden digest. Pinned to 2 as of sonara 0.2.3 — a change means
+    // stored embeddings must be regenerated (the model_id + golden move with it).
     assert_eq!(
-        SIMILARITY_VERSION, 1,
-        "sonara SIMILARITY_VERSION changed — bump EMBEDDING_MODEL_ID + recapture"
+        SIMILARITY_VERSION, 2,
+        "sonara SIMILARITY_VERSION changed — embedding_model_id + goldens move; recapture"
     );
 }
 

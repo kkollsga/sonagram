@@ -40,13 +40,20 @@ impl CountingAnalyzer {
 }
 
 impl Analyzer for CountingAnalyzer {
-    fn analyze(&self, requests: &[AnalyzeRequest]) -> Vec<sonagram::Result<AnalysisRecord>> {
+    fn analyze(
+        &self,
+        requests: &[AnalyzeRequest],
+        on_done: &(dyn Fn(usize, usize) + Sync),
+    ) -> Vec<sonagram::Result<AnalysisRecord>> {
         self.calls.fetch_add(requests.len(), Ordering::SeqCst);
+        let total = requests.len();
         requests
             .iter()
-            .map(|req| {
+            .enumerate()
+            .map(|(i, req)| {
                 let mut rec = self.template.clone();
                 rec.source = req.source.clone();
+                on_done(i + 1, total);
                 Ok(rec)
             })
             .collect()
@@ -237,6 +244,60 @@ fn delete_prunes_index_but_keeps_record() {
     // remains on disk.
     let after = load_records(&lib).unwrap().len();
     assert_eq!(after, 3, "orphaned record is kept (content-addressed)");
+}
+
+/// Rewrite the on-disk record whose `source.path` is `rel_path`, applying `f`
+/// (e.g. to age its schema/embedding version), simulating a record left behind
+/// by an older sonara build.
+fn mutate_record(lib: &Path, rel_path: &str, f: impl Fn(&mut AnalysisRecord)) {
+    let dir = lib.join(".sonagram/analysis");
+    for entry in std::fs::read_dir(&dir).expect("analysis dir") {
+        let p = entry.unwrap().path();
+        if p.extension().and_then(|x| x.to_str()) != Some("json") {
+            continue;
+        }
+        let mut rec = AnalysisRecord::from_json(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        if rec.source.path == rel_path {
+            f(&mut rec);
+            std::fs::write(&p, rec.to_json_pretty().unwrap()).unwrap();
+            return;
+        }
+    }
+    panic!("no record found for {rel_path}");
+}
+
+/// A record produced by an OLDER sonara (mismatched analysis-schema or embedding
+/// version) is stale: it must be re-analyzed, not trusted — while fresh records
+/// stay on the zero-cost stat fast-path. This is the gap the sonara 0.2.3 chroma
+/// bump exposed (old records carried v1 semantics the graph must not keep).
+#[test]
+fn stale_records_reanalyzed_fresh_untouched() {
+    let lib = build_library("stale");
+    let analyzer = CountingAnalyzer::new();
+    scan_library_with(&lib, &opts(), &analyzer).unwrap();
+    assert_eq!(analyzer.count(), 3, "first scan analyzes all three");
+
+    // The mock's template is a committed fixture recaptured at the CURRENT sonara
+    // versions, so the three saved records are all fresh. Age two of them via the
+    // two independent staleness triggers the scanner checks.
+    mutate_record(&lib, "a.mp3", |r| r.analysis.provenance.schema_version = 0);
+    mutate_record(&lib, "sub/c.mp3", |r| {
+        r.analysis.embedding_version = Some(999)
+    });
+
+    // Rescan: both stale files' stat fast-paths are rejected on freshness and
+    // they are re-analyzed; the one fresh file stays on the stat fast-path.
+    let r = scan_library_with(&lib, &opts(), &analyzer).unwrap();
+    assert_eq!(r.analyzed, 2, "both stale files are re-analyzed");
+    assert_eq!(r.reused_stat_match, 1, "the one fresh file is untouched");
+    assert_eq!(analyzer.count(), 5, "two new analyses total");
+
+    // Re-analysis rewrote current-schema records → a further rescan is a true
+    // no-op: all fresh, zero analyses.
+    let r2 = scan_library_with(&lib, &opts(), &analyzer).unwrap();
+    assert_eq!(r2.analyzed, 0, "all records fresh again → no-op analyzes nothing");
+    assert_eq!(r2.reused_stat_match, 3);
+    assert_eq!(analyzer.count(), 5, "no further analyses on the no-op rescan");
 }
 
 #[test]

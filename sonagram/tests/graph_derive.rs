@@ -6,9 +6,9 @@
 //! they document *why* the P6 counts are what they are (and would fail loudly,
 //! with a reason, if the derivation drifted). Expected cardinalities were
 //! computed independently: `SIMILAR_TO` = 15 tracks × min(10, 14) = 150;
-//! `CAMELOT_ADJACENT` = 24 keys × 3 = 72; `Style` = 2 communities at the tuned
-//! threshold (measured — the 15 diverse fixtures single-linkage into 2 tight
-//! components once merely-adjacent chains are cut).
+//! `CAMELOT_ADJACENT` = 24 keys × 3 = 72; `Style` = 3 communities at the tuned
+//! threshold (measured — post-0.2.3 the chroma-fix embedding reshaped the
+//! mutual-kNN graph so the 15 diverse fixtures form 3 tight components).
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
@@ -176,17 +176,17 @@ fn style_ids(graph: &DirGraph) -> Vec<String> {
 }
 
 #[test]
-fn styles_are_two_on_fixtures_under_adaptive_threshold() {
+fn styles_are_three_on_fixtures_under_adaptive_threshold() {
     // P10c: the adaptive per-build threshold (chosen from the fixtures' own
-    // score distribution, ≈0.747, cap = style_cap(15) = 5) restores the two
-    // fixture communities P10b's fixed 0.85 had suppressed.
+    // score distribution, ≈0.637, cap = style_cap(15) = 5). Post-0.2.3 the chroma
+    // fix reshaped the embedding, so the mutual-kNN communities re-formed to three.
     let graph = graph::build_graph(&load_records(), &library()).unwrap();
-    assert_eq!(node_count(&graph, "Style"), 2, "2 communities at the adaptive threshold");
-    assert_eq!(style_ids(&graph), vec!["style-000", "style-001"]);
+    assert_eq!(node_count(&graph, "Style"), 3, "3 communities at the adaptive threshold");
+    assert_eq!(style_ids(&graph), vec!["style-000", "style-001", "style-002"]);
 
-    // IN_STYLE membership = 1.0 (v1 hard assignment); 8 members (4 + 4).
+    // IN_STYLE membership = 1.0 (v1 hard assignment); 9 members (4 + 3 + 2).
     let in_style = edges_of(&graph, "IN_STYLE");
-    assert_eq!(in_style.len(), 8, "4 + 4 members carry IN_STYLE");
+    assert_eq!(in_style.len(), 9, "4 + 3 + 2 members carry IN_STYLE");
     for (_, _, props) in &in_style {
         assert_eq!(props.get("membership"), Some(&Value::Float64(1.0)));
     }
@@ -464,7 +464,7 @@ fn style_profiles_are_shaped_and_deterministic() {
     let a = graph::build_graph(&recs, &library()).unwrap();
     let b = graph::build_graph(&recs, &library()).unwrap();
 
-    for id in ["style-000", "style-001"] {
+    for id in ["style-000", "style-001", "style-002"] {
         let ni_a = a
             .lookup_by_id_readonly("Style", &Value::String(id.to_string()))
             .unwrap_or_else(|| panic!("style {id} present"));

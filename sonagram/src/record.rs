@@ -201,8 +201,15 @@ pub struct AnalysisDto {
     pub mood_relaxed: Option<f32>,
     pub mood_sad: Option<f32>,
     pub instrumentalness: Option<f32>,
-    /// Genre classification (future ML); always `None` today.
+    /// Predicted genre label — populated only when a user-supplied sonara genre
+    /// model is set; `None` otherwise (sonara ships no model).
     pub genre: Option<String>,
+    /// Confidence (softmax probability) of the predicted [`genre`](Self::genre);
+    /// `None` when no genre was predicted. Additive since sonara 0.2.3 —
+    /// `#[serde(default)]` so pre-0.2.3 cached records (which lack the field)
+    /// still deserialize as `None`.
+    #[serde(default)]
+    pub genre_confidence: Option<f32>,
 
     // -- Beat grid (opt-in "beatgrid") --
     pub grid_offset_sec: Option<f32>,
@@ -292,6 +299,7 @@ impl AnalysisRecord {
             mood_sad,
             instrumentalness,
             genre,
+            genre_confidence,
             grid_offset_sec,
             downbeats,
             grid_stability,
@@ -396,6 +404,7 @@ impl AnalysisRecord {
             mood_sad,
             instrumentalness,
             genre,
+            genre_confidence,
             grid_offset_sec,
             downbeats,
             grid_stability,
@@ -526,6 +535,7 @@ mod tests {
                 mood_sad: Some(0.4),
                 instrumentalness: Some(0.2),
                 genre: None,
+                genre_confidence: None,
                 grid_offset_sec: Some(0.12),
                 downbeats: Some(vec![10, 46]),
                 grid_stability: Some(0.9),
@@ -626,6 +636,7 @@ mod tests {
                 mood_sad: None,
                 instrumentalness: None,
                 genre: None,
+                genre_confidence: None,
                 grid_offset_sec: None,
                 downbeats: None,
                 grid_stability: None,
@@ -666,6 +677,97 @@ mod tests {
         // Same record serialized twice is byte-identical (no map iteration).
         let rec = full_record();
         assert_eq!(rec.to_json_pretty().unwrap(), rec.to_json_pretty().unwrap());
+    }
+
+    #[test]
+    fn v1_record_without_genre_confidence_deserializes() {
+        // A pre-sonara-0.2.3 cached record has no `genre_confidence` key at all.
+        // RECORD_VERSION stays 1 (the field is additive), so such a record MUST
+        // still parse — the missing field defaults to `None` (serde default).
+        let json = r#"{
+            "record_version": 1,
+            "source": {
+                "content_hash": "deadbeef",
+                "hash_kind": "mp3-audio-v1",
+                "path": "old.mp3",
+                "file_size": 42,
+                "format": "mp3"
+            },
+            "tags": null,
+            "analysis": {
+                "provenance": {
+                    "schema_version": 1,
+                    "sample_rate": 22050,
+                    "hop_length": 512,
+                    "mode": "playlist",
+                    "requested_features": null
+                },
+                "duration_sec": 1.0,
+                "bpm": 0.0,
+                "bpm_raw": 0.0,
+                "bpm_candidates": [],
+                "beats": [],
+                "onset_frames": [],
+                "rms_mean": 0.0,
+                "rms_max": 0.0,
+                "loudness_lufs": 0.0,
+                "dynamic_range_db": 0.0,
+                "true_peak_db": null,
+                "replaygain_db": null,
+                "loudness_curve": null,
+                "loudness_momentary_max_db": null,
+                "loudness_range_lu": null,
+                "spectral_centroid_mean": 0.0,
+                "zero_crossing_rate": 0.0,
+                "onset_density": 0.0,
+                "spectral_bandwidth_mean": null,
+                "spectral_rolloff_mean": null,
+                "spectral_flatness_mean": null,
+                "spectral_contrast_mean": null,
+                "mfcc_mean": null,
+                "chroma_mean": null,
+                "tempo_curve": null,
+                "tempo_variability": null,
+                "time_signature": null,
+                "time_signature_confidence": null,
+                "chord_sequence": null,
+                "chord_events": null,
+                "chord_change_rate": null,
+                "predominant_chord": null,
+                "dissonance": null,
+                "energy": null,
+                "danceability": null,
+                "key": null,
+                "key_confidence": null,
+                "key_camelot": null,
+                "valence": null,
+                "acousticness": null,
+                "embedding": null,
+                "mood_happy": null,
+                "mood_aggressive": null,
+                "mood_relaxed": null,
+                "mood_sad": null,
+                "instrumentalness": null,
+                "genre": null,
+                "grid_offset_sec": null,
+                "downbeats": null,
+                "grid_stability": null,
+                "energy_curve": null,
+                "energy_curve_hop_sec": null,
+                "segments": null,
+                "intro_end_sec": null,
+                "outro_start_sec": null,
+                "energy_level": null,
+                "leading_silence_sec": null,
+                "trailing_silence_sec": null,
+                "key_candidates": null,
+                "vocalness": null,
+                "fingerprint": null,
+                "embedding_version": null
+            }
+        }"#;
+        let rec = AnalysisRecord::from_json(json).expect("v1 record must still parse");
+        assert_eq!(rec.analysis.genre_confidence, None);
     }
 
     #[test]

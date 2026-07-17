@@ -74,11 +74,12 @@ fn str_prop(graph: &DirGraph, node_type: &str, hash: &str, prop: &str) -> String
 }
 
 // Expected cardinalities, computed independently from the fixture JSON.
-// `Style` (P10c): **2** communities over the 15 fixtures at the *adaptive*
+// `Style` (P10c): **3** communities over the 15 fixtures at the *adaptive*
 // threshold this build chooses from the fixtures' own score distribution
-// (measured chosen threshold ≈0.747, cap = style_cap(15) = 5). P10b's fixed 0.85
-// produced zero fixture styles; P10c's per-build adaptive selection restores them
-// (see the `graph_derive::style_threshold_tuning` diagnostic + GRAPH-GATE.md).
+// (measured chosen threshold ≈0.637, cap = style_cap(15) = 5). The sonara 0.2.3
+// chroma fix reshaped the chroma-derived embedding dims (13-25), so the
+// mutual-kNN neighbourhoods — and thus the communities — re-formed (2→3; see
+// GRAPH-GATE.md P11 + the `graph_derive::style_threshold_tuning` diagnostic).
 const EXPECT_NODES: &[(&str, usize)] = &[
     ("Library", 1),
     ("Track", 15),
@@ -89,13 +90,13 @@ const EXPECT_NODES: &[(&str, usize)] = &[
     ("TempoBand", 7),
     ("EnergyLevel", 10),
     ("Decade", 4),
-    ("Style", 2),
+    ("Style", 3),
 ];
 
 // BY_ARTIST carries both Track→Artist (15) and Album→Artist (15) = 30.
 // P6/P10c derived edges: SIMILAR_TO = 15 tracks × min(10, 14) = 150 (dense, all
-// 15 carry embeddings); CAMELOT_ADJACENT = 24 keys × 3 = 72; IN_STYLE = 4 + 4 = 8
-// (the two adaptive-threshold communities' members).
+// 15 carry embeddings); CAMELOT_ADJACENT = 24 keys × 3 = 72; IN_STYLE = 4 + 3 + 2
+// = 9 (the three adaptive-threshold communities' members, post-0.2.3 chroma fix).
 const EXPECT_EDGES: &[(&str, usize)] = &[
     ("BY_ARTIST", 30),
     ("ON_ALBUM", 15),
@@ -106,7 +107,7 @@ const EXPECT_EDGES: &[(&str, usize)] = &[
     ("FROM_DECADE", 15),
     ("SIMILAR_TO", 150),
     ("CAMELOT_ADJACENT", 72),
-    ("IN_STYLE", 8),
+    ("IN_STYLE", 9),
 ];
 
 #[test]
@@ -162,7 +163,7 @@ fn embedding_store_is_present_and_shaped() {
         .expect("similarity embedding store present");
     assert_eq!(store.dimension, 48, "48-dim vectors");
     assert_eq!(store.slot_to_node.len(), 15, "one vector per track");
-    assert_eq!(store.model_id.as_deref(), Some("sonara-similarity-v1"));
+    assert_eq!(store.model_id.as_deref(), Some("sonara-similarity-v2"));
     assert_eq!(store.metric.as_deref(), Some("euclidean"));
 }
 

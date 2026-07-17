@@ -8,14 +8,26 @@
 //! Three tiers decide the cost of each file, cheapest first:
 //!
 //! 1. **Stat fast-path** — the `(size, mtime)` in `index.json` matches the file
-//!    on disk (and its record still exists) ⇒ trust the cached hash, do nothing.
+//!    on disk **and** its record still exists **and** is *fresh* (see below) ⇒
+//!    trust the cached hash, do nothing.
 //! 2. **Hash reuse** — stats changed, but the ID3-stripped
-//!    [`audio_content_hash`](hash::audio_content_hash) already has a record ⇒ the
-//!    file was retagged or moved. Reuse the analysis; refresh `SourceInfo`
-//!    (path/size) and the index. Still zero analyses.
-//! 3. **Analyze** — an unseen hash ⇒ hand it to the [`Analyzer`]. New records are
-//!    gathered and analyzed in **one batch call** so sonara parallelizes across
-//!    files, with per-file failure isolation.
+//!    [`audio_content_hash`](hash::audio_content_hash) already has a *fresh*
+//!    record ⇒ the file was retagged or moved. Reuse the analysis; refresh
+//!    `SourceInfo` (path/size) and the index. Still zero analyses.
+//! 3. **Analyze** — an unseen hash, **or a stale record** ⇒ hand it to the
+//!    [`Analyzer`]. New records are gathered and analyzed in **one batch call**
+//!    so sonara parallelizes across files, with per-file failure isolation.
+//!
+//! **Freshness / staleness.** A cached record is *stale* when it was produced by
+//! a different sonara build than the one we now link: its
+//! `analysis.provenance.schema_version` ≠
+//! [`ANALYSIS_SCHEMA_VERSION`](sonara::analyze::ANALYSIS_SCHEMA_VERSION), or its
+//! `embedding_version` (when present) ≠
+//! [`SIMILARITY_VERSION`](sonara::similarity::SIMILARITY_VERSION). A stale record is treated exactly
+//! like a missing one — re-analyzed — so an upstream schema/embedding bump
+//! (e.g. sonara 0.2.3's chroma fix) self-heals on the next rescan instead of
+//! silently poisoning the graph with old-semantics data. Both reuse tiers verify
+//! this; the check is memoized per content hash for the duration of a scan.
 //!
 //! Records store `source.path` **relative** to the library root, for
 //! portability, privacy and determinism.
@@ -23,6 +35,7 @@
 pub mod cache;
 pub mod hash;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
@@ -94,14 +107,18 @@ fn analysis_config(features: &[String]) -> AnalysisConfig {
         features: Some(features.iter().cloned().collect()),
         bpm_min: None,
         bpm_max: None,
+        // sonagram stays a pure mapper: genre inference belongs upstream, and
+        // sonara ships no model — so we never supply one.
+        genre_model: None,
     }
 }
 
 /// Coarse-grained scan progress, reported through [`ScanOptions::progress`].
 ///
-/// Analysis is a single batched sonara call with no per-file callback in sonara
-/// 0.2.2, so [`ScanStage::Analyze`] fires once at the start of the batch with the
-/// batch total; the walk/hash stages report per-file counts.
+/// Every stage reports per-item counts. Analysis rides sonara 0.2.3's
+/// [`analyze_batch_with`](sonara::analyze::analyze_batch_with) core progress
+/// hook, so [`ScanStage::Analyze`] fires once per file as it completes (in
+/// completion order, on rayon workers) — not just once for the whole batch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanProgress {
     /// Which stage of the scan is reporting.
@@ -181,14 +198,22 @@ pub struct AnalyzeRequest {
 /// mock for the real (slow, audio-requiring) sonara path.
 ///
 /// Returns one result per request, in the same order. A per-file `Err` is
-/// isolated to that file — it must not abort the batch.
+/// isolated to that file — it must not abort the batch. `on_done(done, total)`
+/// is invoked once per completed file (completion order, possibly on worker
+/// threads — keep it cheap and non-blocking), so the scanner can report real
+/// per-file [`ScanStage::Analyze`] progress.
 pub trait Analyzer: Send + Sync {
     /// Analyze every request, returning records stamped with each request's
-    /// `source`.
-    fn analyze(&self, requests: &[AnalyzeRequest]) -> Vec<Result<AnalysisRecord>>;
+    /// `source`, calling `on_done(done, total)` after each file completes.
+    fn analyze(
+        &self,
+        requests: &[AnalyzeRequest],
+        on_done: &(dyn Fn(usize, usize) + Sync),
+    ) -> Vec<Result<AnalysisRecord>>;
 }
 
-/// The production analyzer: one batched [`sonara::analyze::analyze_batch`] call.
+/// The production analyzer: one batched
+/// [`sonara::analyze::analyze_batch_with`] call.
 pub struct SonaraAnalyzer {
     config: AnalysisConfig,
 }
@@ -203,10 +228,17 @@ impl SonaraAnalyzer {
 }
 
 impl Analyzer for SonaraAnalyzer {
-    fn analyze(&self, requests: &[AnalyzeRequest]) -> Vec<Result<AnalysisRecord>> {
+    fn analyze(
+        &self,
+        requests: &[AnalyzeRequest],
+        on_done: &(dyn Fn(usize, usize) + Sync),
+    ) -> Vec<Result<AnalysisRecord>> {
         let paths: Vec<&Path> = requests.iter().map(|r| r.abs_path.as_path()).collect();
-        // sr = 0 → native sample rate. analyze_batch isolates per-file failures.
-        let results = sonara::analyze::analyze_batch(&paths, 0, &self.config);
+        // sr = 0 → native sample rate. analyze_batch_with isolates per-file
+        // failures and drives `on_done` per completed file for real progress.
+        let results = sonara::analyze::analyze_batch_with(&paths, 0, &self.config, |done, total| {
+            on_done(done, total)
+        });
         results
             .into_iter()
             .zip(requests)
@@ -254,6 +286,44 @@ pub fn load_records(library_root: &Path) -> Result<Vec<AnalysisRecord>> {
     Ok(records)
 }
 
+/// True iff a cached record was produced by the sonara build we now link.
+///
+/// A record is **fresh** when its analysis schema version matches sonara's
+/// [`ANALYSIS_SCHEMA_VERSION`](sonara::analyze::ANALYSIS_SCHEMA_VERSION) *and*,
+/// if it carries an `embedding_version`, that matches
+/// [`SIMILARITY_VERSION`](sonara::similarity::SIMILARITY_VERSION). A record with
+/// no embedding_version imposes no embedding constraint. Anything else is
+/// **stale** and must be re-analyzed, not trusted.
+pub fn record_is_fresh(rec: &AnalysisRecord) -> bool {
+    rec.analysis.provenance.schema_version == sonara::analyze::ANALYSIS_SCHEMA_VERSION
+        && rec
+            .analysis
+            .embedding_version
+            .is_none_or(|v| v == sonara::similarity::SIMILARITY_VERSION)
+}
+
+/// Freshness of the on-disk record for `content_hash`, memoized per scan.
+///
+/// Returns `false` for a **missing** record (so the stat fast-path self-heals a
+/// deleted record) and for a **stale** one (so an upstream schema/embedding bump
+/// forces re-analysis). Loading is cheap and cached by hash, so a hash shared by
+/// several index entries is read at most once.
+fn cached_record_is_fresh(
+    cache: &Cache,
+    content_hash: &str,
+    memo: &mut HashMap<String, bool>,
+) -> Result<bool> {
+    if let Some(&fresh) = memo.get(content_hash) {
+        return Ok(fresh);
+    }
+    let fresh = match cache.load_record(content_hash)? {
+        Some(rec) => record_is_fresh(&rec),
+        None => false,
+    };
+    memo.insert(content_hash.to_string(), fresh);
+    Ok(fresh)
+}
+
 /// Scan `library_root` using an injected [`Analyzer`] (the seam tests drive).
 pub fn scan_library_with(
     library_root: &Path,
@@ -280,6 +350,11 @@ pub fn scan_library_with(
     let mut requests: Vec<AnalyzeRequest> = Vec::new();
     let mut pending_meta: Vec<(String, IndexEntry)> = Vec::new();
 
+    // Per-scan memo of record freshness by content hash (see
+    // [`cached_record_is_fresh`]) — avoids reloading a record shared by several
+    // index entries when checking the stat fast-path.
+    let mut fresh_memo: HashMap<String, bool> = HashMap::new();
+
     let mut hashed = 0usize;
     for abs_path in &files {
         let rel = match relative_path(library_root, abs_path) {
@@ -300,10 +375,16 @@ pub fn scan_library_with(
         let size = meta.len();
         let mtime = mtime_unix(&meta);
 
-        // Tier 1: stat fast-path. Requires the record to still exist, so a
-        // deleted record self-heals instead of leaving a hole in the graph.
+        // Tier 1: stat fast-path. Requires the record to still exist AND be
+        // fresh: a deleted record self-heals instead of leaving a hole in the
+        // graph, and a stale record (older sonara schema/embedding) is
+        // re-analyzed instead of silently trusted. The freshness check loads the
+        // record's two version ints once per hash (memoized).
         if let Some(old) = old_index.get(&rel) {
-            if old.size == size && old.mtime_unix == mtime && cache.has_record(&old.content_hash) {
+            if old.size == size
+                && old.mtime_unix == mtime
+                && cached_record_is_fresh(&cache, &old.content_hash, &mut fresh_memo)?
+            {
                 new_index.insert(rel, old.clone());
                 reused_stat_match += 1;
                 continue;
@@ -333,18 +414,21 @@ pub fn scan_library_with(
             content_hash: content_hash.clone(),
         };
 
-        // Tier 2: known hash → reuse the analysis (retag/move path). If the
-        // record vanished between the stat and the load, fall through to
-        // re-analyze.
+        // Tier 2: known, FRESH hash → reuse the analysis (retag/move path). A
+        // record that vanished between the stat and the load (→ None) or one that
+        // is stale falls through to re-analyze, overwriting the stale record with
+        // current-schema output.
         if let Some(mut rec) = cache.load_record(&content_hash)? {
-            // Refresh mutable identity (path/size) and re-save if changed.
-            if rec.source != source {
-                rec.source = source;
-                cache.save_record(&rec)?;
+            if record_is_fresh(&rec) {
+                // Refresh mutable identity (path/size) and re-save if changed.
+                if rec.source != source {
+                    rec.source = source;
+                    cache.save_record(&rec)?;
+                }
+                new_index.insert(rel, entry);
+                reused_hash_match += 1;
+                continue;
             }
-            new_index.insert(rel, entry);
-            reused_hash_match += 1;
-            continue;
         }
 
         // Tier 3: unseen hash → queue for analysis.
@@ -358,8 +442,13 @@ pub fn scan_library_with(
     // -- Analyze all new files in one batch --
     let mut analyzed = 0usize;
     if !requests.is_empty() {
-        opts.report(ScanStage::Analyze, 0, requests.len());
-        let results = analyzer.analyze(&requests);
+        let total = requests.len();
+        opts.report(ScanStage::Analyze, 0, total);
+        // Real per-file progress: sonara's analyze_batch_with drives this once
+        // per completed file (completion order, on worker threads).
+        let results = analyzer.analyze(&requests, &|done, n| {
+            opts.report(ScanStage::Analyze, done, n)
+        });
         for ((res, req), (rel, entry)) in results.into_iter().zip(&requests).zip(pending_meta) {
             match res {
                 Ok(record) => {
@@ -370,7 +459,7 @@ pub fn scan_library_with(
                 Err(e) => failed.push((req.abs_path.clone(), e.to_string())),
             }
         }
-        opts.report(ScanStage::Analyze, requests.len(), requests.len());
+        opts.report(ScanStage::Analyze, total, total);
     }
 
     cache.save_index(&new_index)?;
