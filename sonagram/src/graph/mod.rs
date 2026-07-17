@@ -759,6 +759,7 @@ fn add_tracks(
     let recording_quality: Vec<Option<f64>> = axes.iter().map(|a| a.recording_quality).collect();
     let quality_tier: Vec<Option<String>> =
         axes.iter().map(|a| a.quality_tier.clone()).collect();
+    let is_music: Vec<Option<bool>> = axes.iter().map(|a| Some(a.is_music)).collect();
 
     // P21 Stage C: `is_canonical` is non-null on every Track (all singletons and
     // every version group's best take are `true`), so `WHERE t.is_canonical` is
@@ -838,6 +839,7 @@ fn add_tracks(
         ("tempo_steadiness", ColumnType::Float64, ColumnData::Float64(tempo_steadiness)),
         ("seg_density", ColumnType::Float64, ColumnData::Float64(seg_density)),
         // P21 Stage B: percentile-calibrated composite axes.
+        ("is_music", ColumnType::Boolean, ColumnData::Boolean(is_music)),
         ("arousal_index", ColumnType::Float64, ColumnData::Float64(arousal_index)),
         ("valence_index", ColumnType::Float64, ColumnData::Float64(valence_index)),
         ("tension_index", ColumnType::Float64, ColumnData::Float64(tension_index)),

@@ -43,6 +43,11 @@ const MEAN_EPS: f64 = 1e-9;
 /// are comparable across track lengths.
 const SECS_PER_MIN: f64 = 60.0;
 
+/// Spectral-flatness values above this threshold are strong evidence that a
+/// file is noise, silence, speech, or another non-music fragment. The live
+/// library's p99 is 0.049; 0.10 is deliberately conservative.
+const NON_MUSIC_FLATNESS_THRESHOLD: f32 = 0.10;
+
 // ───────────────────────────── Stage A: curve features ──────────────────────
 
 /// The nine curve-derived flat `Track` properties for one record. Every field is
@@ -246,6 +251,9 @@ fn seg_density(segments: Option<&[crate::record::SegmentEventDto]>, duration_sec
 /// three-way cut of `recording_quality`. Each is `None` when every component that
 /// feeds it is absent for this track (so no signed z-score could be formed).
 pub(super) struct CompositeAxes {
+    /// Conservative music-content gate. Missing flatness is not evidence of
+    /// non-music, so it remains `true`; only values strictly above 0.10 reject.
+    pub is_music: bool,
     /// Energy/brightness/attack composite — the well-predicted mood axis
     /// (R²≈0.6–0.85 in the literature).
     pub arousal_index: Option<f64>,
@@ -294,34 +302,34 @@ pub(super) fn composite_axes(
     // Small per-track projections used across several axes.
     let dissonance: Vec<Option<f64>> = fo(sorted, |a| a.dissonance);
     let chord_entropy: Vec<Option<f64>> = feats.iter().map(|f| f.chord_entropy).collect();
+    let is_music: Vec<bool> = sorted.iter().map(|r| is_music_record(r)).collect();
 
     // arousal_index: energy(+), spectral_centroid(+), onset_density(+),
     // danceability(+), spectral_contrast_mean(+ if present), MFCC-1(+ if present).
     let arousal = z_composite(&[
-        Component::new(fo(sorted, |a| a.energy), 1.0),
-        Component::new(f_always(sorted, |a| a.spectral_centroid_mean), 1.0),
-        Component::new(f_always(sorted, |a| a.onset_density), 1.0),
-        Component::new(fo(sorted, |a| a.danceability), 1.0),
-        Component::new(fo(sorted, |a| vec_mean(a.spectral_contrast_mean.as_deref())), 1.0),
-        Component::new(fo(sorted, |a| a.mfcc_mean.as_ref().and_then(|m| m.first().copied())), 1.0),
+        Component::new(music_only(fo(sorted, |a| a.energy), &is_music), 1.0),
+        Component::new(music_only(f_always(sorted, |a| a.spectral_centroid_mean), &is_music), 1.0),
+        Component::new(music_only(f_always(sorted, |a| a.onset_density), &is_music), 1.0),
+        Component::new(music_only(fo(sorted, |a| a.danceability), &is_music), 1.0),
+        Component::new(music_only(fo(sorted, |a| vec_mean(a.spectral_contrast_mean.as_deref())), &is_music), 1.0),
+        Component::new(music_only(fo(sorted, |a| a.mfcc_mean.as_ref().and_then(|m| m.first().copied())), &is_music), 1.0),
     ]);
 
     // valence_index (WEAK PRIOR): key_confidence(+), dissonance(−), major(+),
     // chord_entropy(−).
     let valence = z_composite(&[
-        Component::new(fo(sorted, |a| a.key_confidence), 1.0),
-        Component::new(dissonance.clone(), -1.0),
-        Component::new(mode_indicator(sorted, "major"), 1.0),
-        Component::new(chord_entropy.clone(), -1.0),
+        Component::new(music_only(fo(sorted, |a| a.key_confidence), &is_music), 1.0),
+        Component::new(music_only(dissonance.clone(), &is_music), -1.0),
+        Component::new(music_only(mode_indicator(sorted, "major"), &is_music), 1.0),
+        Component::new(music_only(chord_entropy.clone(), &is_music), -1.0),
     ]);
 
-    // tension_index: dissonance(+), minor(+), chord_entropy(+),
-    // spectral_flatness_mean(+).
+    // tension_index: dissonance(+), minor(+), chord_entropy(+). Spectral
+    // flatness is a non-music detector, not a musical-tension component.
     let tension = z_composite(&[
-        Component::new(dissonance.clone(), 1.0),
-        Component::new(mode_indicator(sorted, "minor"), 1.0),
-        Component::new(chord_entropy.clone(), 1.0),
-        Component::new(fo(sorted, |a| a.spectral_flatness_mean), 1.0),
+        Component::new(music_only(dissonance.clone(), &is_music), 1.0),
+        Component::new(music_only(mode_indicator(sorted, "minor"), &is_music), 1.0),
+        Component::new(music_only(chord_entropy.clone(), &is_music), 1.0),
     ]);
 
     // recording_quality: macro_dynamics(+), chord_churn(−), dissonance(−),
@@ -340,6 +348,7 @@ pub(super) fn composite_axes(
 
     (0..n)
         .map(|i| CompositeAxes {
+            is_music: is_music[i],
             arousal_index: arousal_pct[i],
             valence_index: valence_pct[i],
             tension_index: tension_pct[i],
@@ -347,6 +356,24 @@ pub(super) fn composite_axes(
             quality_tier: quality_pct[i].map(|p| quality_tier(p).to_string()),
         })
         .collect()
+}
+
+fn is_music_record(r: &AnalysisRecord) -> bool {
+    r.analysis
+        .spectral_flatness_mean
+        .is_none_or(|v| v <= NON_MUSIC_FLATNESS_THRESHOLD)
+}
+
+/// Remove non-music rows before z-score calibration. Masking only the final
+/// percentile would still let outliers distort each component's mean/stdev.
+fn music_only(mut values: Vec<Option<f64>>, is_music: &[bool]) -> Vec<Option<f64>> {
+    debug_assert_eq!(values.len(), is_music.len());
+    for (value, &keep) in values.iter_mut().zip(is_music) {
+        if !keep {
+            *value = None;
+        }
+    }
+    values
 }
 
 /// Percentile thirds of a `recording_quality` percentile rank.
@@ -700,6 +727,29 @@ mod tests {
         let out = z_composite(&[flat]);
         assert_eq!(out[0].unwrap(), 0.0);
         assert_eq!(out[1].unwrap(), 0.0);
+    }
+
+    #[test]
+    fn non_music_mask_excludes_rows_before_calibration() {
+        let base = vec![Some(1.0), Some(2.0), Some(3.0)];
+        let with_extreme = vec![Some(1.0), Some(2.0), Some(3.0), Some(1_000.0)];
+        let base_scores = z_composite(&[Component::new(base, 1.0)]);
+        let masked_scores = z_composite(&[Component::new(
+            music_only(with_extreme, &[true, true, true, false]),
+            1.0,
+        )]);
+        assert_eq!(&masked_scores[..3], base_scores.as_slice());
+        assert!(masked_scores[3].is_none());
+    }
+
+    #[test]
+    fn non_music_threshold_is_strict_and_missing_is_music() {
+        let classify = |flatness: Option<f32>| {
+            flatness.is_none_or(|v| v <= NON_MUSIC_FLATNESS_THRESHOLD)
+        };
+        assert!(classify(None));
+        assert!(classify(Some(0.10)));
+        assert!(!classify(Some(0.100_001)));
     }
 
     // ── Stage B: percentile_rank determinism ──

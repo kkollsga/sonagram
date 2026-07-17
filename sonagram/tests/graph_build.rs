@@ -73,6 +73,13 @@ fn str_prop(graph: &DirGraph, node_type: &str, hash: &str, prop: &str) -> String
     }
 }
 
+fn prop(graph: &DirGraph, node_type: &str, hash: &str, prop: &str) -> Value {
+    let ni = graph
+        .lookup_by_id_readonly(node_type, &Value::String(hash.to_string()))
+        .unwrap_or_else(|| panic!("no {node_type} node with id {hash}"));
+    resolve_node_property(graph.get_node(ni).unwrap(), prop, graph)
+}
+
 // Expected cardinalities, computed independently from the fixture JSON.
 // `Style` (P14): **2** communities over the 15 fixtures at the *adaptive*
 // threshold this build chooses from the fixtures' own score distribution
@@ -156,6 +163,7 @@ fn track_property_row_spot_check() {
     assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "artist_name"), "Bruno Mars");
     assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "key"), "F major");
     assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "camelot"), "7B");
+    assert_eq!(prop(&graph, "Track", BRUNO_HASH, "is_music"), Value::Boolean(true));
 
     // sonara 0.2.4: bpm_confidence is always present and in [0, 1].
     let bpm_conf = f64_prop(&graph, "Track", BRUNO_HASH, "bpm_confidence");
@@ -163,6 +171,37 @@ fn track_property_row_spot_check() {
     // era_source records which year fed FROM_DECADE. Marry You carries a file
     // `year` tag but no `original_year`, so the era falls back to the file year.
     assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "era_source"), "file_year");
+}
+
+#[test]
+fn non_music_track_nulls_only_composite_mood_axes() {
+    let mut record = load_records()
+        .into_iter()
+        .find(|r| r.source.content_hash == BRUNO_HASH)
+        .expect("Bruno fixture present");
+    record.source.content_hash = "non-music-flatness-outlier".to_string();
+    record.analysis.spectral_flatness_mean = Some(0.5);
+    let graph = graph::build_graph(&[record], &LibraryInfo {
+        root: "non-music".to_string(),
+        n_tracks: 1,
+    })
+    .unwrap();
+
+    assert_eq!(
+        prop(&graph, "Track", "non-music-flatness-outlier", "is_music"),
+        Value::Boolean(false)
+    );
+    for axis in ["arousal_index", "valence_index", "tension_index"] {
+        assert_eq!(
+            prop(&graph, "Track", "non-music-flatness-outlier", axis),
+            Value::Null,
+            "{axis} must be null for non-music"
+        );
+    }
+    assert!(matches!(
+        prop(&graph, "Track", "non-music-flatness-outlier", "recording_quality"),
+        Value::Float64(_)
+    ));
 }
 
 #[test]
