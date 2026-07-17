@@ -116,6 +116,17 @@ fn bool_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> bool {
     }
 }
 
+fn float_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> f64 {
+    let ni = graph
+        .lookup_by_id_readonly(node_type, &Value::String(id.to_string()))
+        .unwrap_or_else(|| panic!("no {node_type} node with id {id}"));
+    let node = graph.get_node(ni).unwrap();
+    match resolve_node_property(node, prop, graph) {
+        Value::Float64(v) => v,
+        other => panic!("{prop} is not Float64: {other:?}"),
+    }
+}
+
 /// All VERSION_OF edges as `(track_hash, song_id)`.
 fn version_of_edges(graph: &DirGraph) -> Vec<(String, String)> {
     let sg = graph.graph.as_stable_digraph();
@@ -216,6 +227,54 @@ fn recognized_release_beats_higher_quality_unmatched_take() {
     assert!(!bool_prop(&graph, "Track", MASTER_HASH, "has_lastfm_match"));
     assert!(bool_prop(&graph, "Track", LIVE_HASH, "is_canonical"));
     assert!(!bool_prop(&graph, "Track", MASTER_HASH, "is_canonical"));
+}
+
+#[test]
+fn audio_refinement_preserves_track_properties_and_round_trips() {
+    let mut records = vec![
+        rec("known_a", "Known Artist", "Focus", 0.6),
+        rec("known_b", "Known Artist", "Focus - Live", 0.2),
+        rec("junk", "Unknown Artist", "Focus", 1.0),
+        rec("cover", "Cover Artist", "Focus", 0.9),
+    ];
+    for record in &mut records {
+        record.analysis.embedding = Some(vec![0.25; 48]);
+        record.analysis.embedding_version = Some(1);
+    }
+    let mut graph = graph::build_graph(&records, &library()).unwrap();
+    let song_id = "Known Artist|focus";
+    assert_eq!(int_prop(&graph, "Song", song_id, "n_versions"), 3);
+    assert_eq!(str_prop(&graph, "Song", song_id, "canonical_hash"), "junk");
+    assert_eq!(
+        version_of_edges(&graph),
+        vec![
+            ("junk".to_string(), song_id.to_string()),
+            ("known_a".to_string(), song_id.to_string()),
+            ("known_b".to_string(), song_id.to_string()),
+        ],
+        "junk singleton attaches but the known-artist cover does not"
+    );
+    assert_eq!(str_prop(&graph, "Track", "junk", "title"), "Focus");
+    assert_eq!(str_prop(&graph, "Track", "junk", "artist_name"), "Unknown Artist");
+    assert_eq!(float_prop(&graph, "Track", "junk", "bpm"), 120.0);
+    assert!(bool_prop(&graph, "Track", "junk", "is_canonical"));
+    assert!(bool_prop(&graph, "Track", "cover", "is_canonical"));
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!(
+        "sonagram-song-refine-{}-{stamp}.kgl",
+        std::process::id()
+    ));
+    graph::save(&mut graph, &path).unwrap();
+    let loaded = kglite::api::io::load_file(path.to_str().unwrap()).unwrap();
+    assert_eq!(int_prop(&loaded, "Song", song_id, "n_versions"), 3);
+    assert_eq!(str_prop(&loaded, "Track", "junk", "title"), "Focus");
+    assert_eq!(float_prop(&loaded, "Track", "junk", "bpm"), 120.0);
+    assert!(bool_prop(&loaded, "Track", "junk", "is_canonical"));
+    let _ = std::fs::remove_file(path);
 }
 
 /// A record with every optional analysis field left None/empty (the identity +

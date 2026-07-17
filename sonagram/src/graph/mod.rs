@@ -18,9 +18,10 @@
 //! ## Stage order (fixed — nodes before edges, no endpoint vivification)
 //! dimension nodes (`Artist`, `Album`, `Genre`, static `Key`×24 / `TempoBand`×7
 //! / `EnergyLevel`×10, `Decade`) → `Track` nodes (one full-width `add_nodes`
-//! pass, carrying the P21 Stage-C `is_canonical` flag) → edges → `Song` version
-//! nodes + `VERSION_OF` edges → embedding store → `SIMILAR_TO` →
-//! `CAMELOT_ADJACENT` → `Style` → `Library` root **last** (it carries the
+//! pass, carrying the primary P21 Stage-C `is_canonical` flag) → edges →
+//! embedding store → `SIMILAR_TO` → audio-confirmed `Song` version nodes +
+//! `VERSION_OF` edges and canonical-flag update → `CAMELOT_ADJACENT` →
+//! `Style` → `Library` root **last** (it carries the
 //! adaptive `style_threshold` the Style pass chooses, and has no edges so its
 //! position is free).
 
@@ -345,9 +346,6 @@ pub fn build_graph_from_sources(
         &grouping.is_canonical,
     )?;
 
-    // ── Stage 3b: Song version nodes + VERSION_OF edges (endpoints = Tracks) ─
-    song::add_songs(&mut graph, &grouping)?;
-
     // ── Stage 4: edges (all endpoints now exist) ────────────────────────────
     let specs = build_edges(&sorted, &albums, &source_of);
     let report = add_edges_from_specs(&mut graph, specs).map_err(SonagramError::Graph)?;
@@ -387,6 +385,20 @@ pub fn build_graph_from_sources(
     // Materialize the top-k nearest-neighbour graph; keep the scored fan-out so
     // the style detector reuses it instead of recomputing.
     let sim_edges = derive::add_similar_to(&mut graph, &sorted)?;
+
+    // The primary groups above are the fixed target universe. Junk-tagged
+    // tracks may move only when an either-direction SIMILAR_TO edge reaches an
+    // original member of one unique non-junk target; reassigned tracks never
+    // become confirmation anchors for a cascade.
+    let grouping = song::refine_songs(
+        &sorted,
+        &quality,
+        &popularity.has_lastfm_match,
+        &grouping,
+        &sim_edges,
+    );
+    song::update_canonical_flags(&mut graph, &sorted, &grouping.is_canonical)?;
+    song::add_songs(&mut graph, &grouping)?;
 
     // ── Stage 7: CAMELOT_ADJACENT (static wheel between the 24 Key nodes) ────
     derive::add_camelot_adjacent(&mut graph)?;
