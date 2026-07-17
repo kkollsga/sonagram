@@ -55,9 +55,24 @@ def main():
         report = sonagram.scan(tmp_lib)
         assert report["analyzed"] == 5, report
 
-        have_key = bool(os.environ.get("LASTFM_API_KEY"))
+        # Key resolution has FIVE tiers (env → cwd .env → library .env →
+        # ~/.sonagram/.env); "have a key" must consider all the ones this
+        # process can reach, or the no-key assertion fires on a maintainer
+        # machine whose key lives in a .env file (filed issue, now fixed).
+        have_key = bool(os.environ.get("LASTFM_API_KEY")) or any(
+            os.path.isfile(p)
+            for p in (
+                ".env",
+                os.path.join(tmp_lib, ".env"),
+                os.path.join(
+                    os.environ.get("SONAGRAM_HOME")
+                    or os.path.expanduser("~/.sonagram"),
+                    ".env",
+                ),
+            )
+        )
         if not have_key:
-            # No key: enrich must raise a clear error, then we stop.
+            # No key anywhere: enrich must raise a clear error, then we stop.
             try:
                 sonagram.enrich(tmp_lib)
             except RuntimeError as e:
