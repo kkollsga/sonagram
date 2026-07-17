@@ -14,11 +14,12 @@ command forms also exist for scripting a single folder without any registration.
 
 ## Install
 
-sonagram ships to PyPI as an **sdist** that compiles the native core on install,
-so you need a **Rust toolchain** ([rustup](https://rustup.rs)):
+Prebuilt wheels cover macOS (Apple Silicon + Intel), Linux x86_64, and Windows
+x86_64 on Python ≥ 3.9 — no toolchain needed. Other platforms build from the
+sdist, which needs a **Rust toolchain** ([rustup](https://rustup.rs)):
 
 ```bash
-pip install sonagram          # builds the Rust core — needs a Rust toolchain
+pip install sonagram           # prebuilt wheel on common platforms
 export LASTFM_API_KEY=...      # optional: enables `enrich`
 ```
 

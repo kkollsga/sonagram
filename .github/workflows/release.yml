@@ -1,32 +1,65 @@
 name: Release
 
-# Publishes the `sonagram` sdist to PyPI on a push to `main`, then tags the
-# commit and cuts a GitHub Release.
+# Publishes `sonagram` to PyPI on a push to `main` — prebuilt abi3 wheels for
+# the common platforms plus the sdist fallback — then tags the commit and cuts
+# a GitHub Release.
 #
 # WHY A SEPARATE FILE (not ci.yml): PyPI Trusted Publishing (OIDC) is keyed to
 # the exact **workflow filename**. sonagram's PyPI publisher is registered
 # against `release.yml`, so the publish job MUST live here — an OIDC mint from
-# any other workflow (e.g. ci.yml) is rejected by PyPI. See the `publish`
-# job's permissions/environment below for the values the maintainer registered.
+# any other workflow (e.g. ci.yml) is rejected by PyPI.
 #
-# Idempotent + version-gated: the job reads the version from pyproject.toml,
-# checks PyPI, and skips every publish step when that version already exists —
-# so a re-push of `main` at an unchanged version is a safe no-op.
+# WHEELS (kglite's pattern): the extension is built with pyo3 `abi3-py39`, so
+# ONE wheel per platform serves every CPython >= 3.9 — no per-Python matrix.
+# Linux builds inside the manylinux2014 container via maturin-action (a bare
+# build on the runner would tag a glibc too new for older distros). Users on
+# these platforms need NO Rust toolchain; the sdist remains the fallback for
+# everything else.
 #
-# WHY THIS FILE RUNS TESTS: codingest's release.yml assumes `main` was already
-# green (it triggers on a version tag, downstream of CI). sonagram publishes on
-# a plain push to `main`, and GitHub Actions cannot `needs:` a job in another
-# workflow — so ci.yml's matrix can't gate this file. Publishing an untested
-# `main` is not acceptable, so `release.yml` runs its own essential gate
-# (`cargo test --workspace` + clippy + the Python API scripts) and the publish
-# job `needs: [test]`. ci.yml still carries the full 3-OS matrix on the same
-# push; this is the single-OS pre-publish gate.
+# Idempotent + version-gated: the `version` job reads pyproject.toml, checks
+# PyPI, and every expensive job skips when that version already exists — so a
+# re-push of `main` at an unchanged version is a safe no-op.
+#
+# WHY THIS FILE RUNS TESTS: sonagram publishes on a plain push to `main`, and
+# GitHub Actions cannot `needs:` a job in another workflow — so ci.yml's 3-OS
+# matrix can't gate this file. `release.yml` runs its own single-OS essential
+# gate and `publish` needs it; ci.yml still runs the full matrix on the same
+# push.
 
 on:
   push:
     branches: [main]
 
 jobs:
+  version:
+    name: Version gate
+    runs-on: ubuntu-latest
+    outputs:
+      should_publish: ${{ steps.check.outputs.should_publish }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check pyproject version against PyPI
+        id: check
+        run: |
+          VERSION=$(python3 -c "
+          import tomllib, pathlib
+          d = tomllib.loads(pathlib.Path('pyproject.toml').read_text())
+          print(d['project']['version'])
+          ")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # 404 is the only "publish" signal; 200 = already there; anything
+          # else = can't tell, fail safe to don't-publish.
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://pypi.org/pypi/sonagram/$VERSION/json")
+          if [ "$STATUS" = "404" ]; then
+            echo "Version $VERSION not on PyPI — will build and publish"
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version $VERSION already on PyPI or unverifiable (HTTP $STATUS) — skipping"
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Pre-publish gate
     runs-on: ubuntu-latest
@@ -40,7 +73,6 @@ jobs:
           python-version: "3.12"
 
       # The path-dep upstreams (sonara, kglite) are siblings of this repo.
-      # CI checks them out next to sonagram so the path deps resolve.
       # actions/checkout refuses paths outside the workspace, so check the
       # siblings out INSIDE it and move them up to where ../sonara &
       # ../KGLite path deps expect them.
@@ -82,9 +114,64 @@ jobs:
             python "$t"
           done
 
+  # One abi3 wheel per platform (pyo3 abi3-py39 → cp39-abi3 tag serves every
+  # CPython >= 3.9). Builds run in parallel with the test gate; nothing
+  # reaches PyPI before `publish`, which needs both.
+  build-wheels:
+    name: Wheel ${{ matrix.target }}
+    needs: [version]
+    if: needs.version.outputs.should_publish == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            manylinux: "2014"
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: macos-latest
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v6
+      - name: Check out sonara
+        uses: actions/checkout@v6
+        with:
+          repository: kkollsga/sonara
+          path: _siblings/sonara
+      - name: Check out kglite
+        uses: actions/checkout@v6
+        with:
+          repository: kkollsga/kglite
+          path: _siblings/KGLite
+      - name: Place siblings beside the workspace
+        shell: bash
+        run: |
+          mv _siblings/sonara ../sonara
+          mv _siblings/KGLite ../KGLite
+          rmdir _siblings
+
+      - name: Build abi3 wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: ${{ matrix.manylinux || 'auto' }}
+          command: build
+          args: --release -m sonagram-python/Cargo.toml --out dist
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.target }}
+          path: dist/*.whl
+          if-no-files-found: error
+
   publish:
-    needs: [test]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [version, test, build-wheels]
+    if: needs.version.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -92,52 +179,51 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-python@v6
+      # The sdist build runs cargo metadata, which must resolve the ../sonara
+      # and ../KGLite path deps (maturin bundles path dependencies into the
+      # sdist, making it self-contained for end users).
+      - name: Check out sonara
+        uses: actions/checkout@v6
         with:
-          python-version: "3.12"
-
-      - name: Get package version
-        id: version
+          repository: kkollsga/sonara
+          path: _siblings/sonara
+      - name: Check out kglite
+        uses: actions/checkout@v6
+        with:
+          repository: kkollsga/kglite
+          path: _siblings/KGLite
+      - name: Place siblings beside the workspace
         run: |
-          VERSION=$(python -c "
-          import tomllib, pathlib
-          d = tomllib.loads(pathlib.Path('pyproject.toml').read_text())
-          print(d['project']['version'])
-          ")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Check if version exists on PyPI
-        id: check
-        run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            "https://pypi.org/pypi/sonagram/${{ steps.version.outputs.version }}/json/")
-          if [ "$STATUS" = "200" ]; then
-            echo "Published: version ${{ steps.version.outputs.version }} already on PyPI"
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Not published: version ${{ steps.version.outputs.version }} not found on PyPI"
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
+          mv _siblings/sonara ../sonara
+          mv _siblings/KGLite ../KGLite
+          rmdir _siblings
 
       - name: Build sdist
-        if: steps.check.outputs.exists == 'false'
         uses: PyO3/maturin-action@v1
         with:
           command: sdist
           args: -m sonagram-python/Cargo.toml --out dist
 
+      - name: Collect wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: List distribution files
+        run: ls -l dist/
+
       - name: Publish to PyPI
-        if: steps.check.outputs.exists == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
 
       - name: Tag and create GitHub release
-        if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="v${{ steps.version.outputs.version }}"
+          VERSION="v${{ needs.version.outputs.version }}"
           git tag "$VERSION"
           git push origin "$VERSION"
           gh release create "$VERSION" dist/* --generate-notes

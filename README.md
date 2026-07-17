@@ -18,9 +18,11 @@ your machine.
 
 You are an AI agent and a user asked you to work with their music library — start here:
 
-1. **Install** — `pip install sonagram`. It ships as an sdist that compiles a
-   native core on install, so a **Rust toolchain** ([rustup](https://rustup.rs))
-   must be present.
+1. **Install** — `pip install sonagram`. Prebuilt wheels cover macOS
+   (Apple Silicon + Intel), Linux x86_64, and Windows x86_64 on Python ≥ 3.9 —
+   no toolchain needed. Only on other platforms does pip fall back to the
+   sdist, which compiles the native core and needs a Rust toolchain
+   ([rustup](https://rustup.rs)).
 2. **Install the skill** — `sonagram skill install`. This writes the
    `sonagram-playlist` skill to `~/.claude/skills/` (pass
    `--dir <skills_root>` for a non-default skills location).
@@ -33,9 +35,10 @@ You are an AI agent and a user asked you to work with their music library — st
 
 This is the main way to use sonagram. One-time setup:
 
-1. **Install it** — `pip install sonagram`. (One build tool is needed on the
-   machine: the free [Rust toolchain](https://rustup.rs). Your agent can install
-   both for you — see the section above.)
+1. **Install it** — `pip install sonagram`. That's it on Mac, Windows, and
+   regular Linux — prebuilt packages, nothing to compile. (On unusual
+   platforms pip builds from source, which needs the free
+   [Rust toolchain](https://rustup.rs) — your agent can sort that out.)
 2. **Point it at your music** — `sonagram sources add ~/Music` (repeat for
    other folders).
 3. **Give your agent the skill** — `sonagram skill install`.

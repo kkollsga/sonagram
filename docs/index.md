@@ -58,13 +58,16 @@ schema between them, and nothing else:
 
 ## Install
 
-sonagram ships to PyPI as an **sdist** (a source distribution that compiles the
-native Rust core on install), so a **Rust toolchain** ([rustup](https://rustup.rs))
-must be present on the machine:
+sonagram ships to PyPI with **prebuilt abi3 wheels** for macOS (Apple Silicon +
+Intel), Linux x86_64 (manylinux2014), and Windows x86_64 — one wheel per
+platform covers every CPython ≥ 3.9, so on these platforms nothing compiles:
 
 ```bash
-pip install sonagram          # builds the Rust core — needs a Rust toolchain
+pip install sonagram          # prebuilt wheel on common platforms
 ```
+
+On other platforms pip falls back to the **sdist**, which compiles the native
+core on install and needs a **Rust toolchain** ([rustup](https://rustup.rs)).
 
 `pip install sonagram` also installs kglite (the runtime graph engine) and gives
 you the same `sonagram` command as the standalone binary — one shared code path,
