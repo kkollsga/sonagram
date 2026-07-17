@@ -10,6 +10,7 @@ use sonagram::curation::{
     PlaylistArc, PlaylistPolicy, PlaylistPreset,
 };
 use sonagram::graph::{self, LibraryInfo};
+use sonagram::playlist;
 use sonagram::record::AnalysisRecord;
 
 fn records() -> Vec<AnalysisRecord> {
@@ -374,4 +375,60 @@ fn independent_audit_reports_artist_spacing_positions() {
         .find(|issue| issue.code == "artist_gap")
         .expect("artist gap must be enforced by independent audit");
     assert_eq!(issue.positions, vec![1, 3]);
+}
+
+#[test]
+fn curated_store_persists_provenance_and_rejects_failed_audits() {
+    let graph = graph();
+    let brief = PlaylistBrief {
+        target_tracks: 6,
+        ..PlaylistBrief::default()
+    };
+    let curated = curate_playlist(&graph, &brief, &six_track_policy()).unwrap();
+    assert!(curated.exportable, "{:?}", curated.audit.issues);
+    let entries = playlist::entries_from_graph(&graph, std::path::Path::new(""), &curated.track_ids)
+        .unwrap();
+    let store = std::env::temp_dir().join(format!(
+        "sonagram-curated-store-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let saved = playlist::save_curated_playlist(
+        &store,
+        "Audited Focus",
+        Some("focus work"),
+        &curated,
+        &entries,
+        std::path::Path::new("/music.kgl"),
+        None,
+    )
+    .unwrap();
+    let loaded = playlist::load_playlist_meta(&store, &saved.slug).unwrap();
+    let provenance = loaded.curation.expect("curation provenance");
+    assert_eq!(provenance.brief, curated.brief);
+    assert_eq!(provenance.policy, curated.policy);
+    assert_eq!(provenance.audit.passed, curated.audit.passed);
+    assert_eq!(provenance.audit.track_count, curated.audit.track_count);
+    assert_eq!(provenance.audit.transitions.len(), curated.audit.transitions.len());
+    assert_eq!(provenance.explanation.tracks.len(), curated.explanation.tracks.len());
+
+    let mut failed = curated;
+    failed.exportable = false;
+    failed.audit.passed = false;
+    let rejected_store = store.join("rejected");
+    assert!(playlist::save_curated_playlist(
+        &rejected_store,
+        "Rejected",
+        None,
+        &failed,
+        &entries,
+        std::path::Path::new("/music.kgl"),
+        None,
+    )
+    .is_err());
+    assert!(!rejected_store.exists(), "failed audit writes nothing");
+    let _ = std::fs::remove_dir_all(&store);
 }

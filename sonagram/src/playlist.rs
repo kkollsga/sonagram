@@ -45,6 +45,9 @@ use kglite::api::session::{execute_read, ExecuteOptions};
 use kglite::api::{DirGraph, Value};
 use serde::{Deserialize, Serialize};
 
+use crate::curation::{
+    CuratedPlaylist, PlaylistAudit, PlaylistBrief, PlaylistExplanation, PlaylistPolicy,
+};
 use crate::{Result, SonagramError};
 
 /// The `Track` node type and its unique-id property (the audio content hash).
@@ -544,6 +547,16 @@ pub struct PlaylistTrackMeta {
     pub duration_sec: Option<f32>,
 }
 
+/// Library-owned curation provenance persisted with a curated playlist.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct CurationProvenance {
+    pub brief: PlaylistBrief,
+    pub policy: PlaylistPolicy,
+    pub audit: PlaylistAudit,
+    pub explanation: PlaylistExplanation,
+    pub repair_attempts: usize,
+}
+
 /// The `<slug>.meta.json` sidecar of a stored playlist (P17).
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct PlaylistMeta {
@@ -570,6 +583,10 @@ pub struct PlaylistMeta {
     pub graph: String,
     /// The portable copy-folder that was also written, if any.
     pub copy_to: Option<String>,
+    /// Library-owned policy, audit, and score provenance. Absent on legacy and
+    /// manually materialized playlists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub curation: Option<CurationProvenance>,
 }
 
 /// The outcome of [`save_playlist`]: where the two files landed + the metadata.
@@ -601,6 +618,67 @@ pub fn save_playlist(
     entries: &[PlaylistEntry],
     graph_path: &Path,
     copy_to: Option<&Path>,
+) -> Result<StoredPlaylist> {
+    save_playlist_inner(
+        dir, name, request, cypher, ids, entries, graph_path, copy_to, None,
+    )
+}
+
+/// Store a library-curated playlist and its complete policy/audit provenance.
+/// Non-exportable results are rejected before the store directory is created.
+#[allow(clippy::too_many_arguments)]
+pub fn save_curated_playlist(
+    dir: &Path,
+    name: &str,
+    request: Option<&str>,
+    curated: &CuratedPlaylist,
+    entries: &[PlaylistEntry],
+    graph_path: &Path,
+    copy_to: Option<&Path>,
+) -> Result<StoredPlaylist> {
+    if !curated.exportable || !curated.audit.passed {
+        return Err(SonagramError::Playlist(
+            "refusing to store a curated playlist that failed its library audit".into(),
+        ));
+    }
+    let entry_ids: Vec<&str> = entries.iter().map(|entry| entry.content_hash.as_str()).collect();
+    let curated_ids: Vec<&str> = curated.track_ids.iter().map(String::as_str).collect();
+    if entry_ids != curated_ids {
+        return Err(SonagramError::Playlist(
+            "curated entries do not match the audited track ids and order".into(),
+        ));
+    }
+    let provenance = CurationProvenance {
+        brief: curated.brief.clone(),
+        policy: curated.policy.clone(),
+        audit: curated.audit.clone(),
+        explanation: curated.explanation.clone(),
+        repair_attempts: curated.repair_attempts,
+    };
+    save_playlist_inner(
+        dir,
+        name,
+        request,
+        None,
+        Some(&curated.track_ids),
+        entries,
+        graph_path,
+        copy_to,
+        Some(provenance),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn save_playlist_inner(
+    dir: &Path,
+    name: &str,
+    request: Option<&str>,
+    cypher: Option<&str>,
+    ids: Option<&[String]>,
+    entries: &[PlaylistEntry],
+    graph_path: &Path,
+    copy_to: Option<&Path>,
+    curation: Option<CurationProvenance>,
 ) -> Result<StoredPlaylist> {
     if entries.is_empty() {
         return Err(SonagramError::Playlist(
@@ -641,6 +719,7 @@ pub fn save_playlist(
         tracks,
         graph: graph_path.to_string_lossy().into_owned(),
         copy_to: copy_to.map(|p| p.to_string_lossy().into_owned()),
+        curation,
     };
 
     let m3u8_path = dir.join(format!("{slug}.m3u8"));
@@ -696,12 +775,65 @@ pub fn list_playlists(dir: &Path) -> Result<Vec<PlaylistMeta>> {
 
 /// Load one stored playlist's metadata by slug from `dir`.
 pub fn load_playlist_meta(dir: &Path, slug: &str) -> Result<PlaylistMeta> {
+    validate_slug(slug)?;
     let path = dir.join(format!("{slug}.meta.json"));
     let text = fs::read_to_string(&path).map_err(|e| {
         SonagramError::Playlist(format!("no stored playlist '{slug}' in {}: {e}", dir.display()))
     })?;
     serde_json::from_str(&text)
         .map_err(|e| SonagramError::Playlist(format!("parse {}: {e}", path.display())))
+}
+
+/// Update the free-text request of a stored playlist. The slug is validated
+/// before any path is resolved, and the sidecar replacement is atomic.
+pub fn update_playlist_request(
+    dir: &Path,
+    slug: &str,
+    request: Option<&str>,
+) -> Result<PlaylistMeta> {
+    validate_slug(slug)?;
+    let mut meta = load_playlist_meta(dir, slug)?;
+    meta.request = request.map(str::to_string);
+    let path = dir.join(format!("{slug}.meta.json"));
+    let json = serde_json::to_string_pretty(&meta)
+        .map_err(|e| SonagramError::Playlist(format!("serialize playlist meta: {e}")))?;
+    let tmp = dir.join(format!(".{slug}.meta.json.tmp.{}", std::process::id()));
+    fs::write(&tmp, json).map_err(|e| {
+        SonagramError::Playlist(format!("write playlist metadata {}: {e}", tmp.display()))
+    })?;
+    fs::rename(&tmp, &path).map_err(|e| {
+        SonagramError::Playlist(format!("replace playlist metadata {}: {e}", path.display()))
+    })?;
+    Ok(meta)
+}
+
+/// Delete a stored playlist pair. Returns `false` when neither file exists.
+/// The slug is validated before any filesystem access.
+pub fn delete_playlist(dir: &Path, slug: &str) -> Result<bool> {
+    validate_slug(slug)?;
+    let paths = [
+        dir.join(format!("{slug}.m3u8")),
+        dir.join(format!("{slug}.meta.json")),
+    ];
+    let mut removed = false;
+    for path in paths {
+        if path.exists() {
+            fs::remove_file(&path).map_err(|e| {
+                SonagramError::Playlist(format!("delete stored playlist {}: {e}", path.display()))
+            })?;
+            removed = true;
+        }
+    }
+    Ok(removed)
+}
+
+fn validate_slug(slug: &str) -> Result<()> {
+    if slug.is_empty() || slugify(slug) != slug {
+        return Err(SonagramError::Playlist(format!(
+            "invalid playlist slug '{slug}'"
+        )));
+    }
+    Ok(())
 }
 
 /// Slugify a playlist name to a filesystem-safe kebab string: lowercase, keep
@@ -1111,6 +1243,7 @@ mod tests {
         assert_eq!(m.tracks.len(), 2);
         assert_eq!(m.tracks[0].position, 1);
         assert_eq!(m.tracks[0].title.as_deref(), Some("T1"));
+        assert!(m.curation.is_none(), "legacy/manual metadata stays compatible");
 
         // A second playlist of the same name collides → `-2` slug.
         let s2 = save_playlist(
@@ -1127,5 +1260,62 @@ mod tests {
         assert!(save_playlist(&dir, "x", None, None, Some(&[]), &[], Path::new("/g.kgl"), None).is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn playlist_meta_load_rejects_traversal_slug() {
+        let dir = std::env::temp_dir();
+        let err = load_playlist_meta(&dir, "../escape").unwrap_err();
+        assert!(err.to_string().contains("invalid playlist slug"));
+    }
+
+    #[test]
+    fn legacy_metadata_without_curation_deserializes() {
+        let json = r#"{
+            "name":"Legacy","slug":"legacy","created_at":"2026-01-01T00:00:00Z",
+            "request":null,"cypher":null,"ids":["h"],"n_tracks":1,
+            "total_duration_sec":120,"tracks":[{"position":1,"content_hash":"h",
+            "artist":null,"title":null,"duration_sec":120.0}],
+            "graph":"/g.kgl","copy_to":null
+        }"#;
+        let meta: PlaylistMeta = serde_json::from_str(json).unwrap();
+        assert!(meta.curation.is_none());
+    }
+
+    #[test]
+    fn playlist_store_update_delete_and_traversal_are_safe() {
+        let parent = std::env::temp_dir().join(format!(
+            "sonagram-store-crud-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let dir = parent.join("store");
+        let entries = vec![entry(Some(120.0), Some("A"), Some("T"), "/m/a.mp3")];
+        let ids = vec!["h".to_string()];
+        save_playlist(
+            &dir,
+            "CRUD",
+            None,
+            None,
+            Some(&ids),
+            &entries,
+            Path::new("/g.kgl"),
+            None,
+        )
+        .unwrap();
+        let updated = update_playlist_request(&dir, "crud", Some("updated request")).unwrap();
+        assert_eq!(updated.request.as_deref(), Some("updated request"));
+
+        let outside = parent.join("outside.meta.json");
+        fs::write(&outside, "do not delete").unwrap();
+        assert!(update_playlist_request(&dir, "../outside", Some("bad")).is_err());
+        assert!(delete_playlist(&dir, "../outside").is_err());
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "do not delete");
+
+        assert!(delete_playlist(&dir, "crud").unwrap());
+        assert!(!dir.join("crud.m3u8").exists());
+        assert!(!dir.join("crud.meta.json").exists());
+        assert!(!delete_playlist(&dir, "crud").unwrap());
+        let _ = fs::remove_dir_all(parent);
     }
 }

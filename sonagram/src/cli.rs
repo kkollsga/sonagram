@@ -29,6 +29,7 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 
 use crate::config::Config;
+use crate::curation::{self, PlaylistBrief, PlaylistPolicy, PlaylistPreset};
 use crate::enrich::{self, EnrichOptions, EnrichProgress, EnrichmentData};
 use crate::graph::{self, LibraryInfo, SourceInput};
 use crate::pipeline;
@@ -68,6 +69,10 @@ pub fn run(args: &[String]) -> i32 {
         "enrich" => finish(cmd_enrich(&args[1..])),
         "build" => finish(cmd_build(&args[1..])),
         "playlist" => finish(cmd_playlist(&args[1..])),
+        "profile" => finish(cmd_profile(&args[1..])),
+        "curate" => finish(cmd_curate(&args[1..])),
+        "audit" => finish(cmd_audit(&args[1..])),
+        "explain" => finish(cmd_explain(&args[1..])),
         "playlists" => finish(cmd_playlists(&args[1..])),
         "sources" => finish(cmd_sources(&args[1..])),
         "config" => finish(cmd_config(&args[1..])),
@@ -142,6 +147,24 @@ SUBCOMMANDS:\n\
              are never moved, retagged, or modified. Pass either flag or both;\n\
              at least one is required.\n\
 \n\
+    profile  [--format json|human]\n\
+             Summarize curation-relevant statistics from the configured graph.\n\
+\n\
+    curate   [--preset <name>] [--tracks N] [--duration-sec N]\n\
+             [--seed-ids <hashes>] [--brief-json <json>]\n\
+             [--policy-json <json>] [--name <name>] [--description <text>]\n\
+             [--format json|human]\n\
+             Select, sequence, audit, and optionally store a playlist through\n\
+             the library-owned curation engine. Failed audits are never saved.\n\
+\n\
+    audit    --ids <hashes> [--preset <name> | --policy-json <json>]\n\
+             [--format json|human]\n\
+             Independently audit an ordered playlist against a typed policy.\n\
+\n\
+    explain  --ids <hashes> [--preset <name> | --policy-json <json>]\n\
+             [--format json|human]\n\
+             Explain track, transition, and arc contributions for an order.\n\
+\n\
     status   <library_root> [--format json]\n\
              Read-only freshness probe (mutates nothing): report how the cache\n\
              under <library_root>/.sonagram/ compares to the files on disk.\n\
@@ -175,8 +198,10 @@ SUBCOMMANDS:\n\
              Install fills in your configured library path, refuses to overwrite\n\
              without --force, and tells the agent to read + follow it in-session.\n\
 \n\
-    playlists            List stored playlists (from `playlist --name`).\n\
-    playlists show <slug>  Full metadata + tracklist for one stored playlist.\n\
+    playlists                 List stored playlists (from `curate --name`).\n\
+    playlists show <slug>     Full metadata + tracklist for one stored playlist.\n\
+    playlists update <slug>   Set/clear the stored request description.\n\
+    playlists delete <slug>   Delete the stored .m3u8 + metadata pair.\n\
 \n\
 CONFIG-DRIVEN FORMS (no path args — fan out over configured sources):\n\
     sonagram scan                 scan every configured source\n\
@@ -521,6 +546,345 @@ fn report_enrichment(enrichment: Option<&EnrichmentData>) {
     }
 }
 
+fn load_configured_graph() -> Result<(Config, PathBuf, std::sync::Arc<kglite::api::DirGraph>)> {
+    let cfg = Config::load()?;
+    let graph_path = cfg.resolved_graph()?;
+    let graph = kglite::api::io::load_file(path_str(&graph_path)?)
+        .map_err(|e| SonagramError::Graph(format!("load {}: {e}", graph_path.display())))?;
+    Ok((cfg, graph_path, graph))
+}
+
+fn cmd_profile(args: &[String]) -> Result<()> {
+    let as_json = parse_output_format("profile", args)?;
+    let (_, _, graph) = load_configured_graph()?;
+    let profile = curation::profile_library(&graph)?;
+    if as_json {
+        print_json(&profile)?;
+    } else {
+        println!(
+            "{} tracks ({} music, {} canonical), {} artists, {} albums, {} Songs, {} styles",
+            profile.tracks,
+            profile.music_tracks,
+            profile.canonical_tracks,
+            profile.unique_artists,
+            profile.unique_albums,
+            profile.unique_songs,
+            profile.unique_styles
+        );
+        for (name, stat) in &profile.stats {
+            println!(
+                "  {name}: {}/{} present, median {}",
+                stat.present,
+                stat.total,
+                stat.median
+                    .map(|value| format!("{value:.3}"))
+                    .unwrap_or_else(|| "?".into())
+            );
+        }
+    }
+    Ok(())
+}
+
+fn cmd_curate(args: &[String]) -> Result<()> {
+    let mut preset = None;
+    let mut target_tracks = None;
+    let mut target_duration_sec = None;
+    let mut seed_ids = None;
+    let mut brief_json = None;
+    let mut policy_json = None;
+    let mut name = None;
+    let mut description = None;
+    let mut as_json = false;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--preset" => preset = Some(parse_preset(&flag_value(args, &mut i, "--preset")?)?),
+            "--tracks" => {
+                let value = flag_value(args, &mut i, "--tracks")?;
+                target_tracks = Some(value.parse::<usize>().map_err(|_| {
+                    SonagramError::Playlist(format!("curate: --tracks expects an integer, got {value}"))
+                })?);
+            }
+            "--duration-sec" => {
+                let value = flag_value(args, &mut i, "--duration-sec")?;
+                target_duration_sec = Some(value.parse::<u64>().map_err(|_| {
+                    SonagramError::Playlist(format!(
+                        "curate: --duration-sec expects an integer, got {value}"
+                    ))
+                })?);
+            }
+            "--seed-ids" => seed_ids = Some(parse_ids(&flag_value(args, &mut i, "--seed-ids")?)),
+            "--brief-json" => brief_json = Some(flag_value(args, &mut i, "--brief-json")?),
+            "--policy-json" => policy_json = Some(flag_value(args, &mut i, "--policy-json")?),
+            "--name" => name = Some(flag_value(args, &mut i, "--name")?),
+            "--description" => description = Some(flag_value(args, &mut i, "--description")?),
+            "--format" => {
+                as_json = parse_format_value("curate", &flag_value(args, &mut i, "--format")?)?;
+            }
+            "--json" => as_json = true,
+            other => {
+                return Err(SonagramError::Playlist(format!(
+                    "curate: unexpected argument '{other}'"
+                )))
+            }
+        }
+        i += 1;
+    }
+    let brief_from_json = brief_json.is_some();
+    let mut brief = if let Some(raw) = brief_json {
+        if preset.is_some() || target_tracks.is_some() || target_duration_sec.is_some() || seed_ids.is_some() {
+            return Err(SonagramError::Playlist(
+                "curate: --brief-json cannot be combined with --preset/--tracks/--duration-sec/--seed-ids"
+                    .into(),
+            ));
+        }
+        serde_json::from_str::<PlaylistBrief>(&raw).map_err(|e| {
+            SonagramError::Playlist(format!("curate: invalid --brief-json: {e}"))
+        })?
+    } else {
+        let mut brief = PlaylistBrief {
+            preset: preset.unwrap_or_default(),
+            ..PlaylistBrief::default()
+        };
+        if let Some(value) = target_tracks {
+            brief.target_tracks = value;
+        }
+        brief.target_duration_sec = target_duration_sec;
+        if let Some(value) = seed_ids {
+            brief.seed_ids = value;
+        }
+        brief
+    };
+    let expected_preset = (brief_from_json || preset.is_some()).then_some(brief.preset);
+    let policy = parse_policy(policy_json.as_deref(), expected_preset, "curate")?;
+    if expected_preset.is_none() && policy_json.is_some() {
+        brief.preset = policy.preset;
+    }
+    let (cfg, graph_path, graph) = load_configured_graph()?;
+    let result = curation::curate_playlist(&graph, &brief, &policy)?;
+    if !result.exportable {
+        emit_curate_result(&result, None, as_json)?;
+        return Err(SonagramError::Playlist(
+            "curate: library audit failed; no playlist was written".into(),
+        ));
+    }
+    let stored = if let Some(name) = name {
+        let entries = playlist::entries_from_graph(&graph, Path::new(""), &result.track_ids)?;
+        let dir = cfg.resolved_playlists_dir()?;
+        let saved = playlist::save_curated_playlist(
+            &dir,
+            &name,
+            description.as_deref(),
+            &result,
+            &entries,
+            &graph_path,
+            None,
+        )?;
+        Some(json!({
+            "slug": saved.slug,
+            "m3u8_path": saved.m3u8_path,
+            "meta_path": saved.meta_path,
+        }))
+    } else {
+        None
+    };
+    emit_curate_result(&result, stored, as_json)
+}
+
+fn emit_curate_result(
+    result: &curation::CuratedPlaylist,
+    stored: Option<serde_json::Value>,
+    as_json: bool,
+) -> Result<()> {
+    if as_json {
+        print_json(&json!({ "result": result, "stored": stored }))
+    } else {
+        println!(
+            "curated {} tracks; audit {}; mean transition {}; arc error {}",
+            result.track_ids.len(),
+            if result.audit.passed { "passed" } else { "failed" },
+            result
+                .audit
+                .mean_transition_score
+                .map(|value| format!("{value:.3}"))
+                .unwrap_or_else(|| "?".into()),
+            result
+                .audit
+                .mean_arc_error
+                .map(|value| format!("{value:.3}"))
+                .unwrap_or_else(|| "?".into())
+        );
+        for issue in &result.audit.issues {
+            println!("  {:?} {}: {}", issue.severity, issue.code, issue.message);
+        }
+        if let Some(stored) = stored {
+            println!("stored: {}", stored["m3u8_path"].as_str().unwrap_or("?"));
+        }
+        Ok(())
+    }
+}
+
+fn cmd_audit(args: &[String]) -> Result<()> {
+    let (ids, policy, as_json) = parse_order_policy_args("audit", args)?;
+    let (_, _, graph) = load_configured_graph()?;
+    let audit = curation::audit_playlist(&graph, &ids, &policy)?;
+    if as_json {
+        print_json(&audit)?;
+    } else {
+        println!(
+            "audit {}: {} tracks, {} artists, mean transition {}",
+            if audit.passed { "passed" } else { "failed" },
+            audit.track_count,
+            audit.unique_artists,
+            audit
+                .mean_transition_score
+                .map(|value| format!("{value:.3}"))
+                .unwrap_or_else(|| "?".into())
+        );
+        for issue in &audit.issues {
+            println!("  {:?} {}: {}", issue.severity, issue.code, issue.message);
+        }
+    }
+    Ok(())
+}
+
+fn cmd_explain(args: &[String]) -> Result<()> {
+    let (ids, policy, as_json) = parse_order_policy_args("explain", args)?;
+    let (_, _, graph) = load_configured_graph()?;
+    let explanation = curation::explain_playlist(&graph, &ids, &policy)?;
+    if as_json {
+        print_json(&explanation)?;
+    } else {
+        for line in &explanation.summary {
+            println!("{line}");
+        }
+        for track in &explanation.tracks {
+            println!(
+                "  {:>3}. {} - {} [{}]",
+                track.position,
+                track.artist.as_deref().unwrap_or("?"),
+                track.title.as_deref().unwrap_or("?"),
+                track
+                    .contributions
+                    .iter()
+                    .map(|item| format!("{}={:.3}", item.component, item.value))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+    }
+    Ok(())
+}
+
+fn parse_order_policy_args(
+    command: &str,
+    args: &[String],
+) -> Result<(Vec<String>, PlaylistPolicy, bool)> {
+    let mut ids = None;
+    let mut preset = None;
+    let mut policy_json = None;
+    let mut as_json = false;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--ids" => ids = Some(parse_ids(&flag_value(args, &mut i, "--ids")?)),
+            "--preset" => preset = Some(parse_preset(&flag_value(args, &mut i, "--preset")?)?),
+            "--policy-json" => policy_json = Some(flag_value(args, &mut i, "--policy-json")?),
+            "--format" => {
+                as_json = parse_format_value(command, &flag_value(args, &mut i, "--format")?)?;
+            }
+            "--json" => as_json = true,
+            other => {
+                return Err(SonagramError::Playlist(format!(
+                    "{command}: unexpected argument '{other}'"
+                )))
+            }
+        }
+        i += 1;
+    }
+    let ids = ids.filter(|value| !value.is_empty()).ok_or_else(|| {
+        SonagramError::Playlist(format!("{command}: pass --ids <hash1,hash2,...>"))
+    })?;
+    let policy = parse_policy(policy_json.as_deref(), preset, command)?;
+    Ok((ids, policy, as_json))
+}
+
+fn parse_policy(
+    raw: Option<&str>,
+    preset: Option<PlaylistPreset>,
+    command: &str,
+) -> Result<PlaylistPolicy> {
+    match raw {
+        Some(raw) => {
+            let policy = serde_json::from_str::<PlaylistPolicy>(raw).map_err(|e| {
+                SonagramError::Playlist(format!("{command}: invalid --policy-json: {e}"))
+            })?;
+            if let Some(preset) = preset {
+                if policy.preset != preset {
+                    return Err(SonagramError::Playlist(format!(
+                        "{command}: --preset does not match --policy-json"
+                    )));
+                }
+            }
+            Ok(policy)
+        }
+        None => Ok(PlaylistPolicy::for_preset(preset.unwrap_or_default())),
+    }
+}
+
+fn parse_preset(value: &str) -> Result<PlaylistPreset> {
+    match value.to_ascii_lowercase().as_str() {
+        "general" => Ok(PlaylistPreset::General),
+        "focus" => Ok(PlaylistPreset::Focus),
+        "party" => Ok(PlaylistPreset::Party),
+        "workout" => Ok(PlaylistPreset::Workout),
+        "chill" => Ok(PlaylistPreset::Chill),
+        "discovery" => Ok(PlaylistPreset::Discovery),
+        _ => Err(SonagramError::Playlist(format!(
+            "unknown preset '{value}' (expected general|focus|party|workout|chill|discovery)"
+        ))),
+    }
+}
+
+fn parse_ids(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn parse_output_format(command: &str, args: &[String]) -> Result<bool> {
+    match args {
+        [] => Ok(false),
+        [flag] if flag == "--json" => Ok(true),
+        [flag, value] if flag == "--format" => parse_format_value(command, value),
+        _ => Err(SonagramError::Playlist(format!(
+            "{command}: expected only [--format json|human]"
+        ))),
+    }
+}
+
+fn parse_format_value(command: &str, value: &str) -> Result<bool> {
+    match value {
+        "json" => Ok(true),
+        "human" => Ok(false),
+        _ => Err(SonagramError::Playlist(format!(
+            "{command}: --format expects json or human, got {value}"
+        ))),
+    }
+}
+
+fn print_json(value: &impl serde::Serialize) -> Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string(value)
+            .map_err(|e| SonagramError::Playlist(format!("serialize JSON output: {e}")))?
+    );
+    Ok(())
+}
+
 fn cmd_playlist(args: &[String]) -> Result<()> {
     // Local --help for the subcommand (its flags are non-trivial).
     if args.iter().any(|a| a == "--help" || a == "-h") {
@@ -723,6 +1087,14 @@ fn cmd_playlists(args: &[String]) -> Result<()> {
             if let Some(c) = &m.copy_to {
                 println!("  copy_to:  {c}");
             }
+            if let Some(curation) = &m.curation {
+                println!("  preset:   {:?}", curation.policy.preset);
+                println!(
+                    "  audit:    {} ({} repair attempt(s))",
+                    if curation.audit.passed { "passed" } else { "failed" },
+                    curation.repair_attempts
+                );
+            }
             for t in &m.tracks {
                 let dur = t
                     .duration_sec
@@ -737,8 +1109,55 @@ fn cmd_playlists(args: &[String]) -> Result<()> {
             }
             Ok(())
         }
+        Some("update") => {
+            let slug = args.get(1).ok_or_else(|| {
+                SonagramError::Playlist("playlists update: missing <slug>".into())
+            })?;
+            let mut description = None;
+            let mut clear = false;
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--description" => {
+                        description = Some(flag_value(args, &mut i, "--description")?)
+                    }
+                    "--clear-description" => clear = true,
+                    other => {
+                        return Err(SonagramError::Playlist(format!(
+                            "playlists update: unexpected argument '{other}'"
+                        )))
+                    }
+                }
+                i += 1;
+            }
+            if description.is_some() == clear {
+                return Err(SonagramError::Playlist(
+                    "playlists update: pass exactly one of --description <text> or --clear-description"
+                        .into(),
+                ));
+            }
+            let meta = playlist::update_playlist_request(&dir, slug, description.as_deref())?;
+            println!("updated playlist '{}' ({})", meta.name, meta.slug);
+            Ok(())
+        }
+        Some("delete") => {
+            let slug = args.get(1).ok_or_else(|| {
+                SonagramError::Playlist("playlists delete: missing <slug>".into())
+            })?;
+            if args.len() != 2 {
+                return Err(SonagramError::Playlist(
+                    "playlists delete: expected exactly one <slug>".into(),
+                ));
+            }
+            if playlist::delete_playlist(&dir, slug)? {
+                println!("deleted stored playlist '{slug}'");
+            } else {
+                println!("stored playlist '{slug}' does not exist");
+            }
+            Ok(())
+        }
         Some(other) => Err(SonagramError::Playlist(format!(
-            "playlists: unknown subcommand '{other}' — try `playlists` or `playlists show <slug>`"
+            "playlists: unknown subcommand '{other}' — try list|show|update|delete"
         ))),
     }
 }
