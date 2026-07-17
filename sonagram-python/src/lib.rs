@@ -391,6 +391,19 @@ fn export_m3u(
     .map_err(to_pyerr)
 }
 
+/// Run the shared `sonagram` CLI in-process, returning its process exit code.
+///
+/// The standalone `sonagram` binary and the `sonagram` console script bundled in
+/// this wheel both call the same pure-Rust [`sonagram::cli::run`], so command
+/// parsing, output strings, and exit codes cannot drift. `argv` excludes the
+/// program name (the `sonagram.cli` shim forwards `sys.argv[1:]`). The GIL is
+/// released for the duration — the CLI is blocking Rust IO/CPU that writes its
+/// own stdout/stderr and returns only an exit code.
+#[pyfunction]
+fn _run_cli(py: Python<'_>, argv: Vec<String>) -> i32 {
+    py.detach(|| sonagram::cli::run(&argv))
+}
+
 /// The compiled `_sonagram` module. Imported by `python/sonagram/__init__.py`.
 #[pymodule]
 fn _sonagram(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -402,6 +415,7 @@ fn _sonagram(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build, m)?)?;
     m.add_function(wrap_pyfunction!(scan_and_build, m)?)?;
     m.add_function(wrap_pyfunction!(export_m3u, m)?)?;
+    m.add_function(wrap_pyfunction!(_run_cli, m)?)?;
     Ok(())
 }
 

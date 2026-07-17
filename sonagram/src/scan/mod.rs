@@ -35,7 +35,7 @@
 pub mod cache;
 pub mod hash;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
@@ -322,6 +322,104 @@ fn cached_record_is_fresh(
     };
     memo.insert(content_hash.to_string(), fresh);
     Ok(fresh)
+}
+
+/// The outcome of a read-only freshness probe ([`probe_freshness`]).
+///
+/// Every count is derived without hashing a single file or running any analysis:
+/// it compares the on-disk `*.mp3` set and their `(size, mtime)` stats against
+/// the cached `index.json`, and checks each referenced record's schema/embedding
+/// freshness against the sonara build we now link. The four disjoint file counts
+/// (`fresh` + `stale` + `missing_from_index`) sum to `total_files`;
+/// `deleted_in_index` counts index entries with no file on disk (not part of
+/// `total_files`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FreshnessReport {
+    /// Total `*.mp3` files discovered on disk under the library root.
+    pub total_files: usize,
+    /// Files present in the index whose `(size, mtime)` still match **and** whose
+    /// cached record exists and is fresh (current sonara schema/embedding). These
+    /// would be served from the scan's stat fast-path — zero work on a rescan.
+    pub fresh: usize,
+    /// Files in the index whose stats changed, or whose cached record is missing
+    /// or stale (older sonara schema/embedding). A rescan would re-hash and, if
+    /// needed, re-analyze these.
+    pub stale: usize,
+    /// Files on disk with no index entry at all (never scanned).
+    pub missing_from_index: usize,
+    /// Index entries whose file no longer exists on disk (deleted since the last
+    /// scan). A rescan would prune these from the graph.
+    pub deleted_in_index: usize,
+    /// Whether a scan cache (`.sonagram/index.json`) exists at all.
+    pub has_cache: bool,
+}
+
+/// Read-only freshness probe of `library_root` against its `.sonagram/` scan
+/// cache. **Mutates nothing** — no index write, no record write, no analysis.
+///
+/// Walks for `*.mp3` (reusing the scanner's own discovery, so the file set is
+/// identical to what a scan would see), then classifies each file against the
+/// cached `index.json`:
+///
+/// - **fresh** — indexed, `(size, mtime)` unchanged, and the referenced record
+///   is present and passes [`record_is_fresh`];
+/// - **stale** — indexed but stats changed, or the record is missing/stale;
+/// - **missing_from_index** — on disk, not in the index.
+///
+/// Index entries with no file on disk are counted as `deleted_in_index`.
+///
+/// Record freshness is checked through the same `(schema_version,
+/// embedding_version)` comparison the scanner uses, memoized per content hash so
+/// each unique cached record is read at most once (no sampling needed — a full,
+/// exact check that stays cheap because records are content-addressed and
+/// deduplicated).
+pub fn probe_freshness(library_root: &Path) -> Result<FreshnessReport> {
+    let cache = Cache::new(library_root);
+    let has_cache = cache.index_path().exists();
+    let index = cache.load_index()?;
+    let files = discover_mp3s(library_root, &cache);
+
+    let mut fresh = 0usize;
+    let mut stale = 0usize;
+    let mut missing_from_index = 0usize;
+    let mut fresh_memo: HashMap<String, bool> = HashMap::new();
+    let mut present: HashSet<String> = HashSet::with_capacity(files.len());
+
+    for abs_path in &files {
+        let rel = match relative_path(library_root, abs_path) {
+            Some(r) => r,
+            None => continue,
+        };
+        present.insert(rel.clone());
+
+        match index.get(&rel) {
+            None => missing_from_index += 1,
+            Some(entry) => {
+                let stats_match = match std::fs::metadata(abs_path) {
+                    Ok(m) => entry.size == m.len() && entry.mtime_unix == mtime_unix(&m),
+                    Err(_) => false,
+                };
+                if stats_match
+                    && cached_record_is_fresh(&cache, &entry.content_hash, &mut fresh_memo)?
+                {
+                    fresh += 1;
+                } else {
+                    stale += 1;
+                }
+            }
+        }
+    }
+
+    let deleted_in_index = index.keys().filter(|k| !present.contains(*k)).count();
+
+    Ok(FreshnessReport {
+        total_files: files.len(),
+        fresh,
+        stale,
+        missing_from_index,
+        deleted_in_index,
+        has_cache,
+    })
 }
 
 /// Scan `library_root` using an injected [`Analyzer`] (the seam tests drive).

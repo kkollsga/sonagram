@@ -37,6 +37,14 @@ dependencies = [
     "kglite>=0.14",
 ]
 
+# Bundled Rust console script. The CLI is linked into this wheel's existing
+# `_sonagram` extension (the `sonagram` core crate's `cli::run`), and the shim
+# forwards `sys.argv[1:]` into it via `sonagram._sonagram._run_cli`. So
+# `pip install sonagram` gives the same `sonagram` command as the cargo binary,
+# from one shared code path — no separate build, no drift.
+[project.scripts]
+sonagram = "sonagram.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/kkollsga/sonagram"
 Documentation = "https://github.com/kkollsga/sonagram#readme"

@@ -18,6 +18,8 @@
 
 pub mod error;
 
+pub mod cli;
+
 pub mod record;
 
 pub mod scan;
