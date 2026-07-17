@@ -4,6 +4,61 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [Unreleased]
+
+Statistics-driven mood + quality layer plus song/version clustering (P21 Stages
+A, B, C). Pure mapper change — no scan, analysis, or CLI/status behaviour is
+touched; the graph is built from the curves already cached on disk. Graph schema
+moves to **v2**, so both golden digests were regenerated in this change (plain
+`9977d14b141a`, enriched `40709837f90c`).
+
+### Graph schema
+
+Graph schema **v2**. `Track` gains fifteen new properties, all null when their
+source curve/scalar is absent (the existing null-property policy), except
+`is_canonical` which is non-null on every `Track`. A new `Song` node type groups
+version families:
+
+- **Stage A — curve-derived flat features** (computed per track from the cached
+  `loudness_curve` / `energy_curve` / `tempo_curve` / `chord_events` /
+  `segments`): `macro_dynamics` (loudness-curve population stdev),
+  `energy_arc_range` (`(p95−p5)/mean` of the energy curve),
+  `energy_builds_per_min` (maximal ≥8-sample rising runs per minute),
+  `flow_smoothness` (`1 − mean|Δ|/mean`, clamped), `chord_vocab` (distinct chord
+  labels), `chord_entropy` (Shannon bits of the chord-label distribution),
+  `chord_churn` (chord events per minute), `tempo_steadiness` (`1 − cv`,
+  clamped), `seg_density` (segments per minute).
+- **Stage B — percentile-calibrated composite axes** (library-relative, computed
+  after all raw features exist; each is a percentile rank in `[0,1]` of a
+  signed-z-score composite, tie-broken by `content_hash`): `arousal_index`,
+  `valence_index` (documented weak prior — literature R² 0.12–0.28),
+  `tension_index`, `recording_quality`, plus `quality_tier` (`high`/`mid`/`low`
+  by percentile thirds of `recording_quality`).
+- **Stage C — song/version layer.** Recordings that share a version key
+  `(artist_id, normalized_title)` are grouped: every group of two or more gets a
+  `Song` node (id `"<artist_id>|<normalized_title>"`, properties `title`,
+  `artist`, `n_versions`, `canonical_hash`) with a `Track -[:VERSION_OF]-> Song`
+  edge from each member. Singletons get no `Song`. Every `Track` gains a non-null
+  `is_canonical` bool — `true` unless the track is a non-best member of a version
+  group; within a group the best member is the highest `recording_quality` (nulls
+  lowest), tie-broken by `content_hash` — so `WHERE t.is_canonical` skips
+  duplicate/inferior takes. Grouping is title+artist only in this iteration
+  (embeddings/duration deferred; the grouping seam is structured for a later
+  splitter).
+
+### Added
+
+- `graph/features.rs` — pure statistics module for the P21 Stage-A curve
+  features and the Stage-B two-pass z-score + percentile composite axes, with
+  unit tests for every feature (including empty/constant/too-short curves) and a
+  determinism test for the percentile pass.
+- `graph/song.rs` — the P21 Stage-C version-grouping + canonical-selection
+  module, plus `normalize::normalized_title` (lowercase; strip
+  bracketed/parenthesized and trailing edition markers; fold Unicode
+  apostrophes). Unit-tested for title normalization, canonical selection (null
+  `recording_quality`, tie-break, singleton exclusion) and order-independence;
+  `tests/song_versions.rs` is the integration gate over a synthetic version set.
+
 ## [0.2.0] - 2026-07-17
 
 Streaming scan pipeline (P20). Graph schema unchanged (v1); the golden-graph

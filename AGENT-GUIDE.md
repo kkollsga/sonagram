@@ -77,6 +77,34 @@ that wasn't run, or a tag the file lacked).
 | `analysis_schema_version` | int | no | provenance |
 | `embedding_version` | int | yes | provenance |
 
+**P21 curve-derived features** (graph schema v2 — computed from the full
+analysis curves at build time):
+
+| Property | Type | Null? | Meaning |
+|---|---|---|---|
+| `macro_dynamics` | float | yes | loudness-curve spread: arrangement-level quiet/loud architecture. High = deliberate dynamics (real masters); low = flat/monotone |
+| `energy_arc_range` | float | yes | how far the song travels dynamically ((p95−p5)/mean of energy curve) |
+| `energy_builds_per_min` | float | yes | sustained crescendo count per minute — "songs that go somewhere" |
+| `flow_smoothness` | float | yes | 0–1, high = steady flow (focus-friendly), low = jittery |
+| `chord_vocab` | int | yes | distinct chords in the track |
+| `chord_entropy` | float | yes | harmonic richness/unpredictability (bits) |
+| `chord_churn` | float | yes | chord events/min — on clean audio = harmonic rate; inflated on murky recordings (read with `recording_quality`) |
+| `tempo_steadiness` | float | yes | 0–1 performance tightness |
+| `seg_density` | float | yes | structural sections per minute |
+
+**P21 composite axes** (library-relative percentile ranks in [0,1] — 0.5 is the
+library median by construction; filter with percentile semantics, e.g.
+`tension_index > 0.7` = top 30%):
+
+| Property | Type | Null? | Meaning |
+|---|---|---|---|
+| `arousal_index` | float | yes | energy/brightness/rhythm intensity — the well-predicted mood axis |
+| `valence_index` | float | yes | musical positiveness — **WEAK PRIOR** (literature R² 0.12–0.28): rank with it, never hard-filter |
+| `tension_index` | float | yes | dissonance/minor/harmonic-complexity — "deep thinking" material = low-mid `arousal_index` × mid-high `tension_index` × high `chord_entropy` |
+| `recording_quality` | float | yes | audio-only production/provenance quality (validated: separates studio masters from bootlegs, AUC 0.75 scalar-only, d=0.93 with curves) |
+| `quality_tier` | str | yes | `"high"` / `"mid"` / `"low"` — percentile thirds of `recording_quality`, for cheap WHERE clauses |
+| `is_canonical` | bool | no | false only for inferior members of a version group — `WHERE t.is_canonical` is the universal "skip duplicate/inferior takes" filter |
+
 ### Dimension + derived nodes
 
 | Node | id | Properties |
@@ -89,6 +117,7 @@ that wasn't run, or a tag the file lacked).
 | `EnergyLevel` (10, static) | `"1"`–`"10"` | `name`, `level` |
 | `Decade` | e.g. `"1970s"` | `name` |
 | `Style` (detected) | `"style-000"` (id prop is `unique_id`) | `name` (derived `<band>-<acoustic\|electric>-<top-genre>`), `mean_bpm`, `mean_energy`, `mean_valence`, `mean_acousticness`, `n_tracks`, `top_genres` (list), `top_artists` (list), `exemplar_titles` (list) |
+| `Song` (P21, v2) | `artist_id\|normalized_title` | `title`, `artist`, `n_versions`, `canonical_hash` — exists only when ≥2 recordings share a version key; the members link in via `VERSION_OF` |
 | `Library` (1) | label | `path`, `n_tracks`, `schema_version` |
 
 ## Edge reference
@@ -103,6 +132,7 @@ that wasn't run, or a tag the file lacked).
 | `AT_ENERGY` | `Track`→`EnergyLevel` | — | only if `energy_level` present |
 | `FROM_DECADE` | `Track`→`Decade` | — | only if a year tag present; uses `original_year` when set, else file `year` (see `era_source`) |
 | `SIMILAR_TO` | `Track`→`Track` | `score` 0–1 | top-10 kNN; **directed** (A→B ≠ B→A) |
+| `VERSION_OF` | `Track`→`Song` | — | recordings of the same composition (P21); the Song's `canonical_hash` names the best take |
 | `IN_STYLE` | `Track`→`Style` | `membership` (1.0 in v1) | tracks in a similarity community |
 | `CAMELOT_ADJACENT` | `Key`→`Key` | `transition` = `energy_up`/`energy_down`/`mode_switch` | the Camelot wheel (72 edges) |
 
@@ -324,6 +354,14 @@ playlist. A hash matching no Track is reported, not silently dropped.
 
 ## Quality bar (every playlist, before you export)
 QC audits grade on these; treat them as requirements, not suggestions:
+0. **Filter `t.is_canonical` and prefer `quality_tier <> 'low'` by DEFAULT.**
+   On collector libraries the candidate pool is otherwise flooded with session
+   outtakes, bootlegs, and duplicate takes that pass every scalar filter. Only
+   drop these guards when the brief explicitly wants rarities/outtakes. For
+   mood asks, curate on the axes (`arousal_index`/`tension_index` percentiles +
+   curve features like `flow_smoothness`, `chord_entropy`), not on raw `energy`
+   thresholds alone — and treat `valence_index` as a ranking hint, never a
+   hard filter.
 1. **Duration check every pick.** Casual/mood playlists default to
    radio-length cuts (`duration_sec <= 330`) unless the brief wants epics —
    a 8:15 LP cut mid-road-trip reads as a pacing defect. Always `RETURN

@@ -63,6 +63,120 @@ pub fn decade_id(year: u32) -> String {
     format!("{}s", (year / 10) * 10)
 }
 
+/// Canonical title form for **version keying** (P21 Stage C): the string that,
+/// paired with an [`artist_id`], groups every recording of the same underlying
+/// song regardless of edition. It folds away the edition/mastering decoration
+/// that labels the *same* composition differently (`"- Remastered 2009"`,
+/// `"(Live)"`, `"- Take 5"`, `"(Mono)"`), so studio master, session outtake and
+/// live take share one key.
+///
+/// The transform, in order:
+/// 1. lowercase, and fold the three common Unicode apostrophes
+///    (`’ ‘ ʼ`) to ASCII `'` so `"I’d"` and `"I'd"` key identically;
+/// 2. drop **every** parenthesized `(...)` and bracketed `[...]` group — these
+///    almost always carry edition/feat./year decoration, and dropping the year-
+///    only parenthetical is called out in the spec;
+/// 3. drop a trailing `" - <marker>…"` segment when the segment (after removing
+///    any standalone 4-digit year token) is empty or begins with a known edition
+///    marker (`live`, `remaster`/`remastered`, `mono`, `stereo`, `take N`,
+///    `demo`, `version`, `edit`, `single version`, `album version`) — repeated so
+///    stacked markers all fall off;
+/// 4. collapse internal whitespace and trim surrounding `-_.` and spaces.
+///
+/// It is pure and total: the same input always yields the same output, so it is
+/// safe as a node-id component. This iteration keys on **title + artist only**;
+/// the `song` grouping module deliberately structures grouping so a later
+/// refinement can split an over-merged key by embedding/duration without changing
+/// this function.
+pub fn normalized_title(title: &str) -> String {
+    // 1. Lowercase + apostrophe fold.
+    let lowered = title.to_lowercase().replace(['\u{2019}', '\u{2018}', '\u{02bc}'], "'");
+    // 2. Strip bracketed/parenthesized groups.
+    let debracketed = strip_bracket_groups(&lowered);
+    let collapsed = collapse_ws(&debracketed);
+    // 3. Strip trailing edition markers.
+    let trimmed_markers = strip_trailing_markers(&collapsed);
+    // 4. Final collapse + trim of separator punctuation.
+    collapse_ws(&trimmed_markers)
+        .trim_matches(|c: char| c == '-' || c == '_' || c == '.' || c.is_whitespace())
+        .to_string()
+}
+
+/// Remove every `(...)` / `[...]` group (non-nested; unmatched openers drop the
+/// remainder). Content is discarded wholesale — for version keying the decoration
+/// inside brackets is exactly what must not distinguish two takes.
+fn strip_bracket_groups(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut depth = 0u32;
+    for c in s.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Collapse any run of whitespace to a single space and trim the ends.
+fn collapse_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Drop a trailing `" - <marker>…"` segment while one is present. Uses the last
+/// `" - "` so a title that itself contains a dash phrase is only trimmed when the
+/// *final* segment reads as an edition marker.
+fn strip_trailing_markers(s: &str) -> String {
+    let mut cur = s.to_string();
+    while let Some(pos) = cur.rfind(" - ") {
+        if is_edition_marker(cur[pos + 3..].trim()) {
+            cur.truncate(pos);
+        } else {
+            break;
+        }
+    }
+    cur
+}
+
+/// Whether a post-separator tail reads as an edition/mastering marker rather than
+/// part of the title. `take N` needs a numeric argument; a tail that is only
+/// 4-digit year tokens qualifies (the `"- 2009"` reissue stamp); otherwise the
+/// tail must begin with one of the marker words after its year tokens are removed
+/// (so both `"2009 remaster"` and `"remastered 2009"` match).
+fn is_edition_marker(tail: &str) -> bool {
+    if tail.is_empty() {
+        return false;
+    }
+    if let Some(rest) = tail.strip_prefix("take ") {
+        return rest
+            .split_whitespace()
+            .next()
+            .is_some_and(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit()));
+    }
+    let is_year = |w: &str| w.len() == 4 && w.chars().all(|c| c.is_ascii_digit());
+    let non_year: Vec<&str> = tail.split_whitespace().filter(|w| !is_year(w)).collect();
+    if non_year.is_empty() {
+        return true; // tail was only year token(s), e.g. "2009"
+    }
+    const MARKERS: [&str; 10] = [
+        "live",
+        "remaster",
+        "remastered",
+        "mono",
+        "stereo",
+        "demo",
+        "version",
+        "edit",
+        "single version",
+        "album version",
+    ];
+    let joined = non_year.join(" ");
+    MARKERS
+        .iter()
+        .any(|m| joined == *m || joined.starts_with(&format!("{m} ")))
+}
+
 /// The file-name component of a (possibly `/`-joined, relative) source path.
 /// Returns the whole string when it has no separator.
 pub fn filename_from_path(path: &str) -> String {
@@ -214,6 +328,69 @@ mod tests {
         assert_eq!(decade_id(1979), "1970s");
         assert_eq!(decade_id(2009), "2000s");
         assert_eq!(decade_id(1967), "1960s");
+    }
+
+    #[test]
+    fn normalized_title_folds_editions_and_case() {
+        // Bare title: lowercase only.
+        assert_eq!(normalized_title("Yesterday"), "yesterday");
+        assert_eq!(normalized_title("  Let It Be  "), "let it be");
+        // Parenthesized + bracketed decoration is dropped wholesale.
+        assert_eq!(normalized_title("Yesterday (Remastered)"), "yesterday");
+        assert_eq!(normalized_title("Yesterday (2009)"), "yesterday");
+        assert_eq!(normalized_title("Come Together [Mono]"), "come together");
+        assert_eq!(normalized_title("Help! (feat. Someone)"), "help!");
+        // Trailing dash markers, including year-decorated remaster spellings.
+        assert_eq!(normalized_title("Yesterday - Live"), "yesterday");
+        assert_eq!(normalized_title("Yesterday - Live at the BBC"), "yesterday");
+        assert_eq!(normalized_title("Yesterday - Remastered 2009"), "yesterday");
+        assert_eq!(normalized_title("Yesterday - 2009 Remaster"), "yesterday");
+        assert_eq!(normalized_title("Yesterday - Mono"), "yesterday");
+        assert_eq!(normalized_title("Yesterday - Stereo"), "yesterday");
+        assert_eq!(normalized_title("Yesterday - Take 5"), "yesterday");
+        assert_eq!(normalized_title("Yesterday - Demo"), "yesterday");
+        assert_eq!(normalized_title("Yesterday - Single Version"), "yesterday");
+        assert_eq!(normalized_title("Yesterday - Album Version"), "yesterday");
+        assert_eq!(normalized_title("Yesterday - 2009"), "yesterday");
+        // Stacked markers all fall off.
+        assert_eq!(
+            normalized_title("Yesterday (Remastered) - Live - Mono"),
+            "yesterday"
+        );
+    }
+
+    #[test]
+    fn normalized_title_normalizes_unicode_apostrophes() {
+        // Curly (U+2019), left (U+2018), modifier-letter (U+02BC) all fold to '.
+        let curly = normalized_title("I\u{2019}d Much Rather Be With the Boys");
+        let straight = normalized_title("I'd Much Rather Be With the Boys");
+        assert_eq!(curly, "i'd much rather be with the boys");
+        assert_eq!(curly, straight, "apostrophe variants must key identically");
+        assert_eq!(
+            normalized_title("Don\u{2018}t Stop"),
+            normalized_title("Don't Stop")
+        );
+    }
+
+    #[test]
+    fn normalized_title_preserves_non_marker_dash_phrases() {
+        // A genuine dash phrase that is NOT an edition marker stays intact.
+        assert_eq!(
+            normalized_title("Marie - A Little Cajun Waltz"),
+            "marie - a little cajun waltz"
+        );
+        // "Take" without a number is not a take marker.
+        assert_eq!(normalized_title("Give and Take"), "give and take");
+        // A real title that happens to start with "Live" (no separator) survives.
+        assert_eq!(normalized_title("Live and Let Die"), "live and let die");
+    }
+
+    #[test]
+    fn normalized_title_trims_separator_punctuation() {
+        // Punctuation left after stripping is trimmed off the ends.
+        assert_eq!(normalized_title("Song."), "song");
+        assert_eq!(normalized_title("_Intro_"), "intro");
+        assert_eq!(normalized_title("(Live)"), "", "all-decoration title collapses");
     }
 
     #[test]

@@ -18,12 +18,16 @@
 //! ## Stage order (fixed — nodes before edges, no endpoint vivification)
 //! dimension nodes (`Artist`, `Album`, `Genre`, static `Key`×24 / `TempoBand`×7
 //! / `EnergyLevel`×10, `Decade`) → `Track` nodes (one full-width `add_nodes`
-//! pass) → edges → embedding store → `SIMILAR_TO` → `CAMELOT_ADJACENT` →
-//! `Style` → `Library` root **last** (it carries the adaptive `style_threshold`
-//! the Style pass chooses, and has no edges so its position is free).
+//! pass, carrying the P21 Stage-C `is_canonical` flag) → edges → `Song` version
+//! nodes + `VERSION_OF` edges → embedding store → `SIMILAR_TO` →
+//! `CAMELOT_ADJACENT` → `Style` → `Library` root **last** (it carries the
+//! adaptive `style_threshold` the Style pass chooses, and has no edges so its
+//! position is free).
 
 mod derive;
+mod features;
 pub mod normalize;
+mod song;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -47,7 +51,17 @@ use normalize::{
 /// Version of *this* graph schema (node/edge/property layout). Distinct from the
 /// analysis schema version (which lives on each `Track`). Bump when the mapping
 /// changes shape.
-pub const GRAPH_SCHEMA_VERSION: u32 = 1;
+///
+/// v2 (P21): `Track` gains the curve-derived Stage-A properties (`macro_dynamics`,
+/// `energy_arc_range`, `energy_builds_per_min`, `flow_smoothness`, `chord_vocab`,
+/// `chord_entropy`, `chord_churn`, `tempo_steadiness`, `seg_density`), the
+/// percentile-calibrated Stage-B axes (`arousal_index`, `valence_index`,
+/// `tension_index`, `recording_quality`, `quality_tier`), and the Stage-C version
+/// layer: an `is_canonical` bool on every `Track`, plus a `Song` node per version
+/// group (≥2 recordings sharing `(artist_id, normalized_title)`) with
+/// `Track -[:VERSION_OF]-> Song` edges. Pure mapper change (Stage C extends the
+/// same v2 schema — no bump).
+pub const GRAPH_SCHEMA_VERSION: u32 = 2;
 
 /// The embedding-store model identity, **derived** from sonara's
 /// [`SIMILARITY_VERSION`] (format `"sonara-similarity-v{N}"`) rather than
@@ -78,6 +92,8 @@ const TEMPO_BAND_TYPE: &str = "TempoBand";
 const ENERGY_LEVEL: &str = "EnergyLevel";
 const DECADE: &str = "Decade";
 const STYLE: &str = "Style";
+// P21 Stage C: one Song node per version group (≥2 recordings of the same song).
+const SONG: &str = "Song";
 
 // Edge-type names. None contains the reserved Cypher substring "CONTAINS".
 const BY_ARTIST: &str = "BY_ARTIST";
@@ -93,6 +109,8 @@ const FROM_SOURCE: &str = "FROM_SOURCE";
 const SIMILAR_TO: &str = "SIMILAR_TO";
 const CAMELOT_ADJACENT: &str = "CAMELOT_ADJACENT";
 const IN_STYLE: &str = "IN_STYLE";
+// P21 Stage C: every member recording → its Song version group.
+const VERSION_OF: &str = "VERSION_OF";
 // Phase 12 enrichment edge: human co-listening similarity from Last.fm. Carries
 // `score` (the match weight) on Track→Track; `source="lastfm"` on Artist→Artist.
 const CROWD_SIMILAR: &str = "CROWD_SIMILAR";
@@ -301,8 +319,22 @@ pub fn build_graph_from_sources(
     // P19: also stamps each source's scan_fingerprint when available.
     add_sources(&mut graph, &source_counts, &source_fingerprints)?;
 
+    // P21 Stage A curve features + Stage B composite axes, computed once over the
+    // sorted set (pure functions of the cached record curves/scalars — no
+    // re-scan). Hoisted here so the Stage-C version grouping can read
+    // `recording_quality` to pick each song's canonical take, and so both `Track`
+    // properties and the `Song` layer see identical values.
+    let feats: Vec<features::CurveFeatures> =
+        sorted.iter().map(|r| features::curve_features(r)).collect();
+    let axes = features::composite_axes(&sorted, &feats);
+    let quality: Vec<Option<f64>> = axes.iter().map(|a| a.recording_quality).collect();
+    let grouping = song::group_songs(&sorted, &quality);
+
     // ── Stage 3: Track nodes (single full-width pass) ───────────────────────
-    add_tracks(&mut graph, &sorted, &source_of, enrichment)?;
+    add_tracks(&mut graph, &sorted, &source_of, enrichment, &feats, &axes, &grouping.is_canonical)?;
+
+    // ── Stage 3b: Song version nodes + VERSION_OF edges (endpoints = Tracks) ─
+    song::add_songs(&mut graph, &grouping)?;
 
     // ── Stage 4: edges (all endpoints now exist) ────────────────────────────
     let specs = build_edges(&sorted, &albums, &source_of);
@@ -587,11 +619,15 @@ fn add_sources(
 /// every row (missing optionals → null cells) so this is one `add_nodes` pass —
 /// a partial DataFrame would rebuild nodes from only its columns, dropping the
 /// rest.
+#[allow(clippy::too_many_arguments)]
 fn add_tracks(
     graph: &mut DirGraph,
     sorted: &[&AnalysisRecord],
     source_of: &BTreeMap<String, String>,
     enrichment: Option<&EnrichmentData>,
+    feats: &[features::CurveFeatures],
+    axes: &[features::CompositeAxes],
+    is_canonical: &[bool],
 ) -> Result<()> {
     if sorted.is_empty() {
         return Ok(());
@@ -702,6 +738,33 @@ fn add_tracks(
     let trailing_silence_sec = fo_col(sorted, |r| r.analysis.trailing_silence_sec);
     let spectral_flatness = fo_col(sorted, |r| r.analysis.spectral_flatness_mean);
 
+    // P21 Stage A curve features + Stage B composite axes are computed once by the
+    // caller (see `build_graph_from_sources`) so the Stage-C song grouping and
+    // these `Track` columns read identical values; here they are just projected
+    // into columns.
+    let macro_dynamics: Vec<Option<f64>> = feats.iter().map(|f| f.macro_dynamics).collect();
+    let energy_arc_range: Vec<Option<f64>> = feats.iter().map(|f| f.energy_arc_range).collect();
+    let energy_builds_per_min: Vec<Option<f64>> =
+        feats.iter().map(|f| f.energy_builds_per_min).collect();
+    let flow_smoothness: Vec<Option<f64>> = feats.iter().map(|f| f.flow_smoothness).collect();
+    let chord_vocab: Vec<Option<i64>> = feats.iter().map(|f| f.chord_vocab).collect();
+    let chord_entropy: Vec<Option<f64>> = feats.iter().map(|f| f.chord_entropy).collect();
+    let chord_churn: Vec<Option<f64>> = feats.iter().map(|f| f.chord_churn).collect();
+    let tempo_steadiness: Vec<Option<f64>> = feats.iter().map(|f| f.tempo_steadiness).collect();
+    let seg_density: Vec<Option<f64>> = feats.iter().map(|f| f.seg_density).collect();
+
+    let arousal_index: Vec<Option<f64>> = axes.iter().map(|a| a.arousal_index).collect();
+    let valence_index: Vec<Option<f64>> = axes.iter().map(|a| a.valence_index).collect();
+    let tension_index: Vec<Option<f64>> = axes.iter().map(|a| a.tension_index).collect();
+    let recording_quality: Vec<Option<f64>> = axes.iter().map(|a| a.recording_quality).collect();
+    let quality_tier: Vec<Option<String>> =
+        axes.iter().map(|a| a.quality_tier.clone()).collect();
+
+    // P21 Stage C: `is_canonical` is non-null on every Track (all singletons and
+    // every version group's best take are `true`), so `WHERE t.is_canonical` is
+    // the universal "skip duplicate/inferior takes" filter.
+    let is_canonical_col: Vec<Option<bool>> = is_canonical.iter().map(|&b| Some(b)).collect();
+
     // String (optional) tonal/rhythm columns.
     let time_signature = str_opt_col(sorted, |r| r.analysis.time_signature.clone());
     let key = str_opt_col(sorted, |r| r.analysis.key.clone());
@@ -764,6 +827,24 @@ fn add_tracks(
         ("leading_silence_sec", ColumnType::Float64, ColumnData::Float64(leading_silence_sec)),
         ("trailing_silence_sec", ColumnType::Float64, ColumnData::Float64(trailing_silence_sec)),
         ("spectral_flatness", ColumnType::Float64, ColumnData::Float64(spectral_flatness)),
+        // P21 Stage A: curve-derived flat features.
+        ("macro_dynamics", ColumnType::Float64, ColumnData::Float64(macro_dynamics)),
+        ("energy_arc_range", ColumnType::Float64, ColumnData::Float64(energy_arc_range)),
+        ("energy_builds_per_min", ColumnType::Float64, ColumnData::Float64(energy_builds_per_min)),
+        ("flow_smoothness", ColumnType::Float64, ColumnData::Float64(flow_smoothness)),
+        ("chord_vocab", ColumnType::Int64, ColumnData::Int64(chord_vocab)),
+        ("chord_entropy", ColumnType::Float64, ColumnData::Float64(chord_entropy)),
+        ("chord_churn", ColumnType::Float64, ColumnData::Float64(chord_churn)),
+        ("tempo_steadiness", ColumnType::Float64, ColumnData::Float64(tempo_steadiness)),
+        ("seg_density", ColumnType::Float64, ColumnData::Float64(seg_density)),
+        // P21 Stage B: percentile-calibrated composite axes.
+        ("arousal_index", ColumnType::Float64, ColumnData::Float64(arousal_index)),
+        ("valence_index", ColumnType::Float64, ColumnData::Float64(valence_index)),
+        ("tension_index", ColumnType::Float64, ColumnData::Float64(tension_index)),
+        ("recording_quality", ColumnType::Float64, ColumnData::Float64(recording_quality)),
+        ("quality_tier", ColumnType::String, ColumnData::String(quality_tier)),
+        // P21 Stage C: canonical-take flag (non-null bool).
+        ("is_canonical", ColumnType::Boolean, ColumnData::Boolean(is_canonical_col)),
         ("time_signature", ColumnType::String, ColumnData::String(time_signature)),
         ("key", ColumnType::String, ColumnData::String(key)),
         ("camelot", ColumnType::String, ColumnData::String(camelot)),
