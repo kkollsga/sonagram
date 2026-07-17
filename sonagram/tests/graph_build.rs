@@ -74,12 +74,12 @@ fn str_prop(graph: &DirGraph, node_type: &str, hash: &str, prop: &str) -> String
 }
 
 // Expected cardinalities, computed independently from the fixture JSON.
-// `Style` (P10c): **3** communities over the 15 fixtures at the *adaptive*
+// `Style` (P14): **2** communities over the 15 fixtures at the *adaptive*
 // threshold this build chooses from the fixtures' own score distribution
-// (measured chosen threshold ≈0.637, cap = style_cap(15) = 5). The sonara 0.2.3
-// chroma fix reshaped the chroma-derived embedding dims (13-25), so the
-// mutual-kNN neighbourhoods — and thus the communities — re-formed (2→3; see
-// GRAPH-GATE.md P11 + the `graph_derive::style_threshold_tuning` diagnostic).
+// (cap = style_cap(15) = 5). The sonara 0.2.4 danceability recalibration shifted
+// embedding dim 37 (the danceability component) on all 15 fixtures, slightly
+// perturbing the mutual-kNN neighbourhoods so the communities re-formed (3→2; see
+// GRAPH-GATE.md P14 + the `graph_derive::style_threshold_tuning` diagnostic).
 const EXPECT_NODES: &[(&str, usize)] = &[
     ("Library", 1),
     ("Track", 15),
@@ -90,13 +90,13 @@ const EXPECT_NODES: &[(&str, usize)] = &[
     ("TempoBand", 7),
     ("EnergyLevel", 10),
     ("Decade", 4),
-    ("Style", 3),
+    ("Style", 2),
 ];
 
 // BY_ARTIST carries both Track→Artist (15) and Album→Artist (15) = 30.
-// P6/P10c derived edges: SIMILAR_TO = 15 tracks × min(10, 14) = 150 (dense, all
-// 15 carry embeddings); CAMELOT_ADJACENT = 24 keys × 3 = 72; IN_STYLE = 4 + 3 + 2
-// = 9 (the three adaptive-threshold communities' members, post-0.2.3 chroma fix).
+// P6/P14 derived edges: SIMILAR_TO = 15 tracks × min(10, 14) = 150 (dense, all
+// 15 carry embeddings); CAMELOT_ADJACENT = 24 keys × 3 = 72; IN_STYLE = 5 + 3 = 8
+// (the two adaptive-threshold communities' members, post-0.2.4 recalibration).
 const EXPECT_EDGES: &[(&str, usize)] = &[
     ("BY_ARTIST", 30),
     ("ON_ALBUM", 15),
@@ -107,7 +107,7 @@ const EXPECT_EDGES: &[(&str, usize)] = &[
     ("FROM_DECADE", 15),
     ("SIMILAR_TO", 150),
     ("CAMELOT_ADJACENT", 72),
-    ("IN_STYLE", 9),
+    ("IN_STYLE", 8),
 ];
 
 #[test]
@@ -152,6 +152,13 @@ fn track_property_row_spot_check() {
     assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "artist_name"), "Bruno Mars");
     assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "key"), "F major");
     assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "camelot"), "7B");
+
+    // sonara 0.2.4: bpm_confidence is always present and in [0, 1].
+    let bpm_conf = f64_prop(&graph, "Track", BRUNO_HASH, "bpm_confidence");
+    assert!((0.0..=1.0).contains(&bpm_conf), "bpm_confidence out of range: {bpm_conf}");
+    // era_source records which year fed FROM_DECADE. Marry You carries a file
+    // `year` tag but no `original_year`, so the era falls back to the file year.
+    assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "era_source"), "file_year");
 }
 
 #[test]

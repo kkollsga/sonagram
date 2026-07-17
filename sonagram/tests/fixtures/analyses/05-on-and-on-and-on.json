@@ -13,11 +13,12 @@
     "album": "Super Trouper",
     "genre": "pop",
     "year": 2007,
+    "original_year": null,
     "track_no": 5
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 222.32817,
     "bpm": 127.99153,
     "bpm_raw": 127.99153,
+    "bpm_confidence": 0.69409883,
     "bpm_candidates": [
       [
         129.19922,
@@ -4075,12 +4077,12 @@
     "predominant_chord": "C",
     "dissonance": 0.007292295,
     "energy": 0.60223985,
-    "danceability": 0.9782032,
+    "danceability": 0.89498454,
     "key": "C major",
     "key_confidence": 0.21410526,
     "key_camelot": "8B",
     "valence": 0.7251171,
-    "acousticness": 0.48534793,
+    "acousticness": 0.25310057,
     "embedding": [
       0.82191914,
       0.99959433,
@@ -4119,7 +4121,7 @@
       0.06922808,
       0.6896151,
       0.35495576,
-      0.9782032,
+      0.89498454,
       0.98124653,
       0.6321303,
       0.556819,
@@ -4131,11 +4133,11 @@
       0.60223985,
       0.7251171
     ],
-    "mood_happy": 0.8794003,
+    "mood_happy": 0.8627566,
     "mood_aggressive": 0.3719725,
     "mood_relaxed": 0.3775249,
     "mood_sad": 0.19579238,
-    "instrumentalness": 0.54942846,
+    "instrumentalness": 0.17057353,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.16253968,
@@ -4892,7 +4894,7 @@
         0.46209085
       ]
     ],
-    "vocalness": 0.4505715,
+    "vocalness": 0.82942647,
     "fingerprint": null,
     "embedding_version": 2
   }

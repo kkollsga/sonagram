@@ -13,11 +13,12 @@
     "album": "The Very Best of Al Green",
     "genre": "R&B",
     "year": 1995,
+    "original_year": null,
     "track_no": 14
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 209.47592,
     "bpm": 112.88457,
     "bpm_raw": 112.88457,
+    "bpm_confidence": 0.7063472,
     "bpm_candidates": [
       [
         112.347145,
@@ -3912,12 +3914,12 @@
     "predominant_chord": "Dm",
     "dissonance": 0.0069428715,
     "energy": 0.50486237,
-    "danceability": 0.9211365,
+    "danceability": 0.8085752,
     "key": "A minor",
     "key_confidence": 0.20636013,
     "key_camelot": "8A",
     "valence": 0.4001596,
-    "acousticness": 0.5982031,
+    "acousticness": 0.3888822,
     "embedding": [
       0.5096368,
       0.9999633,
@@ -3956,7 +3958,7 @@
       0.012763354,
       0.57529044,
       0.46067348,
-      0.9211365,
+      0.8085752,
       0.98532325,
       0.5801462,
       0.6262613,
@@ -3968,11 +3970,11 @@
       0.50486237,
       0.4001596
     ],
-    "mood_happy": 0.40076202,
+    "mood_happy": 0.37824976,
     "mood_aggressive": 0.5353935,
     "mood_relaxed": 0.37773418,
     "mood_sad": 0.6824928,
-    "instrumentalness": 0.33580148,
+    "instrumentalness": 0.39830673,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.80108845,
@@ -4647,7 +4649,7 @@
         0.42144898
       ]
     ],
-    "vocalness": 0.6641985,
+    "vocalness": 0.6016933,
     "fingerprint": null,
     "embedding_version": 2
   }

@@ -592,13 +592,15 @@ fn profile(members: &[&AnalysisRecord]) -> StyleProfile {
 ///
 /// Rule (documented so the golden is explainable):
 /// - `<tempo-band>` = [`tempo_band`] of `mean_bpm` (e.g. `"house"`).
-/// - acoustic/electric term is **three-way** with distinctive cutoffs (P10b):
-///   `"acoustic"` if `mean_acousticness >= 0.70`, `"electric"` if `<= 0.50`, else
-///   the term is **omitted entirely** (e.g. `"house-pop"`). The old 0.5 split
-///   named ~84% of tracks "acoustic" because sonara 0.2.2's `acousticness` is
-///   compressed to roughly `[0.42, 0.93]` (avg ~0.63) — these cutoffs are
-///   **calibrated to that observed compressed range** and MUST be revisited when
-///   sonara recalibrates.
+/// - acoustic/electric term is **three-way** with distinctive cutoffs
+///   (P14-recalibrated): `"acoustic"` if `mean_acousticness >= 0.60`, `"electric"`
+///   if `<= 0.30`, else the term is **omitted entirely** (e.g. `"house-pop"`).
+///   sonara 0.2.4 recalibrated `acousticness` to an absolute scale (electronic
+///   anchors ≈ 0.11, acoustic anchors ≈ 0.71; the old ~0.37 floor is gone), so the
+///   15 re-captured fixtures now spread `[0.25, 0.78]` (avg ~0.46) versus the old
+///   compressed `[0.42, 0.93]`. These cutoffs sit either side of the midpoint
+///   between the two genre anchors and MUST be revisited whenever sonara
+///   recalibrates `acousticness` again.
 /// - `<top-genre>` = the #1 `top_genre` (by count, name-tiebroken), or `"mixed"`
 ///   when the community carries no genre tags.
 fn style_name(mean_bpm: f64, mean_acousticness: f64, top_genre: Option<&str>) -> String {
@@ -611,11 +613,13 @@ fn style_name(mean_bpm: f64, mean_acousticness: f64, top_genre: Option<&str>) ->
 }
 
 /// The three-way acoustic/electric term, or `None` when the middle band omits it.
-/// Cutoffs calibrated to sonara 0.2.2's compressed `acousticness` range (P10b).
+/// Cutoffs recalibrated to sonara 0.2.4's absolute `acousticness` scale (P14):
+/// electronic genre anchor ≈ 0.11, acoustic ≈ 0.71, so `>= 0.60` names a style
+/// acoustic and `<= 0.30` names it electric, leaving a wide neutral middle.
 fn acoustic_term(mean_acousticness: f64) -> Option<&'static str> {
-    if mean_acousticness >= 0.70 {
+    if mean_acousticness >= 0.60 {
         Some("acoustic")
-    } else if mean_acousticness <= 0.50 {
+    } else if mean_acousticness <= 0.30 {
         Some("electric")
     } else {
         None
@@ -817,26 +821,27 @@ mod tests {
 
     #[test]
     fn style_name_follows_the_three_way_template() {
-        // house band (110–125), acoustic (>=0.70), top genre "folk".
-        assert_eq!(style_name(118.0, 0.8, Some("folk")), "house-acoustic-folk");
-        // upbeat, electric (<=0.50), no genre → "mixed".
+        // house band (110–125), acoustic (>=0.60), top genre "folk".
+        assert_eq!(style_name(118.0, 0.7, Some("folk")), "house-acoustic-folk");
+        // upbeat, electric (<=0.30), no genre → "mixed".
         assert_eq!(style_name(130.0, 0.2, None), "upbeat-electric-mixed");
-        // P10b: mid band (0.50, 0.70) omits the acoustic/electric term entirely.
-        assert_eq!(style_name(100.0, 0.60, Some("pop")), "mid-pop");
-        // P10b boundary: exactly 0.70 → acoustic; exactly 0.50 → electric.
-        assert_eq!(style_name(80.0, 0.70, Some("jazz")), "downtempo-acoustic-jazz");
-        assert_eq!(style_name(80.0, 0.50, Some("jazz")), "downtempo-electric-jazz");
+        // P14: mid band (0.30, 0.60) omits the acoustic/electric term entirely.
+        assert_eq!(style_name(100.0, 0.45, Some("pop")), "mid-pop");
+        // P14 boundary: exactly 0.60 → acoustic; exactly 0.30 → electric.
+        assert_eq!(style_name(80.0, 0.60, Some("jazz")), "downtempo-acoustic-jazz");
+        assert_eq!(style_name(80.0, 0.30, Some("jazz")), "downtempo-electric-jazz");
     }
 
     #[test]
     fn acoustic_term_is_three_way_with_calibrated_cutoffs() {
-        assert_eq!(acoustic_term(0.93), Some("acoustic"));
-        assert_eq!(acoustic_term(0.70), Some("acoustic")); // inclusive high cutoff
-        assert_eq!(acoustic_term(0.69), None); // just inside the omitted middle
-        assert_eq!(acoustic_term(0.60), None);
-        assert_eq!(acoustic_term(0.51), None);
-        assert_eq!(acoustic_term(0.50), Some("electric")); // inclusive low cutoff
-        assert_eq!(acoustic_term(0.42), Some("electric"));
+        // Recalibrated to sonara 0.2.4's absolute scale (P14).
+        assert_eq!(acoustic_term(0.78), Some("acoustic")); // fixture max
+        assert_eq!(acoustic_term(0.60), Some("acoustic")); // inclusive high cutoff
+        assert_eq!(acoustic_term(0.59), None); // just inside the omitted middle
+        assert_eq!(acoustic_term(0.45), None); // fixture mean
+        assert_eq!(acoustic_term(0.31), None);
+        assert_eq!(acoustic_term(0.30), Some("electric")); // inclusive low cutoff
+        assert_eq!(acoustic_term(0.11), Some("electric")); // electronic anchor
     }
 
     #[test]

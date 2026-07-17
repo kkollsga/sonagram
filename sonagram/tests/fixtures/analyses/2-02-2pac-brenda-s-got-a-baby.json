@@ -13,11 +13,12 @@
     "album": "Greatest Hits",
     "genre": "Rap & Hip-Hop",
     "year": 1998,
+    "original_year": null,
     "track_no": 2
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 234.05714,
     "bpm": 111.3676,
     "bpm_raw": 111.3676,
+    "bpm_confidence": 0.70478284,
     "bpm_candidates": [
       [
         112.347145,
@@ -4480,12 +4482,12 @@
     "predominant_chord": "G",
     "dissonance": 0.008441645,
     "energy": 0.6352795,
-    "danceability": 0.95354146,
+    "danceability": 0.862873,
     "key": "G minor",
     "key_confidence": 0.1737012,
     "key_camelot": "6A",
     "valence": 0.4652664,
-    "acousticness": 0.5142598,
+    "acousticness": 0.2969765,
     "embedding": [
       0.7841488,
       0.99952066,
@@ -4524,7 +4526,7 @@
       0.012118545,
       0.5629756,
       0.40837607,
-      0.95354146,
+      0.862873,
       0.9795866,
       0.6655615,
       0.4818039,
@@ -4536,11 +4538,11 @@
       0.6352795,
       0.4652664
     ],
-    "mood_happy": 0.45920205,
+    "mood_happy": 0.44106835,
     "mood_aggressive": 0.55780536,
     "mood_relaxed": 0.40471816,
     "mood_sad": 0.60445035,
-    "instrumentalness": 0.20013863,
+    "instrumentalness": 0.26290452,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.54566896,
@@ -5153,7 +5155,7 @@
         0.4054207
       ]
     ],
-    "vocalness": 0.7998614,
+    "vocalness": 0.7370955,
     "fingerprint": null,
     "embedding_version": 2
   }

@@ -80,8 +80,16 @@ pub struct TagsDto {
     pub album: Option<String>,
     /// Genre string as stored in the file.
     pub genre: Option<String>,
-    /// Release year.
+    /// Release year of *this* file/edition (sonara's `tags.year`). On a reissue
+    /// or compilation this is the reissue date — see [`original_year`](Self::original_year).
     pub year: Option<u32>,
+    /// Original release year (sonara's `tags.original_year`, from ID3v2.4 `TDOR` /
+    /// v2.3 `TORY` / Vorbis `ORIGINALDATE`). `None` when the file carries no such
+    /// tag (there is no fallback to `year`). Additive since sonara 0.2.4 —
+    /// `#[serde(default)]` so pre-0.2.4 cached records (which lack the field) still
+    /// deserialize as `None`.
+    #[serde(default)]
+    pub original_year: Option<u32>,
     /// Track number.
     pub track_no: Option<u32>,
 }
@@ -140,6 +148,13 @@ pub struct AnalysisDto {
     pub duration_sec: f32,
     pub bpm: f32,
     pub bpm_raw: f32,
+    /// How firmly the tempo estimate is anchored in the audio ([0,1]) — sonara's
+    /// always-present `bpm_confidence`. Low (<0.45) flags ambient/rubato material
+    /// where BPM is unreliable. Additive since sonara 0.2.4 — `#[serde(default)]`
+    /// so pre-0.2.4 cached records (which lack the field) still deserialize (to
+    /// `0.0`, treated as "unknown/low trust").
+    #[serde(default)]
+    pub bpm_confidence: f32,
     /// Strongest tempo candidates as `(bpm, score)` pairs.
     pub bpm_candidates: Vec<(f32, f32)>,
     /// Beat positions as main-pass frame indices.
@@ -255,6 +270,7 @@ impl AnalysisRecord {
             duration_sec,
             bpm,
             bpm_raw,
+            bpm_confidence,
             bpm_candidates,
             beats,
             onset_frames,
@@ -324,6 +340,7 @@ impl AnalysisRecord {
             album: t.album,
             genre: t.genre,
             year: t.year,
+            original_year: t.original_year,
             track_no: t.track_no,
         });
 
@@ -360,6 +377,7 @@ impl AnalysisRecord {
             duration_sec,
             bpm,
             bpm_raw,
+            bpm_confidence,
             bpm_candidates,
             beats,
             onset_frames,
@@ -463,6 +481,7 @@ mod tests {
                 album: Some("Homecoming".to_string()),
                 genre: Some("Rock".to_string()),
                 year: Some(1974),
+                original_year: Some(1972),
                 track_no: Some(2),
             }),
             analysis: AnalysisDto {
@@ -480,6 +499,7 @@ mod tests {
                 duration_sec: 210.5,
                 bpm: 119.7,
                 bpm_raw: 119.7,
+                bpm_confidence: 0.83,
                 bpm_candidates: vec![(119.7, 0.9), (59.85, 0.4)],
                 beats: vec![10, 22, 34, 46],
                 onset_frames: vec![5, 12, 20],
@@ -592,6 +612,7 @@ mod tests {
                 duration_sec: 1.0,
                 bpm: 0.0,
                 bpm_raw: 0.0,
+                bpm_confidence: 0.0,
                 bpm_candidates: vec![],
                 beats: vec![],
                 onset_frames: vec![],
@@ -768,6 +789,108 @@ mod tests {
         }"#;
         let rec = AnalysisRecord::from_json(json).expect("v1 record must still parse");
         assert_eq!(rec.analysis.genre_confidence, None);
+    }
+
+    #[test]
+    fn pre_0_2_4_record_without_new_fields_deserializes() {
+        // A pre-sonara-0.2.4 cached record has no `analysis.bpm_confidence` key and
+        // no `tags.original_year` key. RECORD_VERSION stays 1 (both fields are
+        // additive), so such a record MUST still parse — the missing analysis
+        // scalar defaults to `0.0` and the missing tag to `None` (serde defaults).
+        // Tags ARE present here (unlike the genre_confidence test) so the missing
+        // `original_year` key is exercised in a real tag block.
+        let json = r#"{
+            "record_version": 1,
+            "source": {
+                "content_hash": "cafef00d",
+                "hash_kind": "mp3-audio-v1",
+                "path": "old.mp3",
+                "file_size": 42,
+                "format": "mp3"
+            },
+            "tags": {
+                "title": "Old Song",
+                "artist": "Old Artist",
+                "album": "Old Album",
+                "genre": "Rock",
+                "year": 1985,
+                "track_no": 3
+            },
+            "analysis": {
+                "provenance": {
+                    "schema_version": 2,
+                    "sample_rate": 22050,
+                    "hop_length": 512,
+                    "mode": "playlist",
+                    "requested_features": null
+                },
+                "duration_sec": 200.0,
+                "bpm": 120.0,
+                "bpm_raw": 120.0,
+                "bpm_candidates": [],
+                "beats": [],
+                "onset_frames": [],
+                "rms_mean": 0.1,
+                "rms_max": 0.3,
+                "loudness_lufs": -10.0,
+                "dynamic_range_db": 8.0,
+                "true_peak_db": null,
+                "replaygain_db": null,
+                "loudness_curve": null,
+                "loudness_momentary_max_db": null,
+                "loudness_range_lu": null,
+                "spectral_centroid_mean": 2000.0,
+                "zero_crossing_rate": 0.05,
+                "onset_density": 1.2,
+                "spectral_bandwidth_mean": null,
+                "spectral_rolloff_mean": null,
+                "spectral_flatness_mean": null,
+                "spectral_contrast_mean": null,
+                "mfcc_mean": null,
+                "chroma_mean": null,
+                "tempo_curve": null,
+                "tempo_variability": null,
+                "time_signature": null,
+                "time_signature_confidence": null,
+                "chord_sequence": null,
+                "chord_events": null,
+                "chord_change_rate": null,
+                "predominant_chord": null,
+                "dissonance": null,
+                "energy": null,
+                "danceability": null,
+                "key": null,
+                "key_confidence": null,
+                "key_camelot": null,
+                "valence": null,
+                "acousticness": null,
+                "embedding": null,
+                "mood_happy": null,
+                "mood_aggressive": null,
+                "mood_relaxed": null,
+                "mood_sad": null,
+                "instrumentalness": null,
+                "genre": null,
+                "grid_offset_sec": null,
+                "downbeats": null,
+                "grid_stability": null,
+                "energy_curve": null,
+                "energy_curve_hop_sec": null,
+                "segments": null,
+                "intro_end_sec": null,
+                "outro_start_sec": null,
+                "energy_level": null,
+                "leading_silence_sec": null,
+                "trailing_silence_sec": null,
+                "key_candidates": null,
+                "vocalness": null,
+                "fingerprint": null,
+                "embedding_version": null
+            }
+        }"#;
+        let rec = AnalysisRecord::from_json(json).expect("pre-0.2.4 record must still parse");
+        assert_eq!(rec.analysis.bpm_confidence, 0.0);
+        assert_eq!(rec.tags.unwrap().original_year, None);
     }
 
     #[test]

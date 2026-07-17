@@ -6,9 +6,10 @@
 //! they document *why* the P6 counts are what they are (and would fail loudly,
 //! with a reason, if the derivation drifted). Expected cardinalities were
 //! computed independently: `SIMILAR_TO` = 15 tracks × min(10, 14) = 150;
-//! `CAMELOT_ADJACENT` = 24 keys × 3 = 72; `Style` = 3 communities at the tuned
-//! threshold (measured — post-0.2.3 the chroma-fix embedding reshaped the
-//! mutual-kNN graph so the 15 diverse fixtures form 3 tight components).
+//! `CAMELOT_ADJACENT` = 24 keys × 3 = 72; `Style` = 2 communities at the tuned
+//! threshold (measured — post-0.2.4 the danceability recalibration shifted
+//! embedding dim 37 so the mutual-kNN graph re-formed the 15 fixtures into 2
+//! components, down from 3).
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
@@ -176,17 +177,18 @@ fn style_ids(graph: &DirGraph) -> Vec<String> {
 }
 
 #[test]
-fn styles_are_three_on_fixtures_under_adaptive_threshold() {
-    // P10c: the adaptive per-build threshold (chosen from the fixtures' own
-    // score distribution, ≈0.637, cap = style_cap(15) = 5). Post-0.2.3 the chroma
-    // fix reshaped the embedding, so the mutual-kNN communities re-formed to three.
+fn styles_are_two_on_fixtures_under_adaptive_threshold() {
+    // P14: the adaptive per-build threshold (chosen from the fixtures' own score
+    // distribution, cap = style_cap(15) = 5). The sonara 0.2.4 danceability
+    // recalibration shifted embedding dim 37 on all 15 fixtures, perturbing the
+    // mutual-kNN communities so they re-formed from three to two.
     let graph = graph::build_graph(&load_records(), &library()).unwrap();
-    assert_eq!(node_count(&graph, "Style"), 3, "3 communities at the adaptive threshold");
-    assert_eq!(style_ids(&graph), vec!["style-000", "style-001", "style-002"]);
+    assert_eq!(node_count(&graph, "Style"), 2, "2 communities at the adaptive threshold");
+    assert_eq!(style_ids(&graph), vec!["style-000", "style-001"]);
 
-    // IN_STYLE membership = 1.0 (v1 hard assignment); 9 members (4 + 3 + 2).
+    // IN_STYLE membership = 1.0 (v1 hard assignment); 8 members (5 + 3).
     let in_style = edges_of(&graph, "IN_STYLE");
-    assert_eq!(in_style.len(), 9, "4 + 3 + 2 members carry IN_STYLE");
+    assert_eq!(in_style.len(), 8, "5 + 3 members carry IN_STYLE");
     for (_, _, props) in &in_style {
         assert_eq!(props.get("membership"), Some(&Value::Float64(1.0)));
     }
@@ -464,15 +466,16 @@ fn style_profiles_are_shaped_and_deterministic() {
     let a = graph::build_graph(&recs, &library()).unwrap();
     let b = graph::build_graph(&recs, &library()).unwrap();
 
-    for id in ["style-000", "style-001", "style-002"] {
+    for id in ["style-000", "style-001"] {
         let ni_a = a
             .lookup_by_id_readonly("Style", &Value::String(id.to_string()))
             .unwrap_or_else(|| panic!("style {id} present"));
         let node_a = a.get_node(ni_a).unwrap();
 
         // name: template string with 2–3 dash-segments — the middle
-        // acoustic/electric term (P10b three-way) is omitted for mid-acousticness
-        // communities, so a name may be "<band>-<genre>" or "<band>-<ae>-<genre>".
+        // acoustic/electric term (three-way) is omitted for mid-acousticness
+        // communities, so a name may be "<band>-<genre>" or "<band>-<ae>-<genre>"
+        // (or a "-<n>" uniquifier suffix on a name collision).
         let name = match resolve_node_property(node_a, "name", &a) {
             Value::String(s) => s,
             other => panic!("style name not String: {other:?}"),

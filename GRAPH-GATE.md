@@ -90,3 +90,4 @@ gate worthless.
 | 2026-07-17 | `fa5531c899d6`    | P10c: adaptive style threshold (intended) |
 | 2026-07-17 | `acf45a46d51a`    | P11: sonara 0.2.3 sync — chroma fix + schema v2 (intended) |
 | 2026-07-17 | `5c15e38bbdf5`    | P12: **enriched** golden added (`library-enriched.sha256`); Last.fm popularity/folksonomy/CROWD_SIMILAR. Plain `library.sha256` UNCHANGED (`acf45a46d51a`). |
+| 2026-07-17 | `2c6d98954873`    | P14: sonara 0.2.4 sync — vocalness v2, recalibrated scales, bpm_confidence, original_year (intended). Enriched golden → `5d3519bdb6a9`. 15 fixtures re-captured at schema v3; new `Track.bpm_confidence`/`original_year`/`era_source` props; Decade/FROM_DECADE now prefer `original_year`; acousticness style cutoffs recalibrated (acoustic≥0.60/electric≤0.30). danceability recalibration shifted embedding dim 37 on all 15, re-forming styles 3→2. |

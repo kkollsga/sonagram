@@ -13,11 +13,12 @@
     "album": "Number Ones",
     "genre": "pop",
     "year": 2017,
+    "original_year": null,
     "track_no": 10
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 225.48898,
     "bpm": 106.2458,
     "bpm_raw": 106.2458,
+    "bpm_confidence": 0.731097,
     "bpm_candidates": [
       [
         105.46875,
@@ -4014,12 +4016,12 @@
     "predominant_chord": "C",
     "dissonance": 0.0075837877,
     "energy": 0.507734,
-    "danceability": 0.9483722,
+    "danceability": 0.8551747,
     "key": "C major",
     "key_confidence": 0.19490033,
     "key_camelot": "8B",
     "valence": 0.569733,
-    "acousticness": 0.63001144,
+    "acousticness": 0.39116365,
     "embedding": [
       0.5790845,
       0.9999429,
@@ -4058,7 +4060,7 @@
       0.019907514,
       0.5201204,
       0.37806726,
-      0.9483722,
+      0.8551747,
       0.98033637,
       0.6059294,
       0.9419486,
@@ -4070,11 +4072,11 @@
       0.507734,
       0.569733
     ],
-    "mood_happy": 0.74731463,
+    "mood_happy": 0.7286751,
     "mood_aggressive": 0.3493539,
     "mood_relaxed": 0.40955916,
     "mood_sad": 0.34081298,
-    "instrumentalness": 0.316481,
+    "instrumentalness": 0.28110576,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.83591837,
@@ -4790,7 +4792,7 @@
         0.48685995
       ]
     ],
-    "vocalness": 0.683519,
+    "vocalness": 0.71889424,
     "fingerprint": null,
     "embedding_version": 2
   }

@@ -13,11 +13,12 @@
     "album": "No Limits",
     "genre": "dance",
     "year": 2006,
+    "original_year": null,
     "track_no": 8
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 359.83673,
     "bpm": 142.22334,
     "bpm_raw": 142.22334,
+    "bpm_confidence": 0.8018347,
     "bpm_candidates": [
       [
         143.55469,
@@ -8021,12 +8023,12 @@
     "predominant_chord": "C#",
     "dissonance": 0.007419998,
     "energy": 0.6817444,
-    "danceability": 0.8462583,
+    "danceability": 0.6270955,
     "key": "G# major",
     "key_confidence": 0.04976126,
     "key_camelot": "4B",
     "valence": 0.6444592,
-    "acousticness": 0.4813562,
+    "acousticness": 0.27071464,
     "embedding": [
       0.8826139,
       0.9995183,
@@ -8065,7 +8067,7 @@
       0.024404464,
       0.7855857,
       0.45969924,
-      0.8462583,
+      0.6270955,
       0.98173726,
       0.71359074,
       0.34118602,
@@ -8077,11 +8079,11 @@
       0.6817444,
       0.6444592
     ],
-    "mood_happy": 0.68667096,
+    "mood_happy": 0.64283836,
     "mood_aggressive": 0.52195925,
     "mood_relaxed": 0.34943503,
     "mood_sad": 0.34623182,
-    "instrumentalness": 0.32679474,
+    "instrumentalness": 0.017269313,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.5804989,
@@ -9317,7 +9319,7 @@
         0.36695725
       ]
     ],
-    "vocalness": 0.67320526,
+    "vocalness": 0.9827307,
     "fingerprint": null,
     "embedding_version": 2
   }

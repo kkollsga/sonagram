@@ -13,11 +13,12 @@
     "album": "Use Your Illusion II",
     "genre": "rock",
     "year": 2016,
+    "original_year": null,
     "track_no": 5
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 615.28815,
     "bpm": 122.15615,
     "bpm_raw": 122.15615,
+    "bpm_confidence": 0.55497825,
     "bpm_candidates": [
       [
         123.046875,
@@ -9013,12 +9015,12 @@
     "predominant_chord": "B",
     "dissonance": 0.0075445273,
     "energy": 0.3912972,
-    "danceability": 0.8479024,
+    "danceability": 0.63181233,
     "key": "F# major",
     "key_confidence": 0.1017483,
     "key_camelot": "2B",
     "valence": 0.52438015,
-    "acousticness": 0.87326634,
+    "acousticness": 0.7787997,
     "embedding": [
       0.7496001,
       0.9999993,
@@ -9057,7 +9059,7 @@
       0.000040821065,
       0.64713967,
       0.12446743,
-      0.8479024,
+      0.63181233,
       0.9620094,
       0.70505583,
       0.3486026,
@@ -9069,11 +9071,11 @@
       0.3912972,
       0.52438015
     ],
-    "mood_happy": 0.6922643,
+    "mood_happy": 0.6490463,
     "mood_aggressive": 0.19447327,
     "mood_relaxed": 0.6018628,
     "mood_sad": 0.39905676,
-    "instrumentalness": 0.4242282,
+    "instrumentalness": 0.42340332,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.04643991,
@@ -10579,7 +10581,7 @@
         0.5379947
       ]
     ],
-    "vocalness": 0.5757718,
+    "vocalness": 0.5765967,
     "fingerprint": null,
     "embedding_version": 2
   }

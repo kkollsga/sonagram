@@ -179,6 +179,7 @@ mod tests {
                 duration_sec: 1.0,
                 bpm: 0.0,
                 bpm_raw: 0.0,
+                bpm_confidence: 0.0,
                 bpm_candidates: vec![],
                 beats: vec![],
                 onset_frames: vec![],

@@ -13,11 +13,12 @@
     "album": "Blonde on Blonde",
     "genre": "folk",
     "year": 1967,
+    "original_year": null,
     "track_no": 10
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 292.0751,
     "bpm": 116.78345,
     "bpm_raw": 116.78345,
+    "bpm_confidence": 0.5687199,
     "bpm_candidates": [
       [
         117.453835,
@@ -4915,12 +4917,12 @@
     "predominant_chord": "E",
     "dissonance": 0.007971158,
     "energy": 0.40457857,
-    "danceability": 0.9738805,
+    "danceability": 0.88988143,
     "key": "E major",
     "key_confidence": 0.3620242,
     "key_camelot": "12B",
     "valence": 0.5624181,
-    "acousticness": 0.73072135,
+    "acousticness": 0.5574988,
     "embedding": [
       0.3142545,
       0.99997663,
@@ -4959,7 +4961,7 @@
       0.0019160787,
       0.6061982,
       0.2870266,
-      0.9738805,
+      0.88988143,
       0.96338016,
       0.49755222,
       0.61791617,
@@ -4971,11 +4973,11 @@
       0.40457857,
       0.5624181
     ],
-    "mood_happy": 0.74744254,
+    "mood_happy": 0.73064274,
     "mood_aggressive": 0.27235872,
     "mood_relaxed": 0.46731773,
     "mood_sad": 0.36641788,
-    "instrumentalness": 0.32033455,
+    "instrumentalness": 0.51272106,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.24380952,
@@ -5733,7 +5735,7 @@
         0.4333108
       ]
     ],
-    "vocalness": 0.67966545,
+    "vocalness": 0.4872789,
     "fingerprint": null,
     "embedding_version": 2
   }

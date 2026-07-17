@@ -40,18 +40,21 @@ that wasn't run, or a tag the file lacked).
 | `album_name` | str | yes | album tag |
 | `genre_tag` | str | yes | raw genre tag (case preserved; the `Genre` node id is lowercased) |
 | `format` | str | no | container, e.g. `"mp3"` |
-| `year` | int | yes | release year (tag) |
+| `year` | int | yes | **file/edition** year tag — on reissues/compilations this is the reissue date, not the recording date |
+| `original_year` | int | yes | original release year (ID3 `TDOR`/`TORY`/Vorbis `ORIGINALDATE`); the reissue-safe era signal. Often null in the wild |
+| `era_source` | str | yes | which year fed `Decade`/`FROM_DECADE`: `"original_year"` (era-true) or `"file_year"` (file tag, treat era with care). Null only when no year tag at all |
 | `track_no` | int | yes | track number (tag) |
 | `file_size` | int | no | bytes |
 | `duration_sec` | float | no | length in seconds |
-| `bpm` | float | no | tempo, typical 60–180 |
+| `bpm` | float | no | tempo, typical 60–180. **Gate on `bpm_confidence` before trusting it** (see below) |
 | `bpm_raw` | float | no | pre-octave-correction tempo |
+| `bpm_confidence` | float | no | 0–1 trust signal for `bpm`: high (≥0.7) on steady percussive music, low (~0.4) on ambient/rubato/sparse-onset material where BPM is unreliable |
 | `energy` | float | yes | perceptual energy 0–1 |
 | `valence` | float | yes | musical positivity 0–1 |
 | `danceability` | float | yes | 0–1 |
-| `acousticness` | float | yes | 0–1 |
-| `vocalness` | float | yes | 0–1 (higher = more vocal) |
-| `instrumentalness` | float | yes | 0–1 (heuristic v1) |
+| `acousticness` | float | yes | 0–1, **absolute scale (recalibrated schema v3)**: electronic ≈ 0.11, acoustic ≈ 0.71 (was compressed to ~0.42–0.93). Roughly: `>= 0.60` acoustic, `<= 0.30` electric |
+| `vocalness` | float | yes | 0–1, **higher = more vocal (FIXED in graph schema v3)**: harsh/screamed > clean singing > instrumental. Usable as a low=instrumental / high=vocal filter (see Pitfalls) |
+| `instrumentalness` | float | yes | 0–1, exactly `1 − vocalness` (collinear — no added signal over `vocalness`) |
 | `dissonance` | float | yes | 0–1 |
 | `mood_happy` / `mood_aggressive` / `mood_relaxed` / `mood_sad` | float | yes | 0–1 heuristic v1 (see Pitfalls) |
 | `energy_level` | int | yes | coarse energy bucket 1–10 |
@@ -98,7 +101,7 @@ that wasn't run, or a tag the file lacked).
 | `IN_KEY` | `Track`→`Key` | — | only if key detected |
 | `IN_TEMPO_BAND` | `Track`→`TempoBand` | — | always (bpm always present) |
 | `AT_ENERGY` | `Track`→`EnergyLevel` | — | only if `energy_level` present |
-| `FROM_DECADE` | `Track`→`Decade` | — | only if year present |
+| `FROM_DECADE` | `Track`→`Decade` | — | only if a year tag present; uses `original_year` when set, else file `year` (see `era_source`) |
 | `SIMILAR_TO` | `Track`→`Track` | `score` 0–1 | top-10 kNN; **directed** (A→B ≠ B→A) |
 | `IN_STYLE` | `Track`→`Style` | `membership` (1.0 in v1) | tracks in a similarity community |
 | `CAMELOT_ADJACENT` | `Key`→`Key` | `transition` = `energy_up`/`energy_down`/`mode_switch` | the Camelot wheel (72 edges) |
@@ -190,16 +193,27 @@ playlist. A hash matching no Track is reported, not silently dropped.
   low — library mean ≈ 0.17; **≥ 0.3 is solid, ≥ 0.45 is strong**. Note that
   high-energy dense mixes tend to score lower confidence, so a strict energy
   floor and a strict confidence floor fight each other — relax one.
-- **`vocalness`/`instrumentalness` INVERT on real music — do not use them to
-  find instrumentals.** Screamed/distorted-vocal metal scores *lowest*
-  (0.13–0.27) and pitched solo instruments (sax, violin, flute) score *high*
-  (0.55–0.85): the heuristic keys on pitched voice-band content.
-  `instrumentalness` is exactly `1 − vocalness` (collinear — no added signal).
-  For "instrumental / no vocals": lead with genre/compilation tags +
-  `acousticness`, then eyeball artists. Within vocal-forward pop, use
-  `vocalness >= ~0.55` only as a FLOOR to exclude instrumentals — it does not
-  rank "singability" (One Love 0.72 vs Our Lips Are Sealed 0.56, both massive
-  singalongs).
+- **`vocalness`/`instrumentalness` are FIXED as of analysis schema v3** (sonara
+  0.2.4; check `t.analysis_schema_version >= 3`). The v2 heuristic now scores
+  **low = instrumental, high = vocal (harsh/screamed highest, clean singing mid,
+  solo instruments low)** — trustworthy for instrumental filtering: use
+  `vocalness < ~0.35` to find instrumentals and `>= ~0.55` to require vocals.
+  Two caveats remain: (1) a **voice-mimicking solo instrument** (nylon-guitar
+  flamenco, solo violin, cathedral organ) can still read mid-high — the
+  documented ambiguous case; cross-check with genre/artist for pure-instrumental
+  asks. (2) `vocalness` measures *presence*, not *singability* — a high score
+  says "a voice is prominent", not "great singalong". `instrumentalness` is
+  exactly `1 − vocalness` (collinear — no added signal; prefer `vocalness`).
+  **On a pre-v3 graph the OLD values INVERT** (screamed metal lowest, solo sax
+  highest) — if you see `analysis_schema_version < 3`, do not trust vocalness for
+  instrumental filtering; lead with genre/compilation tags instead.
+- **Gate `bpm` on `bpm_confidence` before trusting it.** New in schema v3:
+  `bpm_confidence` (0–1) flags when the tempo estimate is solid. Steady dance/pop
+  reads 0.7–0.9; ambient/rubato/sparse-onset material (classical, drone,
+  fingerpicked ballads) reads ~0.4 and its `bpm` is often octave-wrong or
+  meaningless. Add `WHERE t.bpm_confidence >= 0.6` before ordering or filtering by
+  `bpm`, and for calm/acoustic sets order by `energy` or `duration_sec`, never
+  `bpm`.
 - **`mood_aggressive` inverts on genuinely extreme material** (same heuristic
   family): scalar-top "aggressive" tracks were Bros and Paula Abdul while
   Slayer reads 0.25–0.34. For hard/metal asks lead with artist knowledge +
@@ -215,8 +229,9 @@ playlist. A hash matching no Track is reported, not silently dropped.
   like `upbeat-electric-dance` is a deterministic template over the cluster's
   mean features — **read `top_genres`, `mean_*`, and `exemplar_titles`** to know
   what it actually contains, rather than trusting the name.
-- **`mood_*` and `instrumentalness` are heuristic v1** — directional, not
-  calibrated ground truth. Good for coarse ranking, not hard thresholds.
+- **`mood_*` are heuristic v1** — directional, not calibrated ground truth. Good
+  for coarse ranking, not hard thresholds. (`vocalness`/`instrumentalness` are v2
+  and now trustworthy — see the vocalness pitfall above.)
 - **Cypher null semantics**: `WHERE t.energy < 0.5` silently **excludes** rows
   where `energy` is null (a null comparison is not true). Filter explicitly with
   `t.energy IS NOT NULL` when a null-able property must be present, and
@@ -243,10 +258,15 @@ playlist. A hash matching no Track is reported, not silently dropped.
   `.to_df()` / `.scalar()` / `.one()`. Printed reprs TRUNCATE rows and long
   strings (content hashes become `"8fdb…d63"`) — never copy values from a repr;
   always `.to_dicts()` (or narrow with LIMIT/OFFSET).
-- **`danceability` saturates high** (library mean ~0.89) — near-useless as a
-  filter alone; cross it with genre or energy.
+- **`danceability` now spreads and IS a usable filter** (schema v3 /
+  sonara 0.2.4 recalibration): it runs roughly p5 0.20 → p95 0.90 (was
+  compressed ~0.69–0.98, near-useless). Steady dance/house sits high, ambient and
+  rubato low. Still cross it with genre/energy for a stylistic ask, but a
+  `danceability >= ~0.6` floor now meaningfully separates groove from drift.
 - **`bpm` is unreliable on low-onset material** (ambient/classical can read
-  145–157). Order calm sets by `energy`, not `bpm`.
+  145–157) — and now you can SEE it: those tracks carry a low `bpm_confidence`
+  (~0.4). Gate with `WHERE t.bpm_confidence >= 0.6`, and order calm sets by
+  `energy`, not `bpm`.
 - **Style quality degrades on heterogeneous libraries**: expect one cap-sized
   catch-all community plus small tight slivers. Styles are a lead, not a
   survey — for "what's in here", aggregate over `Genre`/`Decade`/`TempoBand`
@@ -266,12 +286,17 @@ playlist. A hash matching no Track is reported, not silently dropped.
   cuts (7–8 min) hide in compilations and derail pacing.
 - **Vibe-over-time recipe**: cross-tab Genre × Decade to find a vibe spanning
   eras, hold it with a tight `acousticness`/`energy` band, and read
-  `avg(loudness_lufs)` per decade for production evolution. HARD RULE:
-  `year`/`Decade` is the year printed on the FILE — on real libraries that's
-  the compilation/reissue date by DEFAULT for pre-2000 material (whole reissue
-  blocks get tagged 2015+). `FROM_DECADE` answers "what's on the file", not
-  "when was it made" — date era claims from your own artist/recording
-  knowledge, always.
+  `avg(loudness_lufs)` per decade for production evolution. HARD RULE, now
+  graph-auditable: `Decade`/`FROM_DECADE` prefers `original_year` when the file
+  carries one, else falls back to the file `year` — and `t.era_source` tells you
+  which. **When `era_source = 'original_year'` the decade is era-true** (trust it).
+  **When `era_source = 'file_year'` it's the year printed on the FILE** — on real
+  libraries that's the compilation/reissue date by default for pre-2000 material
+  (whole reissue blocks get tagged 2015+), so still date those era claims from
+  your own artist/recording knowledge. Filter the trustworthy rows with
+  `WHERE t.era_source = 'original_year'` when era precision matters. In practice
+  `original_year` is often absent (this library: 0 of 15 sample tracks had it),
+  so expect to lean on knowledge for most pre-2000 material regardless.
 - **Finding versions/covers**: identical audio deduplicates to ONE Track node
   (id = content-hash of the audio), so two Track nodes sharing a song title
   are GUARANTEED different recordings. Recipe: pull title+artist+scalars,
@@ -303,11 +328,12 @@ QC audits grade on these; treat them as requirements, not suggestions:
    radio-length cuts (`duration_sec <= 330`) unless the brief wants epics —
    a 8:15 LP cut mid-road-trip reads as a pacing defect. Always `RETURN
    t.duration_sec` in your candidate query.
-2. **Era claims need YOUR knowledge, not the tag.** `year` is the file tag —
-   on compilations/reissues it's the reissue date (a 1958 Sinatra recording
-   tagged 2011). If the brief's premise depends on era, validate each pick
-   against what you know about the artist/recording; drop picks you can't
-   vouch for.
+2. **Era claims: audit `era_source` first, then fall back to YOUR knowledge.**
+   When `t.era_source = 'original_year'` the decade is the true release year —
+   graph-auditable, trust it. When `era_source = 'file_year'` (the common case)
+   `year` is the file tag, which on compilations/reissues is the reissue date (a
+   1958 Sinatra recording tagged 2011); validate each such pick against what you
+   know about the artist/recording and drop picks you can't vouch for.
 3. **Critical slots need style-world cohesion, not just scalar fit.** The
    finale of a singalong set, the seed-side of a "like this" set, the peak of
    a genre set: check the pick belongs to the brief's musical world (genre

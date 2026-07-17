@@ -403,6 +403,7 @@ fn _track_analysis_fields_present(a: sonara::analyze::TrackAnalysis) {
         duration_sec: _,
         bpm: _,
         bpm_raw: _,
+        bpm_confidence: _,
         bpm_candidates: _,
         beats: _,
         onset_frames: _,
@@ -467,6 +468,26 @@ fn _track_analysis_fields_present(a: sonara::analyze::TrackAnalysis) {
     } = a;
 }
 
+/// Compile-time proof that every `TrackTags` field sonagram maps still exists with
+/// the same name (no `..`, so an upstream rename/removal/addition breaks the
+/// build). WHY: `AnalysisRecord::from_analysis` mirrors these into `TagsDto`
+/// (title/artist/album/genre/year/original_year/track_no). `original_year` is the
+/// sonara-0.2.4 era field the graph now prefers for `Decade`/`FROM_DECADE`; if
+/// sonara drops or renames it, era reasoning silently regresses unless this fails
+/// first.
+#[allow(dead_code)]
+fn _track_tags_fields_present(t: sonara::analyze::TrackTags) {
+    let sonara::analyze::TrackTags {
+        title: _,
+        artist: _,
+        album: _,
+        genre: _,
+        year: _,
+        original_year: _,
+        track_no: _,
+    } = t;
+}
+
 #[test]
 fn contract_sonara() {
     use sonara::analyze::{AnalysisConfig, AnalysisMode, ANALYSIS_SCHEMA_VERSION};
@@ -489,10 +510,11 @@ fn contract_sonara() {
     // WHY: each Track carries `analysis_schema_version`. If sonara bumps its
     // schema, previously captured fixtures no longer describe the same analysis
     // semantics — the goldens must be recaptured, not silently trusted. Pinned to
-    // 2 as of sonara 0.2.3 (the chroma sr>22050 filterbank fix); a future bump
-    // must recapture the 15 fixtures + regen the golden in the same commit.
+    // 3 as of sonara 0.2.4 (vocalness v2 inversion fix + acousticness/danceability
+    // recalibration + new bpm_confidence); a future bump must recapture the 15
+    // fixtures + regen the golden in the same commit.
     assert_eq!(
-        ANALYSIS_SCHEMA_VERSION, 2,
+        ANALYSIS_SCHEMA_VERSION, 3,
         "sonara ANALYSIS_SCHEMA_VERSION changed — recapture fixtures + goldens"
     );
 

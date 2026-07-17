@@ -13,11 +13,12 @@
     "album": "The Best Of Me",
     "genre": "hip-hop",
     "year": 2012,
+    "original_year": null,
     "track_no": 1
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 37.45959,
     "bpm": 126.04802,
     "bpm_raw": 126.04802,
+    "bpm_confidence": 0.6078077,
     "bpm_candidates": [
       [
         87.59269,
@@ -889,15 +891,15 @@
       }
     ],
     "chord_change_rate": 1.8953757,
-    "predominant_chord": "A",
+    "predominant_chord": "G#m",
     "dissonance": 0.009263583,
     "energy": 0.3418339,
-    "danceability": 0.95781446,
+    "danceability": 0.86897403,
     "key": "F major",
     "key_confidence": 0.025663106,
     "key_camelot": "7B",
     "valence": 0.4245528,
-    "acousticness": 0.82836914,
+    "acousticness": 0.7726012,
     "embedding": [
       0.33623713,
       0.99999595,
@@ -936,7 +938,7 @@
       0.0028586288,
       0.6756873,
       0.26917896,
-      0.95781446,
+      0.86897403,
       0.9567669,
       0.65499043,
       0.83394593,
@@ -948,11 +950,11 @@
       0.3418339,
       0.4245528
     ],
-    "mood_happy": 0.5317091,
+    "mood_happy": 0.51394105,
     "mood_aggressive": 0.3176251,
     "mood_relaxed": 0.4589077,
     "mood_sad": 0.59148693,
-    "instrumentalness": 0.22588074,
+    "instrumentalness": 1.0,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.08126984,
@@ -1087,7 +1089,7 @@
         0.197159
       ]
     ],
-    "vocalness": 0.77411926,
+    "vocalness": 0.0,
     "fingerprint": null,
     "embedding_version": 2
   }

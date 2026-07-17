@@ -13,11 +13,12 @@
     "album": "Greatest Hits - My Prerogative",
     "genre": "pop",
     "year": 2004,
+    "original_year": null,
     "track_no": 1
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 577.2539,
     "bpm": 135.26378,
     "bpm_raw": 135.26378,
+    "bpm_confidence": 0.75894094,
     "bpm_candidates": [
       [
         135.99918,
@@ -12112,12 +12114,12 @@
     "predominant_chord": "D",
     "dissonance": 0.008799668,
     "energy": 0.6366522,
-    "danceability": 0.94755596,
+    "danceability": 0.8539269,
     "key": "D minor",
     "key_confidence": 0.043535404,
     "key_camelot": "7A",
     "valence": 0.66315943,
-    "acousticness": 0.49440533,
+    "acousticness": 0.2810143,
     "embedding": [
       0.6963977,
       0.99523413,
@@ -12156,7 +12158,7 @@
       0.04290146,
       0.7399172,
       0.3629252,
-      0.94755596,
+      0.8539269,
       0.98489624,
       0.58969384,
       0.7473166,
@@ -12168,11 +12170,11 @@
       0.6366522,
       0.66315943
     ],
-    "mood_happy": 0.72131073,
+    "mood_happy": 0.7025849,
     "mood_aggressive": 0.46290457,
     "mood_relaxed": 0.31610787,
     "mood_sad": 0.34087002,
-    "instrumentalness": 0.4625075,
+    "instrumentalness": 0.0,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 2.2523355,
@@ -14062,7 +14064,7 @@
         0.45654833
       ]
     ],
-    "vocalness": 0.5374925,
+    "vocalness": 1.0,
     "fingerprint": null,
     "embedding_version": 2
   }

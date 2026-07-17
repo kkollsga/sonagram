@@ -13,11 +13,12 @@
     "album": "Analogue",
     "genre": "pop",
     "year": 2007,
+    "original_year": null,
     "track_no": 4
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 224.78368,
     "bpm": 110.01096,
     "bpm_raw": 110.01096,
+    "bpm_confidence": 0.47484568,
     "bpm_candidates": [
       [
         109.95678,
@@ -3167,12 +3169,12 @@
     "predominant_chord": "G",
     "dissonance": 0.006835241,
     "energy": 0.5034686,
-    "danceability": 0.91407144,
+    "danceability": 0.79476297,
     "key": "D major",
     "key_confidence": 0.32282165,
     "key_camelot": "10B",
     "valence": 0.5410098,
-    "acousticness": 0.73990214,
+    "acousticness": 0.54144216,
     "embedding": [
       0.80228615,
       0.99998224,
@@ -3211,7 +3213,7 @@
       0.043455273,
       0.55181926,
       0.21872883,
-      0.91407144,
+      0.79476297,
       0.9639555,
       0.70197314,
       0.38121063,
@@ -3223,11 +3225,11 @@
       0.5034686,
       0.5410098
     ],
-    "mood_happy": 0.7177897,
+    "mood_happy": 0.693928,
     "mood_aggressive": 0.27600902,
     "mood_relaxed": 0.5483834,
     "mood_sad": 0.3643309,
-    "instrumentalness": 0.4714797,
+    "instrumentalness": 0.3506257,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.26702946,
@@ -3799,7 +3801,7 @@
         0.5300197
       ]
     ],
-    "vocalness": 0.5285203,
+    "vocalness": 0.6493743,
     "fingerprint": null,
     "embedding_version": 2
   }

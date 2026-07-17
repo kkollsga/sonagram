@@ -36,7 +36,7 @@ use kglite::datatypes::values::{ColumnData, ColumnType, DataFrame};
 use sonara::similarity::{EMBEDDING_DIM, SIMILARITY_VERSION, WEIGHTS};
 
 use crate::enrich::{similar_key, EnrichmentData};
-use crate::record::AnalysisRecord;
+use crate::record::{AnalysisRecord, TagsDto};
 use crate::{Result, SonagramError};
 
 use normalize::{
@@ -93,6 +93,26 @@ const IN_STYLE: &str = "IN_STYLE";
 // Phase 12 enrichment edge: human co-listening similarity from Last.fm. Carries
 // `score` (the match weight) on Track→Track; `source="lastfm"` on Artist→Artist.
 const CROWD_SIMILAR: &str = "CROWD_SIMILAR";
+
+/// Sentinel `era_source` values stamped on each `Track` so an agent can tell
+/// which year fed the track's `Decade`/`FROM_DECADE` era placement.
+const ERA_SOURCE_ORIGINAL: &str = "original_year";
+const ERA_SOURCE_FILE: &str = "file_year";
+
+/// The year sonagram uses for era reasoning (the `Decade` dimension and the
+/// `FROM_DECADE` edge), with its provenance. sonara 0.2.4 splits release year in
+/// two: `tags.year` is the **file/edition** date (the reissue/compilation date on
+/// re-releases) while `tags.original_year` is the **true original** release year.
+/// For era placement we therefore **prefer `original_year`** and fall back to
+/// `year`, returning `(year, source)` where `source` is [`ERA_SOURCE_ORIGINAL`] or
+/// [`ERA_SOURCE_FILE`]. `None` when neither tag is present (no `FROM_DECADE` edge).
+fn era_year(tags: Option<&TagsDto>) -> Option<(u32, &'static str)> {
+    let t = tags?;
+    match t.original_year {
+        Some(oy) => Some((oy, ERA_SOURCE_ORIGINAL)),
+        None => t.year.map(|y| (y, ERA_SOURCE_FILE)),
+    }
+}
 
 /// Minimal library-root metadata for the `Library` root node.
 #[derive(Debug, Clone)]
@@ -157,7 +177,9 @@ pub fn build_graph_with_enrichment(
         if let Some(g) = genre_id(t.and_then(|t| t.genre.as_deref())) {
             genres.insert(g);
         }
-        if let Some(y) = t.and_then(|t| t.year) {
+        // Decade is derived from the era year (original_year preferred over the
+        // file/edition year) so a reissue lands in its true decade.
+        if let Some((y, _)) = era_year(t) {
             decades.insert(decade_id(y));
         }
     }
@@ -493,6 +515,13 @@ fn add_tracks(
 
     // Int columns.
     let year = int_opt_col(sorted, |r| r.tags.as_ref().and_then(|t| t.year).map(|y| y as i64));
+    // sonara 0.2.4: original release year (reissue-safe), and the source of the
+    // era year the Decade/FROM_DECADE mapping actually used ("original_year" |
+    // "file_year" | null when no year tag at all).
+    let original_year =
+        int_opt_col(sorted, |r| r.tags.as_ref().and_then(|t| t.original_year).map(|y| y as i64));
+    let era_source =
+        str_opt_col(sorted, |r| era_year(r.tags.as_ref()).map(|(_, s)| s.to_string()));
     let track_no = int_opt_col(sorted, |r| {
         r.tags.as_ref().and_then(|t| t.track_no).map(|n| n as i64)
     });
@@ -510,6 +539,7 @@ fn add_tracks(
     let duration_sec = f_col(sorted, |r| r.analysis.duration_sec);
     let bpm = f_col(sorted, |r| r.analysis.bpm);
     let bpm_raw = f_col(sorted, |r| r.analysis.bpm_raw);
+    let bpm_confidence = f_col(sorted, |r| r.analysis.bpm_confidence);
     let loudness_lufs = f_col(sorted, |r| r.analysis.loudness_lufs);
     let dynamic_range_db = f_col(sorted, |r| r.analysis.dynamic_range_db);
     let spectral_centroid = f_col(sorted, |r| r.analysis.spectral_centroid_mean);
@@ -557,6 +587,8 @@ fn add_tracks(
         ("genre_tag", ColumnType::String, ColumnData::String(genre_tag)),
         ("format", ColumnType::String, ColumnData::String(format)),
         ("year", ColumnType::Int64, ColumnData::Int64(year)),
+        ("original_year", ColumnType::Int64, ColumnData::Int64(original_year)),
+        ("era_source", ColumnType::String, ColumnData::String(era_source)),
         ("track_no", ColumnType::Int64, ColumnData::Int64(track_no)),
         ("file_size", ColumnType::Int64, ColumnData::Int64(file_size)),
         ("energy_level", ColumnType::Int64, ColumnData::Int64(energy_level)),
@@ -570,6 +602,7 @@ fn add_tracks(
         ("duration_sec", ColumnType::Float64, ColumnData::Float64(duration_sec)),
         ("bpm", ColumnType::Float64, ColumnData::Float64(bpm)),
         ("bpm_raw", ColumnType::Float64, ColumnData::Float64(bpm_raw)),
+        ("bpm_confidence", ColumnType::Float64, ColumnData::Float64(bpm_confidence)),
         ("loudness_lufs", ColumnType::Float64, ColumnData::Float64(loudness_lufs)),
         ("dynamic_range_db", ColumnType::Float64, ColumnData::Float64(dynamic_range_db)),
         ("spectral_centroid", ColumnType::Float64, ColumnData::Float64(spectral_centroid)),
@@ -664,7 +697,9 @@ fn build_edges(
         if let Some(el) = r.analysis.energy_level {
             specs.push(edge(TRACK, hash, ENERGY_LEVEL, &el.to_string(), AT_ENERGY));
         }
-        if let Some(y) = t.and_then(|t| t.year) {
+        // FROM_DECADE uses the era year (original_year preferred over file year),
+        // matching the Decade dimension; `Track.era_source` records which was used.
+        if let Some((y, _)) = era_year(t) {
             specs.push(edge(TRACK, hash, DECADE, &decade_id(y), FROM_DECADE));
         }
     }
@@ -914,6 +949,40 @@ fn fo_col(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tags_with(year: Option<u32>, original_year: Option<u32>) -> TagsDto {
+        TagsDto {
+            title: None,
+            artist: None,
+            album: None,
+            genre: None,
+            year,
+            original_year,
+            track_no: None,
+        }
+    }
+
+    #[test]
+    fn era_year_prefers_original_year_then_falls_back() {
+        // original_year present ⇒ use it, source "original_year" (reissue-safe).
+        assert_eq!(
+            era_year(Some(&tags_with(Some(2015), Some(1972)))),
+            Some((1972, ERA_SOURCE_ORIGINAL))
+        );
+        // No original_year ⇒ fall back to the file year, source "file_year".
+        assert_eq!(
+            era_year(Some(&tags_with(Some(2015), None))),
+            Some((2015, ERA_SOURCE_FILE))
+        );
+        // Neither year present, or no tags at all ⇒ no era (no FROM_DECADE edge).
+        assert_eq!(era_year(Some(&tags_with(None, None))), None);
+        assert_eq!(era_year(None), None);
+        // original_year present but no file year still resolves via original_year.
+        assert_eq!(
+            era_year(Some(&tags_with(None, Some(1969)))),
+            Some((1969, ERA_SOURCE_ORIGINAL))
+        );
+    }
 
     #[test]
     fn embedding_model_id_derives_from_similarity_version() {

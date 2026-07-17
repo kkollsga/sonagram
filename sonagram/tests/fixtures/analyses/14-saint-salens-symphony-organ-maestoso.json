@@ -13,11 +13,12 @@
     "album": "Karajan Forever - CD 1",
     "genre": "classical",
     "year": 2003,
+    "original_year": null,
     "track_no": 14
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 507.89877,
     "bpm": 119.92527,
     "bpm_raw": 119.92527,
+    "bpm_confidence": 0.4776381,
     "bpm_candidates": [
       [
         120.18532,
@@ -7204,12 +7206,12 @@
     "predominant_chord": "C",
     "dissonance": 0.006989604,
     "energy": 0.30077434,
-    "danceability": 0.83832484,
+    "danceability": 0.60400844,
     "key": "C major",
     "key_confidence": 0.30389088,
     "key_camelot": "8B",
     "valence": 0.5356161,
-    "acousticness": 0.87397397,
+    "acousticness": 0.7572086,
     "embedding": [
       0.30392307,
       0.9999721,
@@ -7248,7 +7250,7 @@
       0.004070586,
       0.63036275,
       0.11173487,
-      0.83832484,
+      0.60400844,
       0.962586,
       0.4555718,
       0.77719426,
@@ -7260,11 +7262,11 @@
       0.30077434,
       0.5356161
     ],
-    "mood_happy": 0.69915164,
+    "mood_happy": 0.6522883,
     "mood_aggressive": 0.15694964,
     "mood_relaxed": 0.5430228,
     "mood_sad": 0.4083585,
-    "instrumentalness": 0.54101324,
+    "instrumentalness": 0.553514,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.5340589,
@@ -8518,7 +8520,7 @@
         0.5312638
       ]
     ],
-    "vocalness": 0.4589868,
+    "vocalness": 0.446486,
     "fingerprint": null,
     "embedding_version": 2
   }

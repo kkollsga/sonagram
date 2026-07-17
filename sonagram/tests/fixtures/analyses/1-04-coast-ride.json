@@ -13,11 +13,12 @@
     "album": "Changes",
     "genre": null,
     "year": 2018,
+    "original_year": null,
     "track_no": 4
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 438.9094,
     "bpm": 123.809044,
     "bpm_raw": 123.809044,
+    "bpm_confidence": 0.8594706,
     "bpm_candidates": [
       [
         123.046875,
@@ -10076,12 +10078,12 @@
     "predominant_chord": "D#m",
     "dissonance": 0.0123359915,
     "energy": 0.57550997,
-    "danceability": 0.8680442,
+    "danceability": 0.6873466,
     "key": "A# major",
     "key_confidence": 0.20867123,
     "key_camelot": "6B",
     "valence": 0.59084433,
-    "acousticness": 0.59405935,
+    "acousticness": 0.43177935,
     "embedding": [
       0.32572198,
       0.9992764,
@@ -10120,7 +10122,7 @@
       0.0063951933,
       0.65937346,
       0.5264944,
-      0.8680442,
+      0.6873466,
       0.98282886,
       0.65950555,
       0.7441934,
@@ -10132,11 +10134,11 @@
       0.57550997,
       0.59084433
     ],
-    "mood_happy": 0.7496017,
+    "mood_happy": 0.71346223,
     "mood_aggressive": 0.44081816,
     "mood_relaxed": 0.29697612,
     "mood_sad": 0.30890512,
-    "instrumentalness": 0.29612243,
+    "instrumentalness": 0.056644022,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.24380952,
@@ -11551,7 +11553,7 @@
         0.27156487
       ]
     ],
-    "vocalness": 0.70387757,
+    "vocalness": 0.943356,
     "fingerprint": null,
     "embedding_version": 2
   }

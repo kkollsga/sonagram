@@ -13,11 +13,12 @@
     "album": "Doo-Wops & Hooligans",
     "genre": "pop",
     "year": 2013,
+    "original_year": null,
     "track_no": 4
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 230.06041,
     "bpm": 144.5663,
     "bpm_raw": 144.5663,
+    "bpm_confidence": 0.6202847,
     "bpm_candidates": [
       [
         143.55469,
@@ -4410,12 +4412,12 @@
     "predominant_chord": "A#",
     "dissonance": 0.007523451,
     "energy": 0.5903574,
-    "danceability": 0.86907876,
+    "danceability": 0.6900747,
     "key": "F major",
     "key_confidence": 0.27173516,
     "key_camelot": "7B",
     "valence": 0.64006686,
-    "acousticness": 0.71672773,
+    "acousticness": 0.51850045,
     "embedding": [
       0.8003591,
       0.9999642,
@@ -4454,7 +4456,7 @@
       0.004302454,
       0.8004586,
       0.2571788,
-      0.86907876,
+      0.6900747,
       0.9839055,
       0.7439943,
       0.37380964,
@@ -4466,11 +4468,11 @@
       0.5903574,
       0.64006686
     ],
-    "mood_happy": 0.79091644,
+    "mood_happy": 0.7551156,
     "mood_aggressive": 0.32386026,
     "mood_relaxed": 0.43812805,
     "mood_sad": 0.26482785,
-    "instrumentalness": 0.30266732,
+    "instrumentalness": 0.3260945,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.04643991,
@@ -5082,7 +5084,7 @@
         0.4242889
       ]
     ],
-    "vocalness": 0.6973327,
+    "vocalness": 0.6739055,
     "fingerprint": null,
     "embedding_version": 2
   }

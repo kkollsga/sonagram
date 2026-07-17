@@ -13,11 +13,12 @@
     "album": "Greatest Hits 1990-1999",
     "genre": "JRock",
     "year": 1999,
+    "original_year": null,
     "track_no": 8
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 212.19266,
     "bpm": 105.17932,
     "bpm_raw": 105.17932,
+    "bpm_confidence": 0.38331434,
     "bpm_candidates": [
       [
         105.46875,
@@ -2676,12 +2678,12 @@
     "predominant_chord": "F#m",
     "dissonance": 0.006776599,
     "energy": 0.4806029,
-    "danceability": 0.7546454,
+    "danceability": 0.35272977,
     "key": "F# minor",
     "key_confidence": 0.27001554,
     "key_camelot": "11A",
     "valence": 0.41861895,
-    "acousticness": 0.7235866,
+    "acousticness": 0.47057214,
     "embedding": [
       0.731804,
       0.9998075,
@@ -2720,7 +2722,7 @@
       0.027371794,
       0.51093745,
       0.049483333,
-      0.7546454,
+      0.35272977,
       0.965565,
       0.65919226,
       0.6514896,
@@ -2732,11 +2734,11 @@
       0.4806029,
       0.41861895
     ],
-    "mood_happy": 0.38158917,
+    "mood_happy": 0.30120605,
     "mood_aggressive": 0.34183383,
     "mood_relaxed": 0.5476924,
     "mood_sad": 0.6732194,
-    "instrumentalness": 0.4535697,
+    "instrumentalness": 0.3605916,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.42956915,
@@ -3282,7 +3284,7 @@
         0.5000912
       ]
     ],
-    "vocalness": 0.5464303,
+    "vocalness": 0.6394084,
     "fingerprint": null,
     "embedding_version": 2
   }

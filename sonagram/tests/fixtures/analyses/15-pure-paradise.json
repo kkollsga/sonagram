@@ -13,11 +13,12 @@
     "album": "Gypsy Flame",
     "genre": "instrumental",
     "year": 2008,
+    "original_year": null,
     "track_no": 15
   },
   "analysis": {
     "provenance": {
-      "schema_version": 2,
+      "schema_version": 3,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -52,6 +53,7 @@
     "duration_sec": 314.01794,
     "bpm": 118.384514,
     "bpm_raw": 118.384514,
+    "bpm_confidence": 0.8105471,
     "bpm_candidates": [
       [
         117.453835,
@@ -6575,12 +6577,12 @@
     "predominant_chord": "Em",
     "dissonance": 0.008141042,
     "energy": 0.6729652,
-    "danceability": 0.7954635,
+    "danceability": 0.4737743,
     "key": "B minor",
     "key_confidence": 0.067659706,
     "key_camelot": "10A",
     "valence": 0.498738,
-    "acousticness": 0.42811683,
+    "acousticness": 0.25331596,
     "embedding": [
       0.66958404,
       0.9995171,
@@ -6619,7 +6621,7 @@
       0.038903367,
       0.61859256,
       0.62469894,
-      0.7954635,
+      0.4737743,
       0.9793328,
       0.61269605,
       0.5087832,
@@ -6631,11 +6633,11 @@
       0.6729652,
       0.498738
     ],
-    "mood_happy": 0.45494848,
+    "mood_happy": 0.39061067,
     "mood_aggressive": 0.6682806,
     "mood_relaxed": 0.28957897,
     "mood_sad": 0.5695512,
-    "instrumentalness": 0.21115279,
+    "instrumentalness": 0.27879548,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.2554195,
@@ -7665,7 +7667,7 @@
         0.30369556
       ]
     ],
-    "vocalness": 0.7888472,
+    "vocalness": 0.7212045,
     "fingerprint": null,
     "embedding_version": 2
   }
