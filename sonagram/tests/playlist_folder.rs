@@ -35,11 +35,15 @@ fn load_records() -> Vec<AnalysisRecord> {
         .collect()
 }
 
-fn library() -> LibraryInfo {
-    LibraryInfo {
-        root: "fixtures".to_string(),
-        n_tracks: 15,
-    }
+/// P17: build the fixture graph with the source root = the fake library dir, so
+/// each Track's stamped `source_root` resolves to the on-disk files this test
+/// materializes (playlist export no longer needs a library_root argument).
+fn build_with_root(records: &[AnalysisRecord], lib: &std::path::Path) -> std::sync::Arc<kglite::api::DirGraph> {
+    let library = LibraryInfo {
+        root: lib.to_string_lossy().into_owned(),
+        n_tracks: records.len(),
+    };
+    graph::build_graph(records, &library).unwrap()
 }
 
 fn unique_temp(tag: &str) -> PathBuf {
@@ -66,12 +70,11 @@ fn fake_library(records: &[AnalysisRecord], root: &std::path::Path) {
 #[test]
 fn export_folder_copies_all_fixtures_with_relative_m3u8() {
     let records = load_records();
-    let g = graph::build_graph(&records, &library()).unwrap();
-
     let base = unique_temp("all");
     let lib = base.join("library");
     let dest = base.join("Road Trip");
     fake_library(&records, &lib);
+    let g = build_with_root(&records, &lib);
 
     // Resolve ALL 15 tracks in fixture (sorted) order via their content hashes.
     let ids: Vec<String> = records.iter().map(|r| r.source.content_hash.clone()).collect();
@@ -139,12 +142,11 @@ fn export_folder_copies_all_fixtures_with_relative_m3u8() {
 #[test]
 fn export_folder_preserves_selection_order() {
     let records = load_records();
-    let g = graph::build_graph(&records, &library()).unwrap();
-
     let base = unique_temp("order");
     let lib = base.join("library");
     let dest = base.join("out");
     fake_library(&records, &lib);
+    let g = build_with_root(&records, &lib);
 
     // Reverse fixture order — the NN prefixes must follow THIS order, not sorted.
     let ids: Vec<String> = records

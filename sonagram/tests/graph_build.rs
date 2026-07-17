@@ -82,6 +82,8 @@ fn str_prop(graph: &DirGraph, node_type: &str, hash: &str, prop: &str) -> String
 // GRAPH-GATE.md P14 + the `graph_derive::style_threshold_tuning` diagnostic).
 const EXPECT_NODES: &[(&str, usize)] = &[
     ("Library", 1),
+    // P17: one Source dimension node (the single fixture source root).
+    ("Source", 1),
     ("Track", 15),
     ("Artist", 15),
     ("Album", 15),
@@ -105,6 +107,8 @@ const EXPECT_EDGES: &[(&str, usize)] = &[
     ("IN_TEMPO_BAND", 15),
     ("AT_ENERGY", 15),
     ("FROM_DECADE", 15),
+    // P17: one FROM_SOURCE edge per Track.
+    ("FROM_SOURCE", 15),
     ("SIMILAR_TO", 150),
     ("CAMELOT_ADJACENT", 72),
     ("IN_STYLE", 8),

@@ -8,6 +8,97 @@ materialize the answer as a playable `.m3u8` playlist.
 
 **Status: under construction** — bootstrap in progress.
 
+## Use it through an agent (no code)
+
+The main way to use sonagram is to just **ask an AI agent** (e.g. Claude Code)
+for a playlist. A bundled skill does the rest — freshness check, scan, graph
+build, curation, and export — so you never touch the CLI.
+
+**One-time setup (3 steps):**
+
+1. **Install** — `pip install sonagram`. sonagram ships as an sdist (it compiles
+   a native core on install), so you need a **Rust toolchain**
+   ([rustup](https://rustup.rs)) on the machine.
+2. **Register your music** — `sonagram sources add ~/Music` (repeat for other
+   folders).
+3. **Install the skill** — copy `skills/sonagram-playlist/` into
+   `~/.claude/skills/` and fill in your library path.
+
+Then just type what you want at your agent:
+
+- "make me a deep-focus work playlist"
+- "a party mix for Saturday that builds"
+- "songs like *Teardrop* but calmer"
+- "which songs do I have multiple versions of? pair them"
+- "what's even in my library?"
+
+Under the hood the skill runs a read-only freshness probe, does an
+**incremental** scan only if something changed, (re)builds the graph, curates
+against a Quality bar (duration, era, style-world cohesion), and writes a named
+`.m3u8` plus a metadata sidecar into a central store — openable in any music app
+and retrievable later with `sonagram playlists`.
+
+> **Optional: Last.fm enrichment.** Adding a free Last.fm API key folds in richer
+> genres, popularity, and crowd-similarity for better picks. The Claude skill can
+> walk you through getting one and storing it — just ask.
+
+## CLI (scriptable)
+
+`pip install sonagram` also gives you the standalone `sonagram` command (the same
+shared code path as the library, so the two frontends cannot drift). Once a
+source is registered, the flow is config-driven — no path arguments:
+
+```bash
+sonagram sources add ~/Music     # register a library folder (repeatable)
+sonagram status                  # freshness of every source (exit 0/1/2)
+sonagram scan                    # walk, hash, analyze → per-source .sonagram/ cache
+sonagram enrich                  # optional: fold in Last.fm metadata (needs a key)
+sonagram build                   # merge all sources → the central .kgl graph
+sonagram playlist --ids h1,h2,h3 \
+    --name "Deep Focus" --description "a calm work playlist"
+sonagram playlists               # list stored playlists (newest first)
+```
+
+`sonagram config` shows the resolved graph + playlist-store paths (defaults under
+`~/.sonagram/`) and whether a Last.fm key is configured; `sonagram config set
+graph|playlists_dir <path>` overrides them.
+
+**Explicit-path forms** still work exactly as before, for scripting a single
+library without touching the config:
+
+```bash
+sonagram scan  ~/Music
+sonagram build ~/Music music.kgl
+sonagram status ~/Music --format json          # one stable JSON object
+sonagram playlist ~/Music music.kgl \
+    --cypher 'MATCH (t:Track) WHERE t.bpm > 120 RETURN t.content_hash ORDER BY t.energy' \
+    --copy-to ~/Desktop/roadtrip               # portable folder: copied tracks + .m3u8
+```
+
+Everything is **incremental and read-only where it can be**: `scan` re-analyzes
+only changed files (a no-op rescan analyzes nothing), and `enrich` skips
+already-fetched entities.
+
+## For building your own agents / integrations
+
+Serve the graph to any MCP-speaking agent, or drive sonagram from Python:
+
+```bash
+kglite-mcp-server --graph ~/.sonagram/music.kgl   # expose the graph over MCP
+```
+
+```python
+import sonagram
+sonagram.scan("~/Music")
+g = sonagram.build("~/Music", out_path="music.kgl")   # a live kglite graph
+sonagram.export_m3u("music.kgl", "~/Music", "set.m3u8",
+                    cypher="MATCH (t:Track) RETURN t.content_hash ORDER BY t.energy")
+```
+
+The multi-source graph carries a `Source` node per registered folder and a
+`source_root` on every `Track`, so playlist export resolves absolute paths
+without a library-root argument.
+
 ## The idea
 
 - **sonara** supplies per-track analysis: tempo, key/Camelot, energy, valence,
@@ -17,59 +108,10 @@ materialize the answer as a playable `.m3u8` playlist.
   exposure.
 - **sonagram** owns the mapping and the schema between them: fat `Track` nodes
   with every filterable signal flat, dimension nodes (`Artist`, `Genre`, `Key`,
-  `TempoBand`, `Style`, …) for grouping and discovery, materialized
+  `TempoBand`, `Style`, `Source`, …) for grouping and discovery, materialized
   `SIMILAR_TO` edges for traversable similarity, Camelot-wheel edges for
   harmonic set-building — a graph designed from agent playlist-queries
   backward, deterministic byte-for-byte across rescans.
-
-## Quick start
-
-Install from PyPI. sonagram ships as an **sdist** (a source distribution that
-compiles the native core on install), so you need a **Rust toolchain**
-([rustup](https://rustup.rs)) on the machine:
-
-```bash
-pip install sonagram          # builds the Rust core — needs a Rust toolchain
-export LASTFM_API_KEY=...      # optional: enables `enrich`
-```
-
-`pip install sonagram` gives you the same `sonagram` command as the standalone
-binary — one shared code path, so the CLI and the library cannot drift. The
-end-to-end flow:
-
-```bash
-sonagram scan  ~/Music                 # walk, hash, analyze → .sonagram/ cache
-sonagram enrich ~/Music                # optional: fold in Last.fm metadata
-sonagram build ~/Music music.kgl       # cached analysis → queryable .kgl graph
-kglite-mcp-server --graph music.kgl    # serve the graph to an AI agent over MCP
-```
-
-The agent then queries the graph over MCP (Cypher, vector similarity, grouping)
-and turns an answer into a playable playlist:
-
-```bash
-sonagram playlist ~/Music music.kgl \
-    --cypher 'MATCH (t:Track) WHERE t.bpm > 120 RETURN t.content_hash ORDER BY t.energy' \
-    --copy-to ~/Desktop/roadtrip       # portable folder: copied tracks + .m3u8
-```
-
-Everything is **incremental and read-only where it can be**: `scan` re-analyzes
-only changed files, and `enrich` skips already-fetched entities.
-
-### Freshness probe for automation
-
-`sonagram status <library_root>` is a **read-only** probe (it mutates nothing)
-that a skill or CI step can chain before deciding whether to rescan:
-
-```bash
-sonagram status ~/Music --format json   # one stable JSON object
-# exit code: 0 = fresh, 1 = needs scan, 2 = no cache
-```
-
-It compares the files on disk against the `.sonagram/` cache — counting fresh /
-stale / newly-added / deleted tracks and checking each record against the
-current sonara analysis schema — without hashing a file or running analysis.
-Chain it as: `status` → `scan`/`build` if needed → query via MCP.
 
 ## Planned shape
 
@@ -84,7 +126,8 @@ License: MIT
 
 ## Claude Code skill
 
-`skills/sonagram-playlist/` ships an invocable skill for Claude Code: copy it
-to `~/.claude/skills/` (filling in your library path), and "make me a work
-playlist" becomes a one-liner — the skill chains `status` → `scan`/`build`
-(only when stale) → graph curation per `AGENT-GUIDE.md` → `.m3u8` export.
+`skills/sonagram-playlist/` ships the invocable skill described at the top: copy
+it to `~/.claude/skills/` (filling in your library path), and "make me a work
+playlist" becomes a one-liner. The skill chains `status` → `scan`/`build` (only
+when stale) → graph curation per `AGENT-GUIDE.md` → named `.m3u8` export into the
+central store.

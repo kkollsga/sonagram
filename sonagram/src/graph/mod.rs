@@ -68,6 +68,7 @@ pub const EMBEDDING_METRIC: &str = "euclidean";
 
 // Node-type names (interned into the graph schema).
 const LIBRARY: &str = "Library";
+const SOURCE: &str = "Source";
 const TRACK: &str = "Track";
 const ARTIST: &str = "Artist";
 const ALBUM: &str = "Album";
@@ -86,6 +87,8 @@ const IN_KEY: &str = "IN_KEY";
 const IN_TEMPO_BAND: &str = "IN_TEMPO_BAND";
 const AT_ENERGY: &str = "AT_ENERGY";
 const FROM_DECADE: &str = "FROM_DECADE";
+// Phase 17 multi-source edge: Track → the Source it was scanned from.
+const FROM_SOURCE: &str = "FROM_SOURCE";
 // Phase 6 derived edges (built after the embedding store — see `derive`).
 const SIMILAR_TO: &str = "SIMILAR_TO";
 const CAMELOT_ADJACENT: &str = "CAMELOT_ADJACENT";
@@ -118,10 +121,26 @@ fn era_year(tags: Option<&TagsDto>) -> Option<(u32, &'static str)> {
 #[derive(Debug, Clone)]
 pub struct LibraryInfo {
     /// The library root (a display string; a file name or label, never a user
-    /// directory tree — the scanner keeps paths relative).
+    /// directory tree — the scanner keeps paths relative). For a **single-source**
+    /// build this is also the `Source` node id and every `Track.source_root`; a
+    /// **multi-source** build (see [`build_graph_from_sources`]) overrides the
+    /// `Library` label with `"multi-source"` and takes each source's root from the
+    /// [`SourceInput`] instead.
     pub root: String,
     /// Number of tracks in the library. Stamped as a `Library` property.
     pub n_tracks: usize,
+}
+
+/// One configured source contributing records to a build (P17). Its `root` is the
+/// absolute source directory (or a label for fixture builds) that becomes the
+/// `Source` node id + `path` and every contained `Track.source_root`; playlist
+/// export resolves absolute paths off `source_root`, so a multi-source graph
+/// needs no `library_root` argument.
+pub struct SourceInput<'a> {
+    /// Absolute source root (Source node id + `Track.source_root`).
+    pub root: String,
+    /// The source's cached analysis records (need not be pre-sorted).
+    pub records: &'a [AnalysisRecord],
 }
 
 /// Build a deterministic `DirGraph` from `records` per the music schema.
@@ -136,12 +155,14 @@ pub fn build_graph(records: &[AnalysisRecord], library: &LibraryInfo) -> Result<
 
 /// Build the graph, optionally folding in Last.fm [`EnrichmentData`] (P12).
 ///
-/// With `enrichment == None` this is byte-identical to [`build_graph`] (the
-/// golden gate's plain path is untouched). With `Some`, the enrichment adds
-/// popularity/MBID/original-album properties to `Track`/`Artist`/`Album` nodes,
-/// folds folksonomy tags into the existing `Genre` dimension (extra `IN_GENRE`
-/// edges), and adds `CROWD_SIMILAR` human co-listening edges between owned
-/// tracks (weighted) and owned artists.
+/// This is the **single-source** entry point: all `records` belong to one source
+/// whose root is `library.root` (so `Track.source_root` = `library.root` and a
+/// single `Source` node id = `library.root` is stamped — P17). With
+/// `enrichment == None` it matches [`build_graph`]. With `Some`, the enrichment
+/// adds popularity/MBID/original-album properties to `Track`/`Artist`/`Album`
+/// nodes, folds folksonomy tags into the existing `Genre` dimension (extra
+/// `IN_GENRE` edges), and adds `CROWD_SIMILAR` human co-listening edges between
+/// owned tracks (weighted) and owned artists.
 ///
 /// Determinism is preserved: enrichment maps are `BTreeMap`-iterated, every new
 /// edge set is deduped through a `BTreeSet` and grouped by `add_edges_from_specs`.
@@ -150,11 +171,56 @@ pub fn build_graph_with_enrichment(
     enrichment: Option<&EnrichmentData>,
     library: &LibraryInfo,
 ) -> Result<Arc<DirGraph>> {
+    let source = SourceInput {
+        root: library.root.clone(),
+        records,
+    };
+    build_graph_from_sources(std::slice::from_ref(&source), enrichment, library)
+}
+
+/// Build the graph from **one or more** sources (P17), deterministically merging
+/// their records into a single `Track` per audio content hash.
+///
+/// Sources are iterated in **sorted `root` order**, and the first source to carry
+/// a given content hash wins the `Track` (its `path`/tags/document); later
+/// duplicates of the same recording are dropped — so the same track present in
+/// two libraries is one node, resolvable via its winning source's `source_root`.
+/// Each source becomes a `Source` node (`path` + `n_tracks`) with a
+/// `Track-[:FROM_SOURCE]->Source` edge. A multi-source build labels the `Library`
+/// node `"multi-source"` and adds an `n_sources` property; a single-source build
+/// keeps the existing single-root `Library` semantics.
+pub fn build_graph_from_sources(
+    sources: &[SourceInput],
+    enrichment: Option<&EnrichmentData>,
+    library: &LibraryInfo,
+) -> Result<Arc<DirGraph>> {
     let mut graph = DirGraph::new();
 
-    // Deterministic input order: sort references by content hash.
-    let mut sorted: Vec<&AnalysisRecord> = records.iter().collect();
+    // ── Merge across sources (sorted root order, first-source-wins) ─────────
+    let mut srcs: Vec<&SourceInput> = sources.iter().collect();
+    srcs.sort_by(|a, b| a.root.cmp(&b.root));
+
+    // content_hash → winning source root, and per-source winning-track counts.
+    let mut source_of: BTreeMap<String, String> = BTreeMap::new();
+    let mut source_counts: BTreeMap<String, i64> = BTreeMap::new();
+    // Every configured source gets a node even if it wins no unique track.
+    for s in &srcs {
+        source_counts.entry(s.root.clone()).or_insert(0);
+    }
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    let mut sorted: Vec<&AnalysisRecord> = Vec::new();
+    for s in &srcs {
+        for r in s.records {
+            if seen.insert(r.source.content_hash.as_str()) {
+                sorted.push(r);
+                source_of.insert(r.source.content_hash.clone(), s.root.clone());
+                *source_counts.get_mut(&s.root).expect("source seeded") += 1;
+            }
+        }
+    }
+    // Deterministic input order for the rest of the pipeline: sort by content hash.
     sorted.sort_by(|a, b| a.source.content_hash.cmp(&b.source.content_hash));
+    let multi_source = srcs.len() > 1;
 
     // ── Dimension collections (BTree* → fixed iteration order) ──────────────
     // Artist id → track count.
@@ -218,12 +284,14 @@ pub fn build_graph_with_enrichment(
     add_tempo_bands(&mut graph)?;
     add_energy_levels(&mut graph)?;
     add_decades(&mut graph, &decades)?;
+    // P17: one Source node per configured source (endpoints for FROM_SOURCE).
+    add_sources(&mut graph, &source_counts)?;
 
     // ── Stage 3: Track nodes (single full-width pass) ───────────────────────
-    add_tracks(&mut graph, &sorted, enrichment)?;
+    add_tracks(&mut graph, &sorted, &source_of, enrichment)?;
 
     // ── Stage 4: edges (all endpoints now exist) ────────────────────────────
-    let specs = build_edges(&sorted, &albums);
+    let specs = build_edges(&sorted, &albums, &source_of);
     let report = add_edges_from_specs(&mut graph, specs).map_err(SonagramError::Graph)?;
     if report.skipped_missing_endpoint != 0 {
         return Err(SonagramError::Graph(format!(
@@ -271,10 +339,17 @@ pub fn build_graph_with_enrichment(
     let (_n_styles, style_threshold) = derive::add_styles(&mut graph, &sorted, &sim_edges)?;
 
     // ── Stage 9: Library root (last — carries the chosen `style_threshold`) ──
-    let lib_df = build_df(vec![
-        ("id", ColumnType::String, str1(&library.root)),
-        ("path", ColumnType::String, str1(&library.root)),
-        ("n_tracks", ColumnType::Int64, int1(library.n_tracks as i64)),
+    // Single-source: id/path = the one source root (existing semantics).
+    // Multi-source (P17): id/path = "multi-source" + an `n_sources` property.
+    let lib_label = if multi_source {
+        "multi-source".to_string()
+    } else {
+        library.root.clone()
+    };
+    let mut lib_cols = vec![
+        ("id", ColumnType::String, str1(&lib_label)),
+        ("path", ColumnType::String, str1(&lib_label)),
+        ("n_tracks", ColumnType::Int64, int1(sorted.len() as i64)),
         (
             "schema_version",
             ColumnType::Int64,
@@ -285,8 +360,11 @@ pub fn build_graph_with_enrichment(
             ColumnType::Float64,
             ColumnData::Float64(vec![Some(style_threshold)]),
         ),
-    ]);
-    add(&mut graph, lib_df, LIBRARY, "id", "path")?;
+    ];
+    if multi_source {
+        lib_cols.push(("n_sources", ColumnType::Int64, int1(srcs.len() as i64)));
+    }
+    add(&mut graph, build_df(lib_cols), LIBRARY, "id", "path")?;
 
     Ok(Arc::new(graph))
 }
@@ -457,6 +535,24 @@ fn add_decades(graph: &mut DirGraph, decades: &BTreeSet<String>) -> Result<()> {
     add(graph, df, DECADE, "id", "name")
 }
 
+/// P17: one `Source` node per configured source, id = the absolute source root,
+/// with `path` (= id) and `n_tracks` (winning-track count). `BTreeMap`-iterated,
+/// so the node order is fixed.
+fn add_sources(graph: &mut DirGraph, source_counts: &BTreeMap<String, i64>) -> Result<()> {
+    if source_counts.is_empty() {
+        return Ok(());
+    }
+    let ids: Vec<Option<String>> = source_counts.keys().map(|k| Some(k.clone())).collect();
+    let paths = ids.clone();
+    let counts: Vec<Option<i64>> = source_counts.values().map(|c| Some(*c)).collect();
+    let df = build_df(vec![
+        ("id", ColumnType::String, ColumnData::String(ids)),
+        ("path", ColumnType::String, ColumnData::String(paths)),
+        ("n_tracks", ColumnType::Int64, ColumnData::Int64(counts)),
+    ]);
+    add(graph, df, SOURCE, "id", "path")
+}
+
 // ─────────────────────────────── Track builder ──────────────────────────────
 
 /// Build the single full-width `Track` DataFrame. Every column is present for
@@ -466,6 +562,7 @@ fn add_decades(graph: &mut DirGraph, decades: &BTreeSet<String>) -> Result<()> {
 fn add_tracks(
     graph: &mut DirGraph,
     sorted: &[&AnalysisRecord],
+    source_of: &BTreeMap<String, String>,
     enrichment: Option<&EnrichmentData>,
 ) -> Result<()> {
     if sorted.is_empty() {
@@ -496,6 +593,12 @@ fn add_tracks(
         })
         .collect();
     let path: Vec<Option<String>> = sorted.iter().map(|r| Some(r.source.path.clone())).collect();
+    // P17: the absolute source root the track was scanned from, so playlist
+    // export resolves `source_root` + relative `path` without a library_root arg.
+    let source_root: Vec<Option<String>> = sorted
+        .iter()
+        .map(|r| source_of.get(&r.source.content_hash).cloned())
+        .collect();
     let filename: Vec<Option<String>> = sorted
         .iter()
         .map(|r| Some(filename_from_path(&r.source.path)))
@@ -581,6 +684,7 @@ fn add_tracks(
         ("content_hash", ColumnType::String, ColumnData::String(unique_id)),
         ("title", ColumnType::String, ColumnData::String(title)),
         ("path", ColumnType::String, ColumnData::String(path)),
+        ("source_root", ColumnType::String, ColumnData::String(source_root)),
         ("filename", ColumnType::String, ColumnData::String(filename)),
         ("artist_name", ColumnType::String, ColumnData::String(artist_name)),
         ("album_name", ColumnType::String, ColumnData::String(album_name_col)),
@@ -675,6 +779,7 @@ fn add_tracks(
 fn build_edges(
     sorted: &[&AnalysisRecord],
     albums: &BTreeMap<String, (String, String, Option<i64>)>,
+    source_of: &BTreeMap<String, String>,
 ) -> Vec<EdgeSpec> {
     let mut specs: Vec<EdgeSpec> = Vec::new();
     for r in sorted {
@@ -683,6 +788,11 @@ fn build_edges(
         let art = artist_id(t.and_then(|t| t.artist.as_deref()));
 
         specs.push(edge(TRACK, hash, ARTIST, &art, BY_ARTIST));
+
+        // P17: Track → the Source it was scanned from.
+        if let Some(src_root) = source_of.get(hash) {
+            specs.push(edge(TRACK, hash, SOURCE, src_root, FROM_SOURCE));
+        }
 
         if let Some(aid) = album_id(&art, t.and_then(|t| t.album.as_deref())) {
             specs.push(edge(TRACK, hash, ALBUM, &aid, ON_ALBUM));

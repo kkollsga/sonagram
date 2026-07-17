@@ -6,43 +6,80 @@ description: Create playlists from the local music library via the sonagram know
 # sonagram-playlist
 
 Turn a natural-language playlist request into a playable `.m3u8` (optionally a
-portable folder of copies) using the sonagram music knowledge graph.
+portable folder of copies) using the sonagram music knowledge graph. sonagram is
+**config-driven**: you register your music folders once, then every command fans
+out over them into one central graph + one playlist store.
+
+## First-run setup (once)
+- **Register the library**: `sonagram sources add <YOUR_LIBRARY_ROOT>` (repeat for
+  each folder). Confirm with `sonagram sources list`.
+- Everything else is defaults: `sonagram config` shows the resolved central graph
+  (`~/.sonagram/music.kgl`) and playlist store (`~/.sonagram/playlists/`).
+- Optional but recommended: Last.fm enrichment (next section).
 
 ## Fixed locations (this machine)
-- **Library**: `<YOUR_LIBRARY_ROOT>`
-- **Graph**: `<library>/.sonagram/music.kgl` (build target; rebuild is ~1s from cache)
-- **CLI**: `sonagram` if on PATH, else
-  `<path to a built sonagram binary>`
+- **CLI**: `sonagram` if on PATH, else `<path to a built sonagram binary>`.
+- **Graph**: the configured central graph — run `sonagram config` for the path
+  (default `~/.sonagram/music.kgl`). `sonagram build` rebuilds it from every
+  configured source (~1s from cache).
+- **Playlist store**: `sonagram config` → `playlists_dir` (default
+  `~/.sonagram/playlists/`), holding a `<slug>.m3u8` + `<slug>.meta.json` per
+  saved playlist.
 - **Query runner** (full-JSON rows, no `$params`):
   `python -c 'import json,sys,kglite; print(json.dumps(kglite.load(sys.argv[1]).cypher(sys.argv[2]).to_dicts(), ensure_ascii=False, default=str))' <graph.kgl> '<cypher>'`
-- **The manual**: read
-  `AGENT-GUIDE.md (ships with this repo)` before querying —
+- **The manual**: read `AGENT-GUIDE.md (ships with this repo)` before querying —
   schema, cookbook, pitfalls, and the **Quality bar** (duration checks, era
   validation, style-world cohesion, final human sanity-read) are all binding.
 
+## First-run Last.fm setup (optional, recommended)
+Run this once when `sonagram config` shows `lastfm_key: not configured`. Last.fm
+enrichment adds better genres, popularity, and crowd-similarity that noticeably
+sharpen playlist curation.
+
+1. Explain the benefit (one line): richer genres + popularity + "fans also like"
+   similarity for better picks.
+2. Walk the user through getting a **free** key:
+   - Create or log into a free Last.fm account at `https://www.last.fm`.
+   - Go to `https://www.last.fm/api/account/create`.
+   - Fill **Application name** (e.g. `sonagram`). Contact email auto-fills;
+     callback URL and homepage can stay **empty**.
+   - Submit — the page shows an **API key** (32-char hex). They do **not** need
+     the shared secret.
+3. Ask the user to **paste the API key in chat**, then write it to
+   `~/.sonagram/.env` as `LASTFM_API_KEY=<pasted>` and `chmod 600` that file.
+4. **Relay this framing to the user**: pasting secrets in chat is normally unsafe
+   practice; it's acceptable *here* because a Last.fm API key is free, instantly
+   revocable, and grants no account access — and it's stored only in a local file
+   that never leaves the machine except in requests to Last.fm. For any other kind
+   of credential, do **not** use this flow.
+5. Then run `sonagram enrich` (all sources; ~30–60 min first run, resumable, safe
+   to background — tell the user the ETA).
+
 ## Workflow
-1. **Freshness**: `sonagram status <library> --format json`. Exit 0 → skip to
-   step 3. Exit 1/2 → warn the user scan takes ~1h cold / minutes incremental,
-   then `sonagram scan <library>` (shows progress).
-2. **(Re)build** if the graph file is missing or older than the cache:
-   `sonagram build <library> <library>/.sonagram/music.kgl`. If a
-   `LASTFM_API_KEY` exists (env or repo `.env`) and no enrichment cache yet,
-   offer `sonagram enrich <library>` first (adds popularity + crowd-similarity;
-   ~30–60 min first run, resumable).
+1. **Freshness**: `sonagram status --format json` (probes every configured
+   source; exit = worst-of). Exit 0 → skip to step 3. Exit 1/2 → warn the user a
+   cold scan is ~1h / incremental is minutes, then `sonagram scan` (all sources,
+   shows progress).
+2. **(Re)build**: `sonagram build` (multi-source → the configured graph). If a
+   Last.fm key is configured and there's no enrichment cache yet, offer
+   `sonagram enrich` first (see above).
 3. **Understand the request** → pick the archetype(s) from AGENT-GUIDE
    (filter / discover / similarity / sequence / mood / vibe-over-time /
    versions). Calibrate thresholds against library averages before filtering.
-4. **Curate**: pull candidates with the query runner (never trust truncated
-   reprs), select + order client-side per the guide's recipes, apply the
-   Quality bar to every pick (duration ≤ 330s unless the brief wants epics,
-   era claims validated by your own artist knowledge or `era_source`,
+4. **Curate**: pull candidates with the query runner against the configured graph
+   (never trust truncated reprs), select + order client-side per the guide's
+   recipes, apply the Quality bar to every pick (duration ≤ 330s unless the brief
+   wants epics, era claims validated by your own artist knowledge or `era_source`,
    style-world cohesion at critical slots, sanity-read the final list).
-5. **Export** (order is preserved verbatim):
-   `sonagram playlist <library> <graph.kgl> --ids <hash,hash,...> --out <name>.m3u8`
-   — add `--copy-to <dir>` when the user wants a portable folder of copies.
-   Default output dir: `~/Desktop` unless the user says otherwise.
-6. **Deliver**: send the .m3u8 to the user with the tracklist (artist – title
-   per slot) and one line on how it fulfils the brief. Offer a tweak round.
+5. **Export + store** (order is preserved verbatim):
+   `sonagram playlist --ids <hash,hash,...> --name "<request-derived name>" --description "<the user's ask>"`
+   — writes `<slug>.m3u8` (absolute paths, openable in any music app) + a
+   `<slug>.meta.json` into the central store. Add `--copy-to <dir>` when the user
+   wants a portable folder of copies.
+6. **Deliver**: give the user the stored `.m3u8` path with the tracklist
+   (artist – title per slot) and one line on how it fulfils the brief. Mention
+   `sonagram playlists` (and `sonagram playlists show <slug>`) to retrieve it
+   later. Offer a tweak round.
 
 ## Rules
 - Never modify, move, or retag source audio. Copies only, via `--copy-to`.

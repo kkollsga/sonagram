@@ -38,10 +38,12 @@
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use kglite::api::cypher::resolve_node_property;
 use kglite::api::session::{execute_read, ExecuteOptions};
 use kglite::api::{DirGraph, Value};
+use serde::{Deserialize, Serialize};
 
 use crate::{Result, SonagramError};
 
@@ -54,7 +56,13 @@ const ID_PROP: &str = "content_hash";
 /// tag-less file still yields a playable entry (path only, `-1` duration).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlaylistEntry {
-    /// Absolute path to the audio file on disk (library root + relative path).
+    /// The audio content hash — the `Track` node id this entry resolved from.
+    /// Recorded in the playlist-store metadata (P17) so a stored playlist can be
+    /// re-resolved later.
+    pub content_hash: String,
+    /// Absolute path to the audio file on disk. Resolved from the `Track`'s
+    /// `source_root` (P17) joined with its relative `path`, falling back to the
+    /// `library_root` argument for graphs built before `source_root` existed.
     pub abs_path: PathBuf,
     /// Track duration in seconds, if known. `None` → `#EXTINF:-1`.
     pub duration_sec: Option<f32>,
@@ -364,8 +372,15 @@ pub fn entries_from_graph(
         };
 
         let rel_path = prop_string(node, "path", graph).unwrap_or_default();
+        // P17: prefer the Track's own absolute `source_root`; fall back to the
+        // caller's `library_root` for pre-P17 graphs that carry no source_root.
+        let abs_path = match prop_string(node, "source_root", graph) {
+            Some(src) => Path::new(&src).join(&rel_path),
+            None => library_root.join(&rel_path),
+        };
         entries.push(PlaylistEntry {
-            abs_path: library_root.join(rel_path),
+            content_hash: id.clone(),
+            abs_path,
             duration_sec: prop_f32(node, "duration_sec", graph),
             artist: prop_string(node, "artist_name", graph),
             title: prop_string(node, "title", graph),
@@ -507,12 +522,264 @@ fn prop_f32(node: &kglite::api::NodeData, prop: &str, graph: &DirGraph) -> Optio
     }
 }
 
+// ─────────────────────────── central playlist store (P17) ───────────────────
+//
+// A named playlist is materialized into a **central store dir**: a `<slug>.m3u8`
+// (absolute paths, directly openable in any music app) next to a
+// `<slug>.meta.json` sidecar carrying enough to retrieve/re-run it later. Both
+// are written together; the store is a flat directory of such pairs.
+
+/// One track's metadata row inside a stored playlist's `<slug>.meta.json`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct PlaylistTrackMeta {
+    /// 1-based position in the playlist.
+    pub position: usize,
+    /// The audio content hash (Track node id).
+    pub content_hash: String,
+    /// Track artist, if known.
+    pub artist: Option<String>,
+    /// Track title, if known.
+    pub title: Option<String>,
+    /// Track duration in seconds, if known.
+    pub duration_sec: Option<f32>,
+}
+
+/// The `<slug>.meta.json` sidecar of a stored playlist (P17).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct PlaylistMeta {
+    /// The human name the user (or agent) gave the playlist.
+    pub name: String,
+    /// Filesystem-safe kebab slug derived from `name` (collision-suffixed).
+    pub slug: String,
+    /// ISO-8601 UTC creation timestamp (e.g. `2026-07-17T09:30:00Z`). Wall-clock
+    /// metadata — never part of any graph digest.
+    pub created_at: String,
+    /// Free-text request/brief this playlist answers (the `--description`).
+    pub request: Option<String>,
+    /// The Cypher query used to curate it, when curated by query.
+    pub cypher: Option<String>,
+    /// The explicit content-hash ids used, when curated by id list.
+    pub ids: Option<Vec<String>>,
+    /// Number of tracks.
+    pub n_tracks: usize,
+    /// Sum of the known track durations (whole seconds).
+    pub total_duration_sec: i64,
+    /// Per-track metadata rows, in playlist order.
+    pub tracks: Vec<PlaylistTrackMeta>,
+    /// The graph the playlist was resolved against.
+    pub graph: String,
+    /// The portable copy-folder that was also written, if any.
+    pub copy_to: Option<String>,
+}
+
+/// The outcome of [`save_playlist`]: where the two files landed + the metadata.
+#[derive(Debug, Clone)]
+pub struct StoredPlaylist {
+    /// The chosen (collision-resolved) slug.
+    pub slug: String,
+    /// Absolute path of the written `<slug>.m3u8`.
+    pub m3u8_path: PathBuf,
+    /// Absolute path of the written `<slug>.meta.json`.
+    pub meta_path: PathBuf,
+    /// The metadata written.
+    pub meta: PlaylistMeta,
+}
+
+/// Save a named playlist into the central store `dir`: write `<slug>.m3u8`
+/// (absolute paths) and its `<slug>.meta.json` sidecar. The slug is derived from
+/// `name` and suffixed (`-2`, `-3`, …) on collision with an existing pair.
+///
+/// Exactly one of `cypher` / `ids` describes how the set was curated (recorded in
+/// the metadata); `copy_to` is the portable folder that was also written, if any.
+#[allow(clippy::too_many_arguments)]
+pub fn save_playlist(
+    dir: &Path,
+    name: &str,
+    request: Option<&str>,
+    cypher: Option<&str>,
+    ids: Option<&[String]>,
+    entries: &[PlaylistEntry],
+    graph_path: &Path,
+    copy_to: Option<&Path>,
+) -> Result<StoredPlaylist> {
+    if entries.is_empty() {
+        return Err(SonagramError::Playlist(
+            "refusing to store an empty playlist (no tracks — did the query match anything?)"
+                .to_string(),
+        ));
+    }
+    fs::create_dir_all(dir)?;
+    let slug = unique_slug(dir, &slugify(name));
+
+    let tracks: Vec<PlaylistTrackMeta> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| PlaylistTrackMeta {
+            position: i + 1,
+            content_hash: e.content_hash.clone(),
+            artist: e.artist.clone(),
+            title: e.title.clone(),
+            duration_sec: e.duration_sec,
+        })
+        .collect();
+    let total_duration_sec: i64 = entries
+        .iter()
+        .filter_map(|e| e.duration_sec)
+        .filter(|d| d.is_finite() && *d >= 0.0)
+        .map(|d| d.round() as i64)
+        .sum();
+
+    let meta = PlaylistMeta {
+        name: name.to_string(),
+        slug: slug.clone(),
+        created_at: iso8601_utc_now(),
+        request: request.map(str::to_string),
+        cypher: cypher.map(str::to_string),
+        ids: ids.map(|v| v.to_vec()),
+        n_tracks: entries.len(),
+        total_duration_sec,
+        tracks,
+        graph: graph_path.to_string_lossy().into_owned(),
+        copy_to: copy_to.map(|p| p.to_string_lossy().into_owned()),
+    };
+
+    let m3u8_path = dir.join(format!("{slug}.m3u8"));
+    let meta_path = dir.join(format!("{slug}.meta.json"));
+    write_m3u8(entries, &m3u8_path)?;
+    let json = serde_json::to_string_pretty(&meta)
+        .map_err(|e| SonagramError::Playlist(format!("serialize playlist meta: {e}")))?;
+    fs::write(&meta_path, json)?;
+
+    Ok(StoredPlaylist {
+        slug,
+        m3u8_path,
+        meta_path,
+        meta,
+    })
+}
+
+/// List every stored playlist in `dir` (its `*.meta.json` files), **newest
+/// first**. A missing dir yields an empty list. A meta file that fails to parse
+/// is skipped (a stray file never breaks the listing).
+pub fn list_playlists(dir: &Path) -> Result<Vec<PlaylistMeta>> {
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut metas: Vec<PlaylistMeta> = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.extension().and_then(|x| x.to_str()) != Some("json") {
+            continue;
+        }
+        if !path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.ends_with(".meta.json"))
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        if let Ok(text) = fs::read_to_string(&path) {
+            if let Ok(meta) = serde_json::from_str::<PlaylistMeta>(&text) {
+                metas.push(meta);
+            }
+        }
+    }
+    // ISO-8601 sorts lexicographically = chronologically; newest first, slug tie.
+    metas.sort_by(|a, b| {
+        b.created_at
+            .cmp(&a.created_at)
+            .then_with(|| a.slug.cmp(&b.slug))
+    });
+    Ok(metas)
+}
+
+/// Load one stored playlist's metadata by slug from `dir`.
+pub fn load_playlist_meta(dir: &Path, slug: &str) -> Result<PlaylistMeta> {
+    let path = dir.join(format!("{slug}.meta.json"));
+    let text = fs::read_to_string(&path).map_err(|e| {
+        SonagramError::Playlist(format!("no stored playlist '{slug}' in {}: {e}", dir.display()))
+    })?;
+    serde_json::from_str(&text)
+        .map_err(|e| SonagramError::Playlist(format!("parse {}: {e}", path.display())))
+}
+
+/// Slugify a playlist name to a filesystem-safe kebab string: lowercase, keep
+/// alphanumerics (including CJK, which `char::is_alphanumeric` accepts), collapse
+/// every other run into a single `-`, trim leading/trailing `-`. Empty → `"playlist"`.
+pub fn slugify(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut prev_dash = false;
+    for ch in name.chars() {
+        if ch.is_alphanumeric() {
+            out.extend(ch.to_lowercase());
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() {
+        "playlist".to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// Return a slug not colliding with an existing `<slug>.m3u8` / `<slug>.meta.json`
+/// in `dir`, appending `-2`, `-3`, … until free.
+fn unique_slug(dir: &Path, base: &str) -> String {
+    let taken = |s: &str| dir.join(format!("{s}.m3u8")).exists() || dir.join(format!("{s}.meta.json")).exists();
+    if !taken(base) {
+        return base.to_string();
+    }
+    let mut n = 2;
+    loop {
+        let cand = format!("{base}-{n}");
+        if !taken(&cand) {
+            return cand;
+        }
+        n += 1;
+    }
+}
+
+/// The current time as an ISO-8601 UTC string, `YYYY-MM-DDTHH:MM:SSZ`.
+fn iso8601_utc_now() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    iso8601_utc(secs)
+}
+
+/// Format whole seconds since the Unix epoch as `YYYY-MM-DDTHH:MM:SSZ` (UTC).
+/// Pure integer arithmetic (Howard Hinnant's civil-from-days), no `chrono`.
+fn iso8601_utc(secs: i64) -> String {
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
+    // days since 1970-01-01 → civil (y, m, d).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn entry(dur: Option<f32>, artist: Option<&str>, title: Option<&str>, path: &str) -> PlaylistEntry {
         PlaylistEntry {
+            content_hash: "h".to_string(),
             abs_path: PathBuf::from(path),
             duration_sec: dur,
             artist: artist.map(String::from),
@@ -622,6 +889,7 @@ mod tests {
     fn copy_filename_truncates_long_stem_at_200_bytes() {
         let long_title = "é".repeat(300); // 2 bytes each → 600 bytes
         let e = PlaylistEntry {
+            content_hash: "h".to_string(),
             abs_path: PathBuf::from("/lib/x.mp3"),
             duration_sec: None,
             artist: None,
@@ -672,12 +940,14 @@ mod tests {
 
         let entries = vec![
             PlaylistEntry {
+                content_hash: "ha".to_string(),
                 abs_path: a,
                 duration_sec: Some(100.0),
                 artist: Some("布袋寅泰".to_string()),
                 title: Some("薔薇と雨".to_string()),
             },
             PlaylistEntry {
+                content_hash: "hb".to_string(),
                 abs_path: b,
                 duration_sec: None,
                 artist: Some("AC/DC".to_string()),
@@ -778,5 +1048,84 @@ mod tests {
         let _ = std::fs::remove_dir_all(
             std::env::temp_dir().join(format!("sonagram-pl-{}-{stamp}", std::process::id())),
         );
+    }
+
+    // ───────────────── central playlist store (P17) ──────────────────
+
+    #[test]
+    fn slugify_kebabs_and_defaults() {
+        assert_eq!(slugify("My Focus Mix!"), "my-focus-mix");
+        assert_eq!(slugify("  Songs like X (but calmer)  "), "songs-like-x-but-calmer");
+        assert_eq!(slugify("薔薇と雨"), "薔薇と雨"); // CJK is alphanumeric, kept
+        assert_eq!(slugify("***"), "playlist"); // nothing left → default
+    }
+
+    #[test]
+    fn iso8601_epoch_is_stable() {
+        assert_eq!(iso8601_utc(0), "1970-01-01T00:00:00Z");
+        // 2026-07-17T09:30:00Z = 1_784_280_600 seconds since the epoch.
+        assert_eq!(iso8601_utc(1_784_280_600), "2026-07-17T09:30:00Z");
+        // A leap-day boundary: 2024-02-29T23:59:59Z = 1_709_251_199.
+        assert_eq!(iso8601_utc(1_709_251_199), "2024-02-29T23:59:59Z");
+    }
+
+    #[test]
+    fn store_writes_reads_and_dedupes_slug() {
+        let dir = std::env::temp_dir().join(format!(
+            "sonagram-p17store-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let entries = vec![
+            entry(Some(200.0), Some("A"), Some("T1"), "/m/a.mp3"),
+            entry(Some(100.4), Some("B"), Some("T2"), "/m/b.mp3"),
+        ];
+        let ids = vec!["h1".to_string(), "h2".to_string()];
+
+        let stored = save_playlist(
+            &dir,
+            "My Focus Mix!",
+            Some("deep work session"),
+            None,
+            Some(&ids),
+            &entries,
+            Path::new("/g.kgl"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(stored.slug, "my-focus-mix");
+        assert!(stored.m3u8_path.exists(), "wrote .m3u8");
+        assert!(stored.meta_path.exists(), "wrote .meta.json");
+
+        // Metadata parses with the expected fields.
+        let m = load_playlist_meta(&dir, "my-focus-mix").unwrap();
+        assert_eq!(m.name, "My Focus Mix!");
+        assert_eq!(m.n_tracks, 2);
+        assert_eq!(m.total_duration_sec, 300, "200 + round(100.4)");
+        assert_eq!(m.request.as_deref(), Some("deep work session"));
+        assert!(m.cypher.is_none());
+        assert_eq!(m.ids.as_deref(), Some(&["h1".to_string(), "h2".to_string()][..]));
+        assert_eq!(m.tracks.len(), 2);
+        assert_eq!(m.tracks[0].position, 1);
+        assert_eq!(m.tracks[0].title.as_deref(), Some("T1"));
+
+        // A second playlist of the same name collides → `-2` slug.
+        let s2 = save_playlist(
+            &dir, "My Focus Mix!", None, None, Some(&ids), &entries, Path::new("/g.kgl"), None,
+        )
+        .unwrap();
+        assert_eq!(s2.slug, "my-focus-mix-2");
+
+        // list_playlists returns both.
+        let list = list_playlists(&dir).unwrap();
+        assert_eq!(list.len(), 2, "both stored playlists listed");
+
+        // An empty selection is rejected.
+        assert!(save_playlist(&dir, "x", None, None, Some(&[]), &[], Path::new("/g.kgl"), None).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -34,7 +34,7 @@ use pyo3::types::{PyDict, PyList};
 
 use kglite::api::DirGraph;
 use sonagram::enrich::{self, EnrichOptions, EnrichReport, EnrichmentData};
-use sonagram::graph::{self, LibraryInfo};
+use sonagram::graph::{self, LibraryInfo, SourceInput};
 use sonagram::playlist;
 use sonagram::scan as core_scan;
 use sonagram::scan::{ScanOptions, ScanProgress, ScanReport, ScanStage};
@@ -165,11 +165,22 @@ fn build_graph_from_lib(py: Python<'_>, root: &Path) -> PyResult<Arc<DirGraph>> 
             )));
         }
         let enrichment = EnrichmentData::load(&root)?;
+        // P17: the Source node id + every Track.source_root is the ABSOLUTE root
+        // (so `export_m3u` resolves paths off source_root), while the Library node
+        // keeps its short label.
+        let source_root = std::fs::canonicalize(&root)
+            .unwrap_or_else(|_| root.clone())
+            .to_string_lossy()
+            .into_owned();
+        let sources = [SourceInput {
+            root: source_root,
+            records: &records,
+        }];
         let library = LibraryInfo {
             root: library_label(&root),
             n_tracks: records.len(),
         };
-        graph::build_graph_with_enrichment(&records, enrichment.as_ref(), &library)
+        graph::build_graph_from_sources(&sources, enrichment.as_ref(), &library)
     })
     .map_err(to_pyerr)
 }

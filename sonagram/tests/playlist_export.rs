@@ -35,14 +35,17 @@ fn load_records() -> Vec<AnalysisRecord> {
         .collect()
 }
 
+const LIB_ROOT: &str = "/music/library";
+
+// P17: build the fixture graph with the source root = LIB_ROOT, so each Track's
+// stamped `source_root` resolves playlist paths under LIB_ROOT (the same root the
+// tests pass as the fallback).
 fn library() -> LibraryInfo {
     LibraryInfo {
-        root: "fixtures".to_string(),
+        root: LIB_ROOT.to_string(),
         n_tracks: 15,
     }
 }
-
-const LIB_ROOT: &str = "/music/library";
 
 /// title → content hash, for picking fixtures by their (readable) title.
 fn hash_by_title(records: &[AnalysisRecord]) -> HashMap<String, String> {
@@ -212,6 +215,7 @@ fn abs_path_is_root_join_relative() {
     let root = Path::new(LIB_ROOT);
     let entries = playlist::entries_from_graph(g.as_ref(), root, std::slice::from_ref(&id)).unwrap();
     let expected: PlaylistEntry = PlaylistEntry {
+        content_hash: id.clone(),
         abs_path: root.join("04 Marry You.mp3"),
         duration_sec: entries[0].duration_sec,
         artist: Some("Bruno Mars".to_string()),

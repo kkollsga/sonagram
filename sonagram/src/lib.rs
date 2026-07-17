@@ -20,6 +20,8 @@ pub mod error;
 
 pub mod cli;
 
+pub mod config;
+
 pub mod record;
 
 pub mod scan;
@@ -34,6 +36,11 @@ pub use error::{Result, SonagramError};
 
 /// The sonagram crate version, sourced from `Cargo.toml` at compile time.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Serializes tests that mutate or depend on process-global env vars
+/// (`SONAGRAM_HOME`, `LASTFM_API_KEY`), which cargo otherwise runs in parallel.
+#[cfg(test)]
+pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[cfg(test)]
 mod tests {

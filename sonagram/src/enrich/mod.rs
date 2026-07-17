@@ -60,8 +60,10 @@ pub const SAVE_EVERY: usize = 25;
 // ───────────────────────────── API-key resolution ───────────────────────────
 
 /// Resolve the Last.fm API key, in order: explicit `override_key` → the
-/// `LASTFM_API_KEY` env var → a `.env` file in the current dir → a `.env` file
-/// in `library_root`. A missing key is [`SonagramError::Enrich`].
+/// `LASTFM_API_KEY` env var → a `.env` file in the current dir → a `.env` file in
+/// `library_root` → `$SONAGRAM_HOME/.env` (P17: the session- and
+/// library-independent home the `sonagram-playlist` skill writes the key to). A
+/// missing key is [`SonagramError::Enrich`].
 ///
 /// `.env` parsing is minimal and dependency-free (see [`parse_env`]): `KEY=VALUE`
 /// lines, `#` comments and blanks ignored, surrounding quotes stripped.
@@ -75,24 +77,61 @@ pub fn api_key(library_root: &Path, override_key: Option<&str>) -> Result<String
             return Ok(k.to_string());
         }
     }
-    for env_path in [
+    let mut env_paths = vec![
         std::path::PathBuf::from(".env"),
         library_root.join(".env"),
-    ] {
-        if let Ok(text) = std::fs::read_to_string(&env_path) {
-            if let Some(k) = parse_env(&text).get("LASTFM_API_KEY") {
-                let k = k.trim();
-                if !k.is_empty() {
-                    return Ok(k.to_string());
-                }
-            }
+    ];
+    // The home `.env` is the last, session-independent fallback (where the skill
+    // stores a user-provided key).
+    if let Ok(home) = crate::config::sonagram_home() {
+        env_paths.push(home.join(".env"));
+    }
+    for env_path in env_paths {
+        if let Some(k) = key_in_env_file(&env_path) {
+            return Ok(k);
         }
     }
     Err(SonagramError::Enrich(
         "no LASTFM_API_KEY — set the env var, or add `LASTFM_API_KEY=...` to a \
-         .env file in the current dir or the library root"
+         .env file in the current dir, the library root, or ~/.sonagram/.env"
             .to_string(),
     ))
+}
+
+/// The non-empty `LASTFM_API_KEY` value from a `.env` file, or `None` when the
+/// file is missing or carries no usable key.
+fn key_in_env_file(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let k = parse_env(&text).get("LASTFM_API_KEY")?.trim().to_string();
+    if k.is_empty() {
+        None
+    } else {
+        Some(k)
+    }
+}
+
+/// Report **where** a Last.fm key is configured (for `sonagram config`), as a
+/// short source label — **never the key itself**. Mirrors [`api_key`]'s order,
+/// minus the library-root tier (`config` has no library context): the
+/// `LASTFM_API_KEY` env var → a cwd `.env` → `$SONAGRAM_HOME/.env`. `None` when no
+/// key is configured anywhere those tiers look.
+pub fn api_key_source() -> Option<&'static str> {
+    if std::env::var("LASTFM_API_KEY")
+        .ok()
+        .map(|k| !k.trim().is_empty())
+        .unwrap_or(false)
+    {
+        return Some("env: LASTFM_API_KEY");
+    }
+    if key_in_env_file(Path::new(".env")).is_some() {
+        return Some(".env (current dir)");
+    }
+    if let Ok(home) = crate::config::sonagram_home() {
+        if key_in_env_file(&home.join(".env")).is_some() {
+            return Some("~/.sonagram/.env");
+        }
+    }
+    None
 }
 
 /// Minimal `.env` parser: `KEY=VALUE` per line. Blank lines and `#` comments are
@@ -800,6 +839,7 @@ mod tests {
 
     #[test]
     fn api_key_missing_is_clear_error() {
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // A dir with no .env, env var cleared for this process is not safe to
         // assume; instead point at a temp dir and pass an explicit empty override
         // + rely on env being unset in CI. We only assert the error *shape* when
@@ -818,6 +858,33 @@ mod tests {
     fn api_key_override_wins() {
         let dir = std::env::temp_dir();
         assert_eq!(api_key(&dir, Some("  mykey  ")).unwrap(), "mykey");
+    }
+
+    #[test]
+    fn api_key_falls_back_to_sonagram_home_env() {
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // Only meaningful when no real key is present in this environment.
+        if std::env::var("LASTFM_API_KEY").is_ok() {
+            return;
+        }
+        let home = std::env::temp_dir().join(format!("sonagram-homeenv-{}", std::process::id()));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".env"), "LASTFM_API_KEY=homekey123\n").unwrap();
+        std::env::set_var("SONAGRAM_HOME", &home);
+
+        // A library root with no .env of its own falls through to the home .env.
+        let lib = std::env::temp_dir().join(format!("sonagram-homeenv-lib-{}", std::process::id()));
+        std::fs::create_dir_all(&lib).unwrap();
+        // Run from a dir with no cwd .env by pointing library_root at `lib`.
+        let got = api_key(&lib, None);
+
+        std::env::remove_var("SONAGRAM_HOME");
+        let _ = std::fs::remove_dir_all(&home);
+        // The cwd may or may not carry a `.env`; accept either the home key or a
+        // cwd-provided one, but the home tier must be reachable when cwd has none.
+        if !Path::new(".env").exists() {
+            assert_eq!(got.unwrap(), "homekey123");
+        }
     }
 
     // ── html strip / truncate ──

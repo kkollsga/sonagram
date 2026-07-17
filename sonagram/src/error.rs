@@ -40,6 +40,13 @@ pub enum SonagramError {
     /// run (see [`crate::enrich`]).
     #[error("enrich error: {0}")]
     Enrich(String),
+
+    /// A user-config failure (P17): the `~/.sonagram/config.json` registry could
+    /// not be read/written, a source directory does not exist or is not a
+    /// directory, or the home dir could not be resolved. Ours: the config format
+    /// and the source registry are sonagram's responsibility.
+    #[error("config error: {0}")]
+    Config(String),
 }
 
 /// The crate-wide result alias.

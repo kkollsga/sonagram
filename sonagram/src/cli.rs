@@ -27,9 +27,11 @@ use std::path::{Path, PathBuf};
 
 use serde_json::json;
 
+use crate::config::Config;
 use crate::enrich::{self, EnrichOptions, EnrichmentData};
-use crate::graph::{self, LibraryInfo};
+use crate::graph::{self, LibraryInfo, SourceInput};
 use crate::playlist;
+use crate::record::AnalysisRecord;
 use crate::scan::{self, scan_library, FreshnessReport, ScanOptions, ScanProgress, ScanStage};
 use crate::{Result, SonagramError, VERSION};
 
@@ -64,6 +66,9 @@ pub fn run(args: &[String]) -> i32 {
         "enrich" => finish(cmd_enrich(&args[1..])),
         "build" => finish(cmd_build(&args[1..])),
         "playlist" => finish(cmd_playlist(&args[1..])),
+        "playlists" => finish(cmd_playlists(&args[1..])),
+        "sources" => finish(cmd_sources(&args[1..])),
+        "config" => finish(cmd_config(&args[1..])),
         // `status` owns its exit code (0 fresh / 1 needs-scan / 2 no-cache), so
         // it is not funnelled through `finish`.
         "status" => cmd_status(&args[1..]),
@@ -143,31 +148,80 @@ SUBCOMMANDS:\n\
                status              (string) 'fresh' | 'needs_scan' | 'no_cache'\n\
                exit_code           (int)    0 | 1 | 2, matching the exit status\n\
 \n\
+    sources  add <dir> | remove <dir> | list\n\
+             Manage the configured source registry (~/.sonagram/config.json).\n\
+             `add` canonicalizes + dedupes; the dir must exist.\n\
+\n\
+    config   [show] | set graph|playlists_dir <path>\n\
+             Show the resolved config (incl. defaults + whether files exist), or\n\
+             set the central graph / playlist-store location.\n\
+\n\
+    playlists            List stored playlists (from `playlist --name`).\n\
+    playlists show <slug>  Full metadata + tracklist for one stored playlist.\n\
+\n\
+CONFIG-DRIVEN FORMS (no path args — fan out over configured sources):\n\
+    sonagram scan                 scan every configured source\n\
+    sonagram status               probe all sources (exit = worst-of)\n\
+    sonagram enrich               enrich all sources\n\
+    sonagram build                multi-source build → the configured graph\n\
+    sonagram playlist (--cypher|--ids ...) --name <name> [--description <text>]\n\
+                                  curate from the configured graph and store the\n\
+                                  playlist (.m3u8 + .meta.json) centrally\n\
+\n\
 FLAGS:\n\
     -h, --help       Print this help\n\
     -V, --version    Print version\n\
 \n\
 EXAMPLES:\n\
-    sonagram scan  ~/Music\n\
+    sonagram sources add ~/Music\n\
+    sonagram scan\n\
+    sonagram build\n\
+    sonagram playlist --ids h1,h2,h3 --name 'Deep Focus' --description 'work playlist'\n\
+    sonagram playlists\n\
+    # explicit-path forms still work:\n\
     sonagram build ~/Music music.kgl\n\
-    sonagram status ~/Music --format json\n\
     sonagram playlist ~/Music music.kgl \\\n\
         --cypher 'MATCH (t:Track) WHERE t.bpm > 120 RETURN t.content_hash ORDER BY t.energy' \\\n\
-        --out set.m3u8\n\
-    sonagram playlist ~/Music music.kgl \\\n\
-        --ids h1,h2,h3 --copy-to ~/Desktop/roadtrip"
+        --out set.m3u8"
     );
 }
 
 fn cmd_scan(args: &[String]) -> Result<()> {
-    let root = positional(args, 0, "scan", "<library_root>")?;
-    let root = PathBuf::from(root);
+    // Explicit `scan <library_root>` (backward-compatible) vs config-driven
+    // `scan` (every configured source, sequentially).
+    match optional_positional(args, 0) {
+        Some(root) => {
+            scan_one(&PathBuf::from(root))?;
+        }
+        None => {
+            let sources = configured_source_paths(&Config::load()?)?;
+            let mut totals = (0usize, 0usize, 0usize, 0usize, 0usize); // files, analyzed, hash, stat, failed
+            for src in &sources {
+                let r = scan_one(src)?;
+                totals.0 += r.total_files;
+                totals.1 += r.analyzed;
+                totals.2 += r.reused_hash_match;
+                totals.3 += r.reused_stat_match;
+                totals.4 += r.failed.len();
+            }
+            println!("combined scan over {} source(s):", sources.len());
+            println!("  total files:        {}", totals.0);
+            println!("  analyzed (new):     {}", totals.1);
+            println!("  reused (hash match):{}", totals.2);
+            println!("  reused (stat match):{}", totals.3);
+            println!("  failed:             {}", totals.4);
+        }
+    }
+    Ok(())
+}
 
+/// Scan one library root and print its per-source report; return the report.
+fn scan_one(root: &Path) -> Result<crate::scan::ScanReport> {
     let opts = ScanOptions {
         progress: Some(Box::new(stage_line)),
         ..Default::default()
     };
-    let report = scan_library(&root, &opts)?;
+    let report = scan_library(root, &opts)?;
 
     println!("scan report for {}", root.display());
     println!("  total files:        {}", report.total_files);
@@ -179,13 +233,24 @@ fn cmd_scan(args: &[String]) -> Result<()> {
         println!("    - {}: {msg}", path.display());
     }
     println!("  elapsed:            {:.2?}", report.elapsed);
-    Ok(())
+    Ok(report)
 }
 
 fn cmd_enrich(args: &[String]) -> Result<()> {
-    let root = positional(args, 0, "enrich", "<library_root>")?;
-    let root = PathBuf::from(root);
+    // Explicit `enrich <library_root>` vs config-driven `enrich` (all sources).
+    match optional_positional(args, 0) {
+        Some(root) => enrich_one(&PathBuf::from(root)),
+        None => {
+            let sources = configured_source_paths(&Config::load()?)?;
+            for src in &sources {
+                enrich_one(src)?;
+            }
+            Ok(())
+        }
+    }
+}
 
+fn enrich_one(root: &Path) -> Result<()> {
     let opts = EnrichOptions {
         api_key: None,
         progress: Some(Box::new(|p: enrich::EnrichProgress| {
@@ -195,7 +260,7 @@ fn cmd_enrich(args: &[String]) -> Result<()> {
             }
         })),
     };
-    let report = enrich::enrich_library(&root, &opts)?;
+    let report = enrich::enrich_library(root, &opts)?;
 
     println!("enrich report for {}", root.display());
     println!(
@@ -215,22 +280,137 @@ fn cmd_enrich(args: &[String]) -> Result<()> {
 }
 
 fn cmd_build(args: &[String]) -> Result<()> {
-    let root = positional(args, 0, "build", "<library_root>")?;
-    let out = positional(args, 1, "build", "<out.kgl>")?;
-    let root = PathBuf::from(root);
-    let out = PathBuf::from(out);
+    let positionals: Vec<&str> = args
+        .iter()
+        .map(String::as_str)
+        .filter(|a| !a.starts_with("--"))
+        .collect();
+    match positionals.len() {
+        // Explicit `build <library_root> <out.kgl>` — single-source (P17 stamps a
+        // Source node id = the absolute root + `Track.source_root`).
+        2 => cmd_build_single(&PathBuf::from(positionals[0]), &PathBuf::from(positionals[1])),
+        // Config-driven `build` — multi-source over every configured source → the
+        // configured graph path.
+        0 => cmd_build_multi(),
+        _ => Err(SonagramError::Graph(
+            "build: pass `<library_root> <out.kgl>` (explicit) or no args (config-driven)".into(),
+        )),
+    }
+}
 
+/// Explicit single-source build. `Source` node id + every `Track.source_root` is
+/// the absolute library root (canonicalized when possible), while the `Library`
+/// node keeps its short label.
+fn cmd_build_single(root: &Path, out: &Path) -> Result<()> {
     eprintln!("[build] loading cached records from {}", root.display());
-    let records = scan::load_records(&root)?;
+    let records = scan::load_records(root)?;
     if records.is_empty() {
         return Err(SonagramError::Playlist(format!(
             "no cached records under {} — run `sonagram scan` first",
             root.display()
         )));
     }
-    // Auto-load the Last.fm enrichment cache when present.
-    let enrichment = EnrichmentData::load(&root)?;
-    match &enrichment {
+    let enrichment = EnrichmentData::load(root)?;
+    report_enrichment(enrichment.as_ref());
+    eprintln!("[build] {} records → building graph", records.len());
+    let source_root = abs_string(root);
+    let sources = [SourceInput {
+        root: source_root,
+        records: &records,
+    }];
+    let library = LibraryInfo {
+        root: library_label(root),
+        n_tracks: records.len(),
+    };
+    let mut g = graph::build_graph_from_sources(&sources, enrichment.as_ref(), &library)?;
+    graph::save(&mut g, out)?;
+    println!("built graph from {} tracks → {}", records.len(), out.display());
+    Ok(())
+}
+
+/// Config-driven multi-source build: load records from every configured source,
+/// merge (one Track per content hash, first source wins), and write the graph to
+/// the configured graph path.
+fn cmd_build_multi() -> Result<()> {
+    let cfg = Config::load()?;
+    let sources = configured_source_paths(&cfg)?;
+    let out = cfg.resolved_graph()?;
+
+    // Load each source's records + merge its enrichment cache.
+    let mut loaded: Vec<(String, Vec<AnalysisRecord>)> = Vec::new();
+    let mut enrichment = EnrichmentData::default();
+    let mut any_enrichment = false;
+    for src in &sources {
+        let records = scan::load_records(src)?;
+        eprintln!("[build] {} records from {}", records.len(), src.display());
+        if let Some(e) = EnrichmentData::load(src)? {
+            merge_enrichment(&mut enrichment, e);
+            any_enrichment = true;
+        }
+        loaded.push((abs_string(src), records));
+    }
+    if loaded.iter().all(|(_, r)| r.is_empty()) {
+        return Err(SonagramError::Playlist(
+            "no cached records under any configured source — run `sonagram scan` first".into(),
+        ));
+    }
+    let enr = if any_enrichment && !enrichment.is_empty() {
+        report_enrichment(Some(&enrichment));
+        Some(&enrichment)
+    } else {
+        eprintln!("[build] no enrichment cache — plain build");
+        None
+    };
+
+    let source_inputs: Vec<SourceInput> = loaded
+        .iter()
+        .map(|(root, records)| SourceInput {
+            root: root.clone(),
+            records,
+        })
+        .collect();
+    // One configured source keeps its real path as the Library label; the
+    // "multi-source" label is reserved for genuinely merged builds.
+    let library = LibraryInfo {
+        root: if source_inputs.len() == 1 {
+            source_inputs[0].root.clone()
+        } else {
+            "multi-source".to_string()
+        },
+        n_tracks: 0, // overridden by the deduped track count in the builder
+    };
+    let mut g = graph::build_graph_from_sources(&source_inputs, enr, &library)?;
+    graph::save(&mut g, &out)?;
+    let n = g
+        .type_indices
+        .get("Track")
+        .map(|r| r.len())
+        .unwrap_or(0);
+    println!(
+        "built multi-source graph from {} source(s), {} tracks → {}",
+        sources.len(),
+        n,
+        out.display()
+    );
+    Ok(())
+}
+
+/// Fold `src`'s enrichment maps into `dst`, first-writer-wins per key.
+fn merge_enrichment(dst: &mut EnrichmentData, src: EnrichmentData) {
+    for (k, v) in src.artists {
+        dst.artists.entry(k).or_insert(v);
+    }
+    for (k, v) in src.tracks {
+        dst.tracks.entry(k).or_insert(v);
+    }
+    for (k, v) in src.albums {
+        dst.albums.entry(k).or_insert(v);
+    }
+}
+
+/// Print the one-line enrichment status a build reports to stderr.
+fn report_enrichment(enrichment: Option<&EnrichmentData>) {
+    match enrichment {
         Some(e) if !e.is_empty() => eprintln!(
             "[build] enriched build: {} artists, {} tracks",
             e.artists_present(),
@@ -238,19 +418,6 @@ fn cmd_build(args: &[String]) -> Result<()> {
         ),
         _ => eprintln!("[build] no enrichment cache — plain build"),
     }
-    eprintln!("[build] {} records → building graph", records.len());
-    let library = LibraryInfo {
-        root: library_label(&root),
-        n_tracks: records.len(),
-    };
-    let mut g = graph::build_graph_with_enrichment(&records, enrichment.as_ref(), &library)?;
-    graph::save(&mut g, &out)?;
-    println!(
-        "built graph from {} tracks → {}",
-        records.len(),
-        out.display()
-    );
-    Ok(())
 }
 
 fn cmd_playlist(args: &[String]) -> Result<()> {
@@ -259,22 +426,40 @@ fn cmd_playlist(args: &[String]) -> Result<()> {
         print_help();
         return Ok(());
     }
-    let root = positional(args, 0, "playlist", "<library_root>")?;
-    let graph_path = positional(args, 1, "playlist", "<graph.kgl>")?;
-    let root = PathBuf::from(root);
+
+    // Leading positionals (up to the first `--flag`): explicit form takes two
+    // (`<library_root> <graph.kgl>`), config-driven form takes none.
+    let n_pos = args.iter().take_while(|a| !a.starts_with("--")).count();
+    let (root_arg, graph_arg) = match n_pos {
+        2 => (
+            Some(PathBuf::from(&args[0])),
+            Some(PathBuf::from(&args[1])),
+        ),
+        0 => (None, None),
+        _ => {
+            return Err(SonagramError::Playlist(
+                "playlist: pass `<library_root> <graph.kgl>` (explicit) or neither (config-driven)"
+                    .into(),
+            ))
+        }
+    };
 
     let mut cypher: Option<String> = None;
     let mut ids: Option<String> = None;
     let mut out: Option<PathBuf> = None;
     let mut copy_to: Option<PathBuf> = None;
+    let mut name: Option<String> = None;
+    let mut description: Option<String> = None;
 
-    let mut i = 2;
+    let mut i = n_pos;
     while i < args.len() {
         match args[i].as_str() {
             "--cypher" => cypher = Some(flag_value(args, &mut i, "--cypher")?),
             "--ids" => ids = Some(flag_value(args, &mut i, "--ids")?),
             "--out" => out = Some(PathBuf::from(flag_value(args, &mut i, "--out")?)),
             "--copy-to" => copy_to = Some(PathBuf::from(flag_value(args, &mut i, "--copy-to")?)),
+            "--name" => name = Some(flag_value(args, &mut i, "--name")?),
+            "--description" => description = Some(flag_value(args, &mut i, "--description")?),
             other => {
                 return Err(SonagramError::Playlist(format!(
                     "unexpected argument '{other}' to `playlist`"
@@ -284,52 +469,285 @@ fn cmd_playlist(args: &[String]) -> Result<()> {
         i += 1;
     }
 
-    // --out is required unless --copy-to gives the playlist a home of its own.
-    if out.is_none() && copy_to.is_none() {
-        return Err(SonagramError::Playlist(
-            "playlist: pass --out <file.m3u8> and/or --copy-to <dir>".into(),
-        ));
-    }
     if cypher.is_some() == ids.is_some() {
         return Err(SonagramError::Playlist(
             "playlist: pass exactly one of --cypher '<query>' or --ids <hashes>".into(),
         ));
     }
-
-    let g = kglite::api::io::load_file(path_str(Path::new(graph_path))?)
-        .map_err(|e| SonagramError::Graph(format!("load {graph_path}: {e}")))?;
-
-    let entries = if let Some(q) = cypher {
-        playlist::entries_from_cypher(g.as_ref(), &root, &q)?
-    } else {
-        let id_list: Vec<String> = ids
-            .unwrap()
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        playlist::entries_from_graph(g.as_ref(), &root, &id_list)?
-    };
-
-    // Optional absolute-path .m3u8 (honored even alongside --copy-to).
-    if let Some(out) = &out {
-        playlist::write_m3u8(&entries, out)?;
-        println!("wrote {} tracks → {}", entries.len(), out.display());
+    // A destination is required: a central-store name, an explicit .m3u8, and/or
+    // a portable copy-folder.
+    if name.is_none() && out.is_none() && copy_to.is_none() {
+        return Err(SonagramError::Playlist(
+            "playlist: pass --name <name>, --out <file.m3u8>, and/or --copy-to <dir>".into(),
+        ));
     }
 
-    // Optional portable copy-folder: copied audio + a relative-path .m3u8.
-    if let Some(dir) = &copy_to {
-        let name = playlist_name(out.as_deref(), dir);
-        let report = playlist::export_folder(&entries, dir, &name)?;
+    // Config is needed for the graph path (config-driven form) and/or the
+    // playlist-store dir (--name).
+    let cfg = if graph_arg.is_none() || name.is_some() {
+        Some(Config::load()?)
+    } else {
+        None
+    };
+    let graph_file = match &graph_arg {
+        Some(g) => g.clone(),
+        None => cfg.as_ref().expect("cfg loaded").resolved_graph()?,
+    };
+    // Fallback library root for pre-P17 graphs; P17 graphs resolve off each
+    // Track's own `source_root`, so an empty root is fine there.
+    let library_root = root_arg.clone().unwrap_or_default();
+
+    let g = kglite::api::io::load_file(path_str(&graph_file)?)
+        .map_err(|e| SonagramError::Graph(format!("load {}: {e}", graph_file.display())))?;
+
+    let ids_vec: Option<Vec<String>> = ids.as_ref().map(|s| {
+        s.split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    });
+    let entries = match (&cypher, &ids_vec) {
+        (Some(q), _) => playlist::entries_from_cypher(g.as_ref(), &library_root, q)?,
+        (None, Some(list)) => playlist::entries_from_graph(g.as_ref(), &library_root, list)?,
+        _ => unreachable!("exactly-one guard above"),
+    };
+
+    // Optional portable copy-folder (shared by both output modes).
+    let copy_report = if let Some(dir) = &copy_to {
+        let folder = name
+            .clone()
+            .unwrap_or_else(|| playlist_name(out.as_deref(), dir));
+        Some(playlist::export_folder(&entries, dir, &folder)?)
+    } else {
+        None
+    };
+
+    if let Some(name) = &name {
+        // Central store: <playlists_dir>/<slug>.m3u8 + <slug>.meta.json.
+        let dir = cfg.as_ref().expect("cfg loaded").resolved_playlists_dir()?;
+        let stored = playlist::save_playlist(
+            &dir,
+            name,
+            description.as_deref(),
+            cypher.as_deref(),
+            ids_vec.as_deref(),
+            &entries,
+            &graph_file,
+            copy_to.as_deref(),
+        )?;
+        // An explicit --out alongside --name writes an extra copy there.
+        if let Some(out) = &out {
+            playlist::write_m3u8(&entries, out)?;
+        }
         println!(
-            "copied {} tracks ({} bytes) → {}",
-            report.copied,
-            report.bytes,
-            report.playlist_path.display()
+            "stored playlist '{}' ({} tracks) → {}",
+            stored.meta.name,
+            stored.meta.n_tracks,
+            stored.m3u8_path.display()
         );
+        println!("  metadata: {}", stored.meta_path.display());
+        if let Some(rep) = &copy_report {
+            println!("  portable copy: {}", rep.playlist_path.display());
+        }
+        if let Some(out) = &out {
+            println!("  also wrote: {}", out.display());
+        }
+        println!(
+            "  retrieve: `sonagram playlists`  (details: `sonagram playlists show {}`)",
+            stored.slug
+        );
+    } else {
+        if let Some(out) = &out {
+            playlist::write_m3u8(&entries, out)?;
+            println!("wrote {} tracks → {}", entries.len(), out.display());
+        }
+        if let Some(rep) = &copy_report {
+            println!(
+                "copied {} tracks ({} bytes) → {}",
+                rep.copied,
+                rep.bytes,
+                rep.playlist_path.display()
+            );
+        }
     }
 
     Ok(())
+}
+
+/// `sonagram playlists` (list) and `sonagram playlists show <slug>` — read the
+/// central playlist store built by `playlist --name`.
+fn cmd_playlists(args: &[String]) -> Result<()> {
+    let dir = Config::load()?.resolved_playlists_dir()?;
+    match args.first().map(String::as_str) {
+        None | Some("list") => {
+            let metas = playlist::list_playlists(&dir)?;
+            if metas.is_empty() {
+                println!("no stored playlists in {}", dir.display());
+                return Ok(());
+            }
+            println!("stored playlists in {} (newest first):", dir.display());
+            for m in &metas {
+                let dur = format!("{}m{:02}s", m.total_duration_sec / 60, m.total_duration_sec % 60);
+                println!(
+                    "  {}  [{} tracks, {}, {}]",
+                    m.slug, m.n_tracks, dur, m.created_at
+                );
+                println!("      {}", m.name);
+                if let Some(req) = &m.request {
+                    println!("      request: {}", one_line(req));
+                }
+            }
+            Ok(())
+        }
+        Some("show") => {
+            let slug = optional_positional(&args[1..], 0).ok_or_else(|| {
+                SonagramError::Playlist("playlists show: missing <slug>".into())
+            })?;
+            let m = playlist::load_playlist_meta(&dir, slug)?;
+            println!("playlist: {} ({})", m.name, m.slug);
+            println!("  created:  {}", m.created_at);
+            if let Some(req) = &m.request {
+                println!("  request:  {req}");
+            }
+            if let Some(q) = &m.cypher {
+                println!("  cypher:   {q}");
+            }
+            println!(
+                "  tracks:   {} ({}m{:02}s total)",
+                m.n_tracks,
+                m.total_duration_sec / 60,
+                m.total_duration_sec % 60
+            );
+            println!("  graph:    {}", m.graph);
+            if let Some(c) = &m.copy_to {
+                println!("  copy_to:  {c}");
+            }
+            for t in &m.tracks {
+                let dur = t
+                    .duration_sec
+                    .map(|d| format!("{}s", d.round() as i64))
+                    .unwrap_or_else(|| "?".to_string());
+                println!(
+                    "  {:>3}. {} - {} ({dur})",
+                    t.position,
+                    t.artist.as_deref().unwrap_or("?"),
+                    t.title.as_deref().unwrap_or("?")
+                );
+            }
+            Ok(())
+        }
+        Some(other) => Err(SonagramError::Playlist(format!(
+            "playlists: unknown subcommand '{other}' — try `playlists` or `playlists show <slug>`"
+        ))),
+    }
+}
+
+/// `sonagram sources add|remove|list` — manage the configured source registry.
+fn cmd_sources(args: &[String]) -> Result<()> {
+    match args.first().map(String::as_str) {
+        Some("add") => {
+            let dir = optional_positional(&args[1..], 0)
+                .ok_or_else(|| SonagramError::Config("sources add: missing <dir>".into()))?;
+            let mut cfg = Config::load()?;
+            let (canon, added) = cfg.add_source(Path::new(dir))?;
+            cfg.save()?;
+            if added {
+                println!("added source: {canon}");
+            } else {
+                println!("already a source: {canon}");
+            }
+            Ok(())
+        }
+        Some("remove") => {
+            let dir = optional_positional(&args[1..], 0)
+                .ok_or_else(|| SonagramError::Config("sources remove: missing <dir>".into()))?;
+            let mut cfg = Config::load()?;
+            let removed = cfg.remove_source(Path::new(dir));
+            cfg.save()?;
+            if removed {
+                println!("removed source: {dir}");
+            } else {
+                println!("not a configured source: {dir}");
+            }
+            Ok(())
+        }
+        None | Some("list") => {
+            let cfg = Config::load()?;
+            if cfg.sources.is_empty() {
+                println!("no configured sources — add one with `sonagram sources add <dir>`");
+            } else {
+                println!("configured sources ({}):", cfg.sources.len());
+                for s in &cfg.sources {
+                    println!("  {s}");
+                }
+            }
+            Ok(())
+        }
+        Some(other) => Err(SonagramError::Config(format!(
+            "sources: unknown subcommand '{other}' — try add/remove/list"
+        ))),
+    }
+}
+
+/// `sonagram config` (show resolved) and `sonagram config set graph|playlists_dir <path>`.
+fn cmd_config(args: &[String]) -> Result<()> {
+    match args.first().map(String::as_str) {
+        None | Some("show") => {
+            let cfg = Config::load()?;
+            let path = crate::config::config_path()?;
+            let graph = cfg.resolved_graph()?;
+            let playlists = cfg.resolved_playlists_dir()?;
+            println!("config file: {} ({})", path.display(), exists_note(&path));
+            println!("sources ({}):", cfg.sources.len());
+            for s in &cfg.sources {
+                println!("  {s}");
+            }
+            println!(
+                "graph:         {} ({}){}",
+                graph.display(),
+                exists_note(&graph),
+                if cfg.graph.is_none() { " [default]" } else { "" }
+            );
+            println!(
+                "playlists_dir: {} ({}){}",
+                playlists.display(),
+                exists_note(&playlists),
+                if cfg.playlists_dir.is_none() {
+                    " [default]"
+                } else {
+                    ""
+                }
+            );
+            // Last.fm key: report only WHERE it's configured, never the key.
+            match enrich::api_key_source() {
+                Some(src) => println!("lastfm_key:    configured (via {src})"),
+                None => println!("lastfm_key:    not configured"),
+            }
+            Ok(())
+        }
+        Some("set") => {
+            let key = optional_positional(&args[1..], 0)
+                .ok_or_else(|| SonagramError::Config("config set: missing <key> (graph|playlists_dir)".into()))?;
+            let val = optional_positional(&args[1..], 1)
+                .ok_or_else(|| SonagramError::Config("config set: missing <path>".into()))?;
+            let mut cfg = Config::load()?;
+            match key {
+                "graph" => cfg.graph = Some(val.to_string()),
+                "playlists_dir" => cfg.playlists_dir = Some(val.to_string()),
+                other => {
+                    return Err(SonagramError::Config(format!(
+                        "config set: unknown key '{other}' (expected graph|playlists_dir)"
+                    )))
+                }
+            }
+            cfg.save()?;
+            println!("set {key} = {val}");
+            Ok(())
+        }
+        Some(other) => Err(SonagramError::Config(format!(
+            "config: unknown subcommand '{other}' — try `config` or `config set <key> <path>`"
+        ))),
+    }
 }
 
 /// `status <library_root> [--format json]` — the read-only freshness probe.
@@ -374,74 +792,139 @@ fn cmd_status(args: &[String]) -> i32 {
         i += 1;
     }
 
-    let root = match root {
-        Some(r) => PathBuf::from(r),
-        None => {
-            eprintln!("error: status: missing <library_root>");
-            return 1;
-        }
-    };
-
-    let report = match scan::probe_freshness(&root) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("error: {e}");
-            return 1;
-        }
-    };
-
-    // Enrichment presence: the Last.fm cache exists and carries at least one
-    // non-empty map. Consistent with what `build` folds in.
-    let has_enrichment = matches!(EnrichmentData::load(&root), Ok(Some(e)) if !e.is_empty());
-
-    let exit_code = status_exit_code(&report);
-    let status_str = status_label(exit_code);
-    let needs_scan = exit_code == 1;
-
-    if as_json {
-        let obj = json!({
-            "library_root": root.to_string_lossy(),
-            "has_cache": report.has_cache,
-            "total_files": report.total_files,
-            "fresh": report.fresh,
-            "stale": report.stale,
-            "missing_from_index": report.missing_from_index,
-            "deleted_in_index": report.deleted_in_index,
-            "has_enrichment": has_enrichment,
-            "schema_version": sonara::analyze::ANALYSIS_SCHEMA_VERSION,
-            "similarity_version": sonara::similarity::SIMILARITY_VERSION,
-            "needs_scan": needs_scan,
-            "status": status_str,
-            "exit_code": exit_code,
-        });
-        println!("{}", serde_json::to_string(&obj).expect("JSON value"));
-    } else {
-        println!("status for {}", root.display());
-        println!(
-            "  cache:              {}",
-            if report.has_cache {
-                "present"
+    // Explicit `status <root>` vs config-driven `status` (all sources; the JSON
+    // gains a per-source array and the exit code is the worst across sources).
+    match root {
+        Some(r) => {
+            let root = PathBuf::from(r);
+            let (exit_code, report, has_enrichment) = match status_one(&root) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return 1;
+                }
+            };
+            if as_json {
+                let obj = status_json_obj(&root, &report, has_enrichment, exit_code);
+                println!("{}", serde_json::to_string(&obj).expect("JSON value"));
             } else {
-                "absent — run `sonagram scan`"
+                print_status_human(&root, &report, has_enrichment, exit_code);
             }
-        );
-        println!("  total files:        {}", report.total_files);
-        println!("  fresh:              {}", report.fresh);
-        println!("  stale:              {}", report.stale);
-        println!("  new (unindexed):    {}", report.missing_from_index);
-        println!("  deleted:            {}", report.deleted_in_index);
-        println!(
-            "  enrichment cache:   {}",
-            if has_enrichment { "present" } else { "absent" }
-        );
-        match exit_code {
-            0 => println!("  => fresh"),
-            2 => println!("  => no cache (run `sonagram scan {}`)", root.display()),
-            _ => println!("  => needs scan (run `sonagram scan {}`)", root.display()),
+            exit_code
+        }
+        None => {
+            let cfg = match Config::load() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return 1;
+                }
+            };
+            let sources = match configured_source_paths(&cfg) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    return 1;
+                }
+            };
+            let mut worst = 0i32;
+            let mut objs: Vec<serde_json::Value> = Vec::new();
+            let mut humans: Vec<(PathBuf, FreshnessReport, bool, i32)> = Vec::new();
+            for src in &sources {
+                match status_one(src) {
+                    Ok((code, report, has_enr)) => {
+                        worst = worst.max(code);
+                        if as_json {
+                            objs.push(status_json_obj(src, &report, has_enr, code));
+                        } else {
+                            humans.push((src.clone(), report, has_enr, code));
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("error: {}: {e}", src.display());
+                        return 1;
+                    }
+                }
+            }
+            if as_json {
+                let agg = json!({
+                    "sources": objs,
+                    "n_sources": sources.len(),
+                    "needs_scan": worst != 0,
+                    "status": status_label(worst),
+                    "exit_code": worst,
+                });
+                println!("{}", serde_json::to_string(&agg).expect("JSON value"));
+            } else {
+                println!("status over {} configured source(s):", sources.len());
+                for (root, report, has_enr, code) in &humans {
+                    print_status_human(root, report, *has_enr, *code);
+                }
+                println!("=> worst: {}", status_label(worst));
+            }
+            worst
         }
     }
+}
 
-    exit_code
+/// Probe one library root: `(exit_code, report, has_enrichment)`.
+fn status_one(root: &Path) -> Result<(i32, FreshnessReport, bool)> {
+    let report = scan::probe_freshness(root)?;
+    // Enrichment presence: the Last.fm cache exists and carries at least one
+    // non-empty map. Consistent with what `build` folds in.
+    let has_enrichment = matches!(EnrichmentData::load(root), Ok(Some(e)) if !e.is_empty());
+    Ok((status_exit_code(&report), report, has_enrichment))
+}
+
+/// The stable per-source status JSON object.
+fn status_json_obj(
+    root: &Path,
+    report: &FreshnessReport,
+    has_enrichment: bool,
+    exit_code: i32,
+) -> serde_json::Value {
+    json!({
+        "library_root": root.to_string_lossy(),
+        "has_cache": report.has_cache,
+        "total_files": report.total_files,
+        "fresh": report.fresh,
+        "stale": report.stale,
+        "missing_from_index": report.missing_from_index,
+        "deleted_in_index": report.deleted_in_index,
+        "has_enrichment": has_enrichment,
+        "schema_version": sonara::analyze::ANALYSIS_SCHEMA_VERSION,
+        "similarity_version": sonara::similarity::SIMILARITY_VERSION,
+        "needs_scan": exit_code == 1,
+        "status": status_label(exit_code),
+        "exit_code": exit_code,
+    })
+}
+
+/// Print the human-readable status block for one source.
+fn print_status_human(root: &Path, report: &FreshnessReport, has_enrichment: bool, exit_code: i32) {
+    println!("status for {}", root.display());
+    println!(
+        "  cache:              {}",
+        if report.has_cache {
+            "present"
+        } else {
+            "absent — run `sonagram scan`"
+        }
+    );
+    println!("  total files:        {}", report.total_files);
+    println!("  fresh:              {}", report.fresh);
+    println!("  stale:              {}", report.stale);
+    println!("  new (unindexed):    {}", report.missing_from_index);
+    println!("  deleted:            {}", report.deleted_in_index);
+    println!(
+        "  enrichment cache:   {}",
+        if has_enrichment { "present" } else { "absent" }
+    );
+    match exit_code {
+        0 => println!("  => fresh"),
+        2 => println!("  => no cache (run `sonagram scan {}`)", root.display()),
+        _ => println!("  => needs scan (run `sonagram scan {}`)", root.display()),
+    }
 }
 
 /// The freshness exit code for a probe report: `2` when there is no cache at
@@ -496,11 +979,46 @@ fn library_label(root: &Path) -> String {
         .unwrap_or_else(|| root.to_string_lossy().into_owned())
 }
 
-fn positional<'a>(args: &'a [String], idx: usize, cmd: &str, name: &str) -> Result<&'a str> {
+/// The `idx`-th positional (non-`--`) argument, if present.
+fn optional_positional(args: &[String], idx: usize) -> Option<&str> {
     args.get(idx)
         .map(String::as_str)
         .filter(|a| !a.starts_with("--"))
-        .ok_or_else(|| SonagramError::Playlist(format!("{cmd}: missing {name}")))
+}
+
+/// The configured source directories (P17), erroring with a helpful hint when the
+/// registry is empty.
+fn configured_source_paths(cfg: &Config) -> Result<Vec<PathBuf>> {
+    if cfg.sources.is_empty() {
+        return Err(SonagramError::Config(
+            "no sources configured — add one with `sonagram sources add <dir>`".into(),
+        ));
+    }
+    Ok(cfg.sources.iter().map(PathBuf::from).collect())
+}
+
+/// The absolute path of `p` as a string: canonicalized when the dir exists (so a
+/// `Source` node id is stable across relative/symlinked spellings), else the path
+/// as given.
+fn abs_string(p: &Path) -> String {
+    std::fs::canonicalize(p)
+        .unwrap_or_else(|_| p.to_path_buf())
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// `"exists"` / `"missing"` for a config path report.
+fn exists_note(p: &Path) -> &'static str {
+    if p.exists() {
+        "exists"
+    } else {
+        "missing"
+    }
+}
+
+/// The first line of `s`, trimmed, for a one-line listing.
+fn one_line(s: &str) -> &str {
+    s.lines().next().unwrap_or("").trim()
 }
 
 fn flag_value(args: &[String], i: &mut usize, flag: &str) -> Result<String> {
