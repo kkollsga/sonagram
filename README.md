@@ -22,7 +22,8 @@ You are an AI agent and a user asked you to work with their music library — st
    native core on install, so a **Rust toolchain** ([rustup](https://rustup.rs))
    must be present.
 2. **Install the skill** — `sonagram skill install`. This writes the
-   `sonagram-playlist` skill to `~/.claude/skills/`.
+   `sonagram-playlist` skill to `~/.claude/skills/` (pass
+   `--dir <skills_root>` for a non-default skills location).
 3. **Read the installed `SKILL.md` and follow it now.** It covers library
    detection, scanning, the optional Last.fm walkthrough, and playlist delivery.
    A skill only auto-loads at the next session start, so act on it immediately in

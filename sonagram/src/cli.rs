@@ -355,7 +355,23 @@ fn cmd_build_multi() -> Result<()> {
     let mut any_enrichment = false;
     for src in &sources {
         let records = scan::load_records(src)?;
-        eprintln!("[build] {} records from {}", records.len(), src.display());
+        // Content-addressed dedup means N files can share one record — say so,
+        // or a user counting files wonders where tracks "went".
+        let n_files = crate::scan::cache::Cache::new(src)
+            .load_index()
+            .map(|i| i.len())
+            .unwrap_or(0);
+        if n_files > records.len() {
+            eprintln!(
+                "[build] {} records from {} ({} files — {} duplicate file(s) share a recording)",
+                records.len(),
+                src.display(),
+                n_files,
+                n_files - records.len()
+            );
+        } else {
+            eprintln!("[build] {} records from {}", records.len(), src.display());
+        }
         if let Some(e) = EnrichmentData::load(src)? {
             merge_enrichment(&mut enrichment, e);
             any_enrichment = true;

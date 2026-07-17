@@ -45,7 +45,9 @@ silently**:
   `~/.sonagram/playlists/`), holding a `<slug>.m3u8` + `<slug>.meta.json` per
   saved playlist.
 - **Query runner** (full-JSON rows, no `$params`):
-  `python -c 'import json,sys,kglite; print(json.dumps(kglite.load(sys.argv[1]).cypher(sys.argv[2]).to_dicts(), ensure_ascii=False, default=str))' <graph.kgl> '<cypher>'`
+  `<PYTHON> -c 'import json,sys,kglite; print(json.dumps(kglite.load(sys.argv[1]).cypher(sys.argv[2]).to_dicts(), ensure_ascii=False, default=str))' <graph.kgl> '<cypher>'`
+  (`<PYTHON>` is filled at install time with the absolute interpreter path —
+  never use a bare `python`, shell aliases shadow it)
 - **The manual**: read `AGENT-GUIDE.md (ships with this repo)` before querying —
   schema, cookbook, pitfalls, and the **Quality bar** (duration checks, era
   validation, style-world cohesion, final human sanity-read) are all binding.

@@ -35,6 +35,12 @@ const PLACEHOLDER_LIBRARY_ROOT: &str = "<YOUR_LIBRARY_ROOT>";
 /// Personalization placeholder: the built binary path. Substituted at install
 /// time with the running executable's path.
 const PLACEHOLDER_BINARY: &str = "<path to a built sonagram binary>";
+/// Personalization placeholder: the Python interpreter for the skill's query
+/// runner. A bare `python` is unsafe — shell aliases shadow it (observed in the
+/// wild: `alias python='cd …'` broke the runner with a cryptic error). We
+/// substitute the interpreter sitting next to the running console script when
+/// one exists, else fall back to `python3`.
+const PLACEHOLDER_PYTHON: &str = "<PYTHON>";
 
 /// The result of an [`install`] — where the file landed and which personalization
 /// substitutions were applied (for the CLI to report back).
@@ -72,13 +78,37 @@ fn personalize() -> (String, Option<String>, Option<String>) {
         text = text.replace(PLACEHOLDER_LIBRARY_ROOT, root);
     }
 
-    // Binary path ← the running executable (always a real value when resolvable).
-    let binary = std::env::current_exe()
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned());
+    // Binary path ← the running executable. Caveat: under the pip console
+    // script, current_exe() is the *interpreter* (console scripts are Python
+    // files) — in that case point at the sibling `sonagram` script instead.
+    let binary = std::env::current_exe().ok().map(|exe| {
+        let is_python = exe
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("python"));
+        if is_python {
+            if let Some(sib) = exe.parent().map(|d| d.join("sonagram")) {
+                if sib.is_file() {
+                    return sib.to_string_lossy().into_owned();
+                }
+            }
+        }
+        exe.to_string_lossy().into_owned()
+    });
     if let Some(bin) = &binary {
         text = text.replace(PLACEHOLDER_BINARY, bin);
     }
+
+    // Python interpreter ← the one next to the console script (a pip-installed
+    // `sonagram` lives in <venv>/bin beside `python`), else `python3`. Never a
+    // bare `python` — shell aliases shadow it.
+    let python = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join("python")))
+        .filter(|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "python3".to_string());
+    text = text.replace(PLACEHOLDER_PYTHON, &python);
 
     (text, library_root, binary)
 }
