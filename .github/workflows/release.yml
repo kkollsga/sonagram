@@ -41,16 +41,24 @@ jobs:
 
       # The path-dep upstreams (sonara, kglite) are siblings of this repo.
       # CI checks them out next to sonagram so the path deps resolve.
+      # actions/checkout refuses paths outside the workspace, so check the
+      # siblings out INSIDE it and move them up to where ../sonara &
+      # ../KGLite path deps expect them.
       - name: Check out sonara
         uses: actions/checkout@v6
         with:
           repository: kkollsga/sonara
-          path: ../sonara
+          path: _siblings/sonara
       - name: Check out kglite
         uses: actions/checkout@v6
         with:
           repository: kkollsga/kglite
-          path: ../KGLite
+          path: _siblings/KGLite
+      - name: Place siblings beside the workspace
+        run: |
+          mv _siblings/sonara ../sonara
+          mv _siblings/KGLite ../KGLite
+          rmdir _siblings
 
       - name: Rust tests
         run: cargo test --workspace
