@@ -19,8 +19,9 @@ small **dimension nodes** you group and traverse by (`Artist`, `Album`, `Genre`,
 `Key`, `TempoBand`, `EnergyLevel`, `Decade`) plus two **derived** structures:
 `Track-[:SIMILAR_TO]->Track` (top-10 nearest neighbours by audio embedding) and
 `Style` community nodes (tracks that cluster tightly in similarity, with a
-readable profile). `Key-[:CAMELOT_ADJACENT]->Key` encodes the harmonic-mixing
-wheel. That is the whole graph: hub + dimensions + similarity + styles.
+readable profile). A `Song` node groups distinct recordings of one song and
+points back to its preferred recording via `canonical_hash`.
+`Key-[:CAMELOT_ADJACENT]->Key` encodes the harmonic-mixing wheel.
 
 ## Node reference
 
@@ -73,6 +74,7 @@ that wasn't run, or a tag the file lacked).
 | `n_segments` | int | yes | number of structural sections |
 | `spectral_centroid` | float | no | brightness (Hz) |
 | `spectral_flatness` | float | yes | noisiness 0–1 |
+| `is_music` | bool | no | false when `spectral_flatness > 0.10` identifies noise, speech, silence, or another non-musical fragment. Missing flatness stays true. |
 | `zero_crossing_rate` | float | no | timbre proxy |
 | `analysis_schema_version` | int | no | provenance |
 | `embedding_version` | int | yes | provenance |
@@ -98,12 +100,27 @@ library median by construction; filter with percentile semantics, e.g.
 
 | Property | Type | Null? | Meaning |
 |---|---|---|---|
-| `arousal_index` | float | yes | energy/brightness/rhythm intensity — the well-predicted mood axis |
-| `valence_index` | float | yes | musical positiveness — **WEAK PRIOR** (literature R² 0.12–0.28): rank with it, never hard-filter |
-| `tension_index` | float | yes | dissonance/minor/harmonic-complexity — "deep thinking" material = low-mid `arousal_index` × mid-high `tension_index` × high `chord_entropy` |
+| `arousal_index` | float | yes | energy/brightness/rhythm intensity — the well-predicted mood axis. Null for non-music; also require `is_music = true` in mood queries. |
+| `valence_index` | float | yes | musical positiveness — **WEAK PRIOR** (literature R² 0.12–0.28): rank with it, never hard-filter. Null for non-music. |
+| `tension_index` | float | yes | dissonance/minor/harmonic-complexity — "deep thinking" material = low-mid `arousal_index` × mid-high `tension_index` × high `chord_entropy`. Null for non-music. |
 | `recording_quality` | float | yes | audio-only production/provenance quality (validated: separates studio masters from bootlegs, AUC 0.75 scalar-only, d=0.93 with curves) |
 | `quality_tier` | str | yes | `"high"` / `"mid"` / `"low"` — percentile thirds of `recording_quality`, for cheap WHERE clauses |
 | `is_canonical` | bool | no | false only for inferior members of a version group — `WHERE t.is_canonical` is the universal "skip duplicate/inferior takes" filter |
+
+**P21b recognition + popularity** (the columns always exist; a plain or
+unmatched build gives null counts/popularity and `has_lastfm_match = false`):
+
+| Property | Type | Null? | Meaning |
+|---|---|---|---|
+| `lastfm_listeners` | int | yes | Last.fm listener count for the matched song |
+| `lastfm_playcount` | int | yes | Last.fm play count for the matched song |
+| `has_lastfm_match` | bool | no | true when enrichment fetched a usable Last.fm track match; a recognized release beats an unmatched take during canonical selection |
+| `popularity` | float | yes | listener-count percentile in `[0,1]` among tracks with listener counts in this library; tied listener counts share a midrank |
+
+Popularity is principally **song-level**, not recording-level: recognized
+versions of the same song commonly receive identical listener/play counts.
+Use it to prefer familiar songs, not to claim that one recognized release is
+the master rather than an alternate take.
 
 ### Dimension + derived nodes
 
@@ -117,7 +134,7 @@ library median by construction; filter with percentile semantics, e.g.
 | `EnergyLevel` (10, static) | `"1"`–`"10"` | `name`, `level` |
 | `Decade` | e.g. `"1970s"` | `name` |
 | `Style` (detected) | `"style-000"` (id prop is `unique_id`) | `name` (derived `<band>-<acoustic\|electric>-<top-genre>`), `mean_bpm`, `mean_energy`, `mean_valence`, `mean_acousticness`, `n_tracks`, `top_genres` (list), `top_artists` (list), `exemplar_titles` (list) |
-| `Song` (P21, v2) | `artist_id\|normalized_title` | `title`, `artist`, `n_versions`, `canonical_hash` — exists only when ≥2 recordings share a version key; the members link in via `VERSION_OF` |
+| `Song` (P21, v2) | `artist_id\|normalized_title` | `title`, `artist`, `n_versions`, `canonical_hash` — exists only when ≥2 recordings share a version key; `canonical_hash` is selected by Last.fm match, then `recording_quality`, then ascending content hash |
 | `Library` (1) | label | `path`, `n_tracks`, `schema_version` |
 
 ## Edge reference
@@ -132,9 +149,25 @@ library median by construction; filter with percentile semantics, e.g.
 | `AT_ENERGY` | `Track`→`EnergyLevel` | — | only if `energy_level` present |
 | `FROM_DECADE` | `Track`→`Decade` | — | only if a year tag present; uses `original_year` when set, else file `year` (see `era_source`) |
 | `SIMILAR_TO` | `Track`→`Track` | `score` 0–1 | top-10 kNN; **directed** (A→B ≠ B→A) |
-| `VERSION_OF` | `Track`→`Song` | — | recordings of the same composition (P21); the Song's `canonical_hash` names the best take |
+| `VERSION_OF` | `Track`→`Song` | — | recordings of the same composition (P21); primary grouping is artist + normalized title, with the conservative junk-tag repair described below |
 | `IN_STYLE` | `Track`→`Style` | `membership` (1.0 in v1) | tracks in a similarity community |
 | `CAMELOT_ADJACENT` | `Key`→`Key` | `transition` = `energy_up`/`energy_down`/`mode_switch` | the Camelot wheel (72 edges) |
+
+### Version grouping and canonical choice
+
+The primary version key is `(artist, normalized_title)`. A second, deliberately
+conservative pass can repair a junk artist tag (`Unknown Artist`, `Artiest
+onbekend`, or a `TJT` tag followed by a digit): it attaches the track only when
+there is exactly one non-junk `Song` with the same normalized title **and** a
+`SIMILAR_TO` edge in either direction connects it to one of that Song's original
+members. Known-artist covers never move, ambiguous titles stay separate, and an
+attached track never becomes an anchor for a cascading reassignment.
+
+Within each resulting Song, canonical choice is a total order:
+`has_lastfm_match DESC`, `recording_quality DESC` (null lowest), then
+`content_hash ASC`. This finds a recognized, good-quality release; it does not
+prove master versus alternate take when both are recognized. In that case the
+song-level Last.fm statistics tie and audio quality, then hash, decide.
 
 ## Query cookbook
 All four archetypes, copy-paste runnable (inline literals — no `$params`).
@@ -142,7 +175,8 @@ All four archetypes, copy-paste runnable (inline literals — no `$params`).
 **1 — Filter + order** ("house-tempo tracks, calmest first"):
 ```cypher
 MATCH (t:Track)
-WHERE t.bpm >= 110 AND t.bpm < 125 AND t.vocalness < 0.5
+WHERE t.is_music AND t.is_canonical
+  AND t.bpm >= 110 AND t.bpm < 125 AND t.vocalness < 0.5
 RETURN t.title, t.artist_name, t.bpm, t.energy
 ORDER BY t.energy ASC LIMIT 30
 ```
@@ -166,7 +200,7 @@ ORDER BY s.n_tracks DESC
 `SIMILAR_TO` hop, which composes with any `WHERE`:
 ```cypher
 MATCH (s:Track {title:'Marry You'})-[r:SIMILAR_TO]->(t:Track)
-WHERE t.energy < s.energy
+WHERE t.is_music AND t.is_canonical AND t.energy < s.energy
 RETURN t.title, t.artist_name, round(r.score,3) AS score
 ORDER BY score DESC LIMIT 20
 ```
@@ -183,7 +217,8 @@ Python API) or just use `SIMILAR_TO`.
 Camelot-adjacent key and pick a higher-energy, tempo-close track:
 ```cypher
 MATCH (a:Track)-[:IN_KEY]->(k1:Key)-[e:CAMELOT_ADJACENT]->(k2:Key)<-[:IN_KEY]-(b:Track)
-WHERE a.title = 'Just Like a Woman' AND b.energy > a.energy AND abs(b.bpm - a.bpm) < 15
+WHERE a.title = 'Just Like a Woman' AND b.is_music AND b.is_canonical
+  AND b.energy > a.energy AND abs(b.bpm - a.bpm) < 15
 RETURN b.title, b.artist_name, b.bpm, b.energy, e.transition
 ORDER BY b.energy LIMIT 10
 ```
@@ -262,6 +297,17 @@ playlist. A hash matching no Track is reported, not silently dropped.
 - **`mood_*` are heuristic v1** — directional, not calibrated ground truth. Good
   for coarse ranking, not hard thresholds. (`vocalness`/`instrumentalness` are v2
   and now trustworthy — see the vocalness pitfall above.)
+- **Mood axes are music-only and nullable.** Non-music is excluded from their
+  library calibration and carries null `arousal_index`, `valence_index`, and
+  `tension_index`. Start mood queries with `t.is_music AND t.is_canonical` and
+  require each axis you use to be non-null; do not mistake a null for a low
+  score.
+- **Popularity recognizes songs, not masters.** `popularity` is the library
+  percentile of Last.fm listeners and is useful for a familiar/mainstream
+  brief. It commonly ties across recognized versions of the same song, so it
+  cannot establish master versus alternate take. `has_lastfm_match` says the
+  release was recognized; canonical selection then falls back to
+  `recording_quality` and finally ascending `content_hash`.
 - **Cypher null semantics**: `WHERE t.energy < 0.5` silently **excludes** rows
   where `energy` is null (a null comparison is not true). Filter explicitly with
   `t.energy IS NOT NULL` when a null-able property must be present, and
@@ -309,10 +355,12 @@ playlist. A hash matching no Track is reported, not silently dropped.
   order client-side, feed the hash list — order is preserved verbatim. A
   12-track Camelot chain or a mood arc with a mid-set dip cannot be expressed
   as one `ORDER BY`.
-- **Mood-playlist recipe** (feel-good, chill, angry…): filter on the scalar
-  stack (`mood_*`, `valence`, `energy`, `vocalness` for singability,
-  `mood_aggressive` as an exclusion), calibrate thresholds against library
-  averages first, build the arc client-side. Check `duration_sec` — LP/extended
+- **Mood-playlist recipe** (feel-good, chill, angry…): begin with
+  `t.is_music AND t.is_canonical`, require the mood axes you use to be non-null,
+  and curate from `arousal_index`/`tension_index` percentiles plus curve features
+  such as `flow_smoothness` and `chord_entropy`. Treat `valence_index` as a
+  ranking hint, then cross-check with `mood_*`, `energy`, and `vocalness` for
+  singability. Build the arc client-side. Check `duration_sec` — LP/extended
   cuts (7–8 min) hide in compilations and derail pacing.
 - **Vibe-over-time recipe**: cross-tab Genre × Decade to find a vibe spanning
   eras, hold it with a tight `acousticness`/`energy` band, and read
@@ -328,12 +376,13 @@ playlist. A hash matching no Track is reported, not silently dropped.
   `original_year` is often absent (this library: 0 of 15 sample tracks had it),
   so expect to lean on knowledge for most pre-2000 material regardless.
 - **Finding versions/covers**: identical audio deduplicates to ONE Track node
-  (id = content-hash of the audio), so two Track nodes sharing a song title
-  are GUARANTEED different recordings. Recipe: pull title+artist+scalars,
-  normalize titles client-side (case, parentheticals, "- Live/Remaster"
-  suffixes), group, keep groups with 2+ nodes; `duration_sec` deltas are the
-  cleanest version-discriminator (halved = solo cover, doubled =
-  live/extended). Do string work in Python, not Cypher.
+  (id = content-hash of the audio), so two Track nodes are different recordings.
+  Start with `MATCH (t:Track)-[:VERSION_OF]->(s:Song)` and read
+  `s.canonical_hash`; the graph already normalizes edition suffixes and applies
+  the conservative audio-confirmed repair for explicit junk artist tags. It
+  never moves known-artist covers or ambiguous same-title songs. For covers
+  across known artists, group candidates client-side and use duration plus your
+  own knowledge; do not weaken the graph's conservative identity rule.
 - **Read the folder structure early** (`RETURN t.path`): compilation/folder
   names ("29 Disco Fever", "Deep Focus") are often the strongest single
   signal for vibe grouping — stronger than any scalar.
@@ -354,14 +403,18 @@ playlist. A hash matching no Track is reported, not silently dropped.
 
 ## Quality bar (every playlist, before you export)
 QC audits grade on these; treat them as requirements, not suggestions:
-0. **Filter `t.is_canonical` and prefer `quality_tier <> 'low'` by DEFAULT.**
+0. **Filter `t.is_music AND t.is_canonical` and prefer
+   `quality_tier <> 'low'` by DEFAULT.**
    On collector libraries the candidate pool is otherwise flooded with session
-   outtakes, bootlegs, and duplicate takes that pass every scalar filter. Only
-   drop these guards when the brief explicitly wants rarities/outtakes. For
-   mood asks, curate on the axes (`arousal_index`/`tension_index` percentiles +
-   curve features like `flow_smoothness`, `chord_entropy`), not on raw `energy`
-   thresholds alone — and treat `valence_index` as a ranking hint, never a
-   hard filter.
+   chatter/non-music, outtakes, bootlegs, and duplicate takes that pass scalar
+   filters. Only drop the canonical guard when the brief explicitly wants
+   rarities/outtakes; keep the music guard. For mood asks, also require each used
+   axis `IS NOT NULL`, curate on `arousal_index`/`tension_index` percentiles +
+   curve features like `flow_smoothness` and `chord_entropy`, and treat
+   `valence_index` as a ranking hint, never a hard filter. For a familiar or
+   mainstream brief, optionally order candidates by `has_lastfm_match DESC,
+   popularity DESC, recording_quality DESC`; popularity is song-level and must
+   not be presented as proof of a particular master.
 1. **Duration check every pick.** Casual/mood playlists default to
    radio-length cuts (`duration_sec <= 330`) unless the brief wants epics —
    a 8:15 LP cut mid-road-trip reads as a pacing defect. Always `RETURN

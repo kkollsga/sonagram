@@ -58,9 +58,50 @@ be null (opt-in analysis that wasn't run, or a tag the file lacked).
 | `n_segments` | int | yes | number of structural sections |
 | `spectral_centroid` | float | no | brightness (Hz) |
 | `spectral_flatness` | float | yes | noisiness 0–1 |
+| `is_music` | bool | no | false when `spectral_flatness > 0.10`; missing flatness stays true |
 | `zero_crossing_rate` | float | no | timbre proxy |
 | `analysis_schema_version` | int | no | provenance |
 | `embedding_version` | int | yes | provenance |
+
+### Graph-derived Track properties (schema v2)
+
+| Property | Type | Null? | Meaning |
+|---|---|---|---|
+| `macro_dynamics` | float | yes | loudness-curve population spread |
+| `energy_arc_range` | float | yes | `(p95−p5)/mean` of the energy curve |
+| `energy_builds_per_min` | float | yes | sustained crescendo count per minute |
+| `flow_smoothness` | float | yes | 0–1 steadiness of the energy curve |
+| `chord_vocab` | int | yes | number of distinct chord labels |
+| `chord_entropy` | float | yes | harmonic-label Shannon entropy in bits |
+| `chord_churn` | float | yes | chord events per minute |
+| `tempo_steadiness` | float | yes | 0–1 tempo consistency |
+| `seg_density` | float | yes | structural sections per minute |
+| `arousal_index` | float | yes | music-only library percentile for energy/brightness/rhythm intensity |
+| `valence_index` | float | yes | music-only library percentile for musical positiveness; a weak ranking prior, not a hard filter |
+| `tension_index` | float | yes | music-only library percentile for dissonance/minor/harmonic complexity |
+| `recording_quality` | float | yes | library percentile for audio production/provenance quality |
+| `quality_tier` | str | yes | `"low"`, `"mid"`, or `"high"` third of `recording_quality` |
+| `is_canonical` | bool | no | true for singletons and the preferred member of each version group |
+
+Non-music is excluded from calibration of the three mood axes and carries null
+for all three. Mood queries should require `t.is_music` and require every axis
+they use to be non-null. Curve features and recording quality remain available.
+
+### Track recognition + popularity (schema v2)
+
+These columns exist in both plain and enriched graphs. Without a usable Last.fm
+match, counts and popularity are null and `has_lastfm_match` is false.
+
+| Property | Type | Null? | Meaning |
+|---|---|---|---|
+| `lastfm_listeners` | int | yes | Last.fm listener count for the matched song |
+| `lastfm_playcount` | int | yes | Last.fm play count for the matched song |
+| `has_lastfm_match` | bool | no | whether enrichment fetched a usable track match |
+| `popularity` | float | yes | listener-count percentile `[0,1]` within this library; equal counts share a midrank |
+
+Popularity is song-level: recognized versions of the same song commonly tie.
+It is useful for preferring familiar songs, but cannot prove master versus
+alternate take among recognized releases.
 
 ## Dimension + derived nodes
 
@@ -74,6 +115,7 @@ be null (opt-in analysis that wasn't run, or a tag the file lacked).
 | `EnergyLevel` (10, static) | `"1"`–`"10"` | `name`, `level` |
 | `Decade` | e.g. `"1970s"` | `name` |
 | `Style` (detected) | `"style-000"` (id prop is `unique_id`) | `name` (derived `<band>-<acoustic\|electric>-<top-genre>`), `mean_bpm`, `mean_energy`, `mean_valence`, `mean_acousticness`, `n_tracks`, `top_genres` (list), `top_artists` (list), `exemplar_titles` (list) |
+| `Song` | `artist_id\|normalized_title` | `title`, `artist`, `n_versions`, `canonical_hash`; exists for version groups with at least two members |
 | `Library` (1) | label | `path`, `n_tracks`, `schema_version` |
 
 ## Edges
@@ -88,17 +130,32 @@ be null (opt-in analysis that wasn't run, or a tag the file lacked).
 | `AT_ENERGY` | `Track`→`EnergyLevel` | — | only if `energy_level` present |
 | `FROM_DECADE` | `Track`→`Decade` | — | only if a year tag present; uses `original_year` when set, else file `year` (see `era_source`) |
 | `SIMILAR_TO` | `Track`→`Track` | `score` 0–1 | top-10 kNN by audio embedding; **directed** (A→B ≠ B→A) |
+| `VERSION_OF` | `Track`→`Song` | — | distinct recordings in a version group |
 | `IN_STYLE` | `Track`→`Style` | `membership` | tracks in a similarity community |
 | `CAMELOT_ADJACENT` | `Key`→`Key` | `transition` = `energy_up`/`energy_down`/`mode_switch` | the Camelot wheel (72 edges) |
 
 ## Enrichment additions (after `enrich`)
 
-Running [`sonagram enrich`](cli.md#sonagram-enrich) before `build` folds Last.fm
-data into the same schema: popularity, MBID, and original-album properties on
-`Track` / `Artist` / `Album`; extra folksonomy-tag `IN_GENRE` edges; and
-`CROWD_SIMILAR` edges (weighted `Track`→`Track` and `source="lastfm"`
-`Artist`→`Artist`) alongside the audio-derived `SIMILAR_TO` web. A plain build
-(no enrichment cache) omits these.
+Running [`sonagram enrich`](cli.md#sonagram-enrich) before `build` fills the
+always-present Track recognition/popularity columns above and adds MBID and
+original-album metadata on `Track` / `Artist` / `Album`, extra folksonomy-tag
+`IN_GENRE` edges, and `CROWD_SIMILAR` edges (weighted `Track`→`Track` and
+`source="lastfm"` `Artist`→`Artist`) alongside the audio-derived `SIMILAR_TO`
+web. A plain build keeps the four Track columns but uses null/null/false/null.
+
+## Version grouping and canonical selection
+
+Primary groups share artist + normalized title. An explicitly junk-tagged track
+(`Unknown Artist`, `Artiest onbekend`, or `TJT` followed by a digit) can attach
+to a non-junk Song only when exactly one primary Song has the same normalized
+title and a `SIMILAR_TO` edge in either direction reaches one of its original
+members. Known-artist covers never move, ambiguous titles remain separate, and
+reassigned tracks cannot cause cascading assignments.
+
+Within a Song, canonical selection orders by `has_lastfm_match` descending,
+`recording_quality` descending (null lowest), then `content_hash` ascending.
+Last.fm recognition can favor a recognized release over an unmatched outtake;
+because popularity is song-level, it cannot distinguish two recognized takes.
 
 ## Determinism
 

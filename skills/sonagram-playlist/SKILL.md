@@ -94,9 +94,13 @@ sharpen playlist curation.
    versions). Calibrate thresholds against library averages before filtering.
 4. **Curate**: pull candidates with the query runner against the configured graph
    (never trust truncated reprs), select + order client-side per the guide's
-   recipes, apply the Quality bar to every pick (duration ≤ 330s unless the brief
-   wants epics, era claims validated by your own artist knowledge or `era_source`,
-   style-world cohesion at critical slots, sanity-read the final list).
+   recipes. Candidate queries default to `t.is_music AND t.is_canonical`; mood
+   queries must also require every used mood axis `IS NOT NULL`. Apply the
+   Quality bar to every pick (prefer `quality_tier <> 'low'`, duration ≤ 330s
+   unless the brief wants epics, era claims validated by your own artist
+   knowledge or `era_source`, style-world cohesion at critical slots, sanity-read
+   the final list). For a familiar/mainstream brief, optionally order by
+   `has_lastfm_match DESC, popularity DESC, recording_quality DESC`.
 5. **Export + store** (order is preserved verbatim):
    `sonagram playlist --ids <hash,hash,...> --name "<request-derived name>" --description "<the user's ask>"`
    — writes `<slug>.m3u8` (absolute paths, openable in any music app) + a
@@ -112,3 +116,17 @@ sharpen playlist curation.
 - Long operations (scan/enrich) run in the background; tell the user the ETA.
 - If the graph/CLI are missing entirely, say what's missing rather than
   improvising another path.
+- For mood playlists, use the music-only `arousal_index`/`tension_index`
+  percentiles plus curve features; treat nullable `valence_index` as a ranking
+  hint. Non-music has null mood axes and was excluded from their calibration.
+- For versions, start from `Track-[:VERSION_OF]->Song` and
+  `Song.canonical_hash`. Primary grouping is artist + normalized title. Only an
+  explicit junk artist tag can attach to one unambiguous same-title non-junk Song,
+  and only with a `SIMILAR_TO` edge in either direction to an original member;
+  known-artist covers never move and repaired tracks never seed a cascade.
+- Canonical choice within a Song is `has_lastfm_match` first, then
+  `recording_quality` (null lowest), then ascending `content_hash`.
+  `lastfm_listeners`/`lastfm_playcount` are song-level counts and `popularity`
+  is their listener percentile within the library (equal counts tie). Use these
+  to prefer familiar songs, never as proof that one recognized release is the
+  master rather than an alternate take.
