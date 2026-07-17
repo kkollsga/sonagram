@@ -1696,6 +1696,8 @@ dependencies = [
  "kglite",
  "numpy",
  "pyo3",
+ "serde",
+ "serde_json",
  "sonagram",
  "tempfile",
 ]

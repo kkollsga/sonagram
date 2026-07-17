@@ -31,8 +31,11 @@ use std::sync::Arc;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 use kglite::api::DirGraph;
+use sonagram::curation::{self as core_curation, PlaylistBrief, PlaylistPolicy};
 use sonagram::enrich::{self, EnrichOptions, EnrichReport, EnrichmentData};
 use sonagram::graph::{self, LibraryInfo, SourceInput};
 use sonagram::pipeline;
@@ -268,6 +271,61 @@ fn report_to_dict<'py>(py: Python<'py>, report: &ScanReport) -> PyResult<Bound<'
     Ok(d)
 }
 
+fn decode_json<T: DeserializeOwned>(raw: &str, label: &str) -> PyResult<T> {
+    serde_json::from_str(raw)
+        .map_err(|error| PyValueError::new_err(format!("{label} is not valid: {error}")))
+}
+
+fn from_python_json<T: DeserializeOwned>(
+    py: Python<'_>,
+    value: &Bound<'_, PyAny>,
+    label: &str,
+) -> PyResult<T> {
+    let raw: String = py.import("json")?.call_method1("dumps", (value,))?.extract()?;
+    decode_json(&raw, label)
+}
+
+fn to_python_json<T: Serialize>(py: Python<'_>, value: &T) -> PyResult<Py<PyAny>> {
+    let raw = serde_json::to_string(value)
+        .map_err(|error| PyRuntimeError::new_err(format!("serialize result: {error}")))?;
+    Ok(py
+        .import("json")?
+        .call_method1("loads", (raw,))?
+        .unbind())
+}
+
+fn load_saved_graph(path: &Path) -> std::result::Result<Arc<DirGraph>, SonagramError> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| SonagramError::Graph(format!("non-UTF-8 path: {}", path.display())))?;
+    kglite::api::io::load_file(path_str)
+        .map_err(|error| SonagramError::Graph(format!("load {path_str}: {error}")))
+}
+
+fn resolve_curation_policy(
+    brief: &PlaylistBrief,
+    policy: Option<PlaylistPolicy>,
+) -> std::result::Result<PlaylistPolicy, String> {
+    let policy = policy.unwrap_or_else(|| PlaylistPolicy::for_preset(brief.preset));
+    if policy.preset != brief.preset {
+        return Err(format!(
+            "brief preset {:?} does not match policy preset {:?}",
+            brief.preset, policy.preset
+        ));
+    }
+    Ok(policy)
+}
+
+fn validate_ordered_track_ids(track_ids: &[String]) -> std::result::Result<(), String> {
+    if track_ids.is_empty() {
+        return Err("track_ids must contain at least one content hash".into());
+    }
+    if track_ids.iter().any(|id| id.trim().is_empty()) {
+        return Err("track_ids must not contain an empty content hash".into());
+    }
+    Ok(())
+}
+
 // ───────────────────────────── Python surface ───────────────────────────────
 
 /// Scan a music library and return its [`ScanReport`] as a plain `dict`.
@@ -431,11 +489,7 @@ fn export_m3u(
         .map_err(PyValueError::new_err)?;
 
     py.detach(move || {
-        let path = kgl_path.to_str().ok_or_else(|| {
-            SonagramError::Graph(format!("non-UTF-8 path: {}", kgl_path.display()))
-        })?;
-        let g = kglite::api::io::load_file(path)
-            .map_err(|e| SonagramError::Graph(format!("load {path}: {e}")))?;
+        let g = load_saved_graph(&kgl_path)?;
         let entries = match &selection {
             Selection::Cypher(q) => playlist::entries_from_cypher(g.as_ref(), &library_root, q)?,
             Selection::Ids(ids) => playlist::entries_from_graph(g.as_ref(), &library_root, ids)?,
@@ -456,6 +510,88 @@ fn export_m3u(
         Ok::<String, SonagramError>(out_path.to_string_lossy().into_owned())
     })
     .map_err(to_pyerr)
+}
+
+/// Profile curation-relevant statistics from a saved `.kgl` graph.
+#[pyfunction]
+fn profile_library(py: Python<'_>, kgl_path: PathBuf) -> PyResult<Py<PyAny>> {
+    let profile = py
+        .detach(move || {
+            let graph = load_saved_graph(&kgl_path)?;
+            core_curation::profile_library(&graph)
+        })
+        .map_err(to_pyerr)?;
+    to_python_json(py, &profile)
+}
+
+/// Curate from a JSON-compatible brief and optional resolved policy.
+#[pyfunction]
+#[pyo3(signature = (kgl_path, brief, policy=None))]
+fn curate_playlist(
+    py: Python<'_>,
+    kgl_path: PathBuf,
+    brief: Py<PyAny>,
+    policy: Option<Py<PyAny>>,
+) -> PyResult<Py<PyAny>> {
+    let brief: PlaylistBrief = from_python_json(py, brief.bind(py), "brief")?;
+    let policy = match policy {
+        Some(value) => Some(from_python_json(py, value.bind(py), "policy")?),
+        None => None,
+    };
+    let policy = resolve_curation_policy(&brief, policy).map_err(PyValueError::new_err)?;
+    let result = py
+        .detach(move || {
+            let graph = load_saved_graph(&kgl_path)?;
+            core_curation::curate_playlist(&graph, &brief, &policy)
+        })
+        .map_err(to_pyerr)?;
+    to_python_json(py, &result)
+}
+
+/// Audit an ordered id list against an optional JSON-compatible policy.
+#[pyfunction]
+#[pyo3(signature = (kgl_path, track_ids, policy=None))]
+fn audit_playlist(
+    py: Python<'_>,
+    kgl_path: PathBuf,
+    track_ids: Vec<String>,
+    policy: Option<Py<PyAny>>,
+) -> PyResult<Py<PyAny>> {
+    validate_ordered_track_ids(&track_ids).map_err(PyValueError::new_err)?;
+    let policy = match policy {
+        Some(value) => from_python_json(py, value.bind(py), "policy")?,
+        None => PlaylistPolicy::default(),
+    };
+    let audit = py
+        .detach(move || {
+            let graph = load_saved_graph(&kgl_path)?;
+            core_curation::audit_playlist(&graph, &track_ids, &policy)
+        })
+        .map_err(to_pyerr)?;
+    to_python_json(py, &audit)
+}
+
+/// Explain an ordered id list against an optional JSON-compatible policy.
+#[pyfunction]
+#[pyo3(signature = (kgl_path, track_ids, policy=None))]
+fn explain_playlist(
+    py: Python<'_>,
+    kgl_path: PathBuf,
+    track_ids: Vec<String>,
+    policy: Option<Py<PyAny>>,
+) -> PyResult<Py<PyAny>> {
+    validate_ordered_track_ids(&track_ids).map_err(PyValueError::new_err)?;
+    let policy = match policy {
+        Some(value) => from_python_json(py, value.bind(py), "policy")?,
+        None => PlaylistPolicy::default(),
+    };
+    let explanation = py
+        .detach(move || {
+            let graph = load_saved_graph(&kgl_path)?;
+            core_curation::explain_playlist(&graph, &track_ids, &policy)
+        })
+        .map_err(to_pyerr)?;
+    to_python_json(py, &explanation)
 }
 
 /// Run the shared `sonagram` CLI in-process, returning its process exit code.
@@ -483,6 +619,10 @@ fn _sonagram(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build, m)?)?;
     m.add_function(wrap_pyfunction!(scan_and_build, m)?)?;
     m.add_function(wrap_pyfunction!(export_m3u, m)?)?;
+    m.add_function(wrap_pyfunction!(profile_library, m)?)?;
+    m.add_function(wrap_pyfunction!(curate_playlist, m)?)?;
+    m.add_function(wrap_pyfunction!(audit_playlist, m)?)?;
+    m.add_function(wrap_pyfunction!(explain_playlist, m)?)?;
     m.add_function(wrap_pyfunction!(_run_cli, m)?)?;
     Ok(())
 }
@@ -531,5 +671,54 @@ mod tests {
         assert_eq!(sel, Selection::Ids(ids));
         // Empty id list is rejected.
         assert!(validate_export_selection(None, Some(&[])).is_err());
+    }
+
+    #[test]
+    fn curation_json_inputs_validate_and_resolve_defaults() {
+        let brief: PlaylistBrief = decode_json(
+            r#"{"preset":"focus","target_tracks":12,"target_duration_sec":null,"seed_ids":[]}"#,
+            "brief",
+        )
+        .unwrap();
+        assert_eq!(brief.target_tracks, 12);
+        let policy = resolve_curation_policy(&brief, None).unwrap();
+        assert_eq!(policy.preset, brief.preset);
+        assert!(resolve_curation_policy(&brief, Some(PlaylistPolicy::default())).is_err());
+        assert!(validate_ordered_track_ids(&[]).is_err());
+        assert!(validate_ordered_track_ids(&[" ".into()]).is_err());
+        assert!(validate_ordered_track_ids(&["hash".into()]).is_ok());
+        assert!(decode_json::<PlaylistBrief>(r#"{"preset":"unknown"}"#, "brief").is_err());
+        assert!(decode_json::<PlaylistPolicy>(r#"{"preset":"focus"}"#, "policy").is_err());
+
+        let brief_json = serde_json::to_value(&brief).unwrap();
+        assert_eq!(brief_json["preset"], "focus");
+        assert_eq!(brief_json["target_tracks"], 12);
+        let policy_json = serde_json::to_value(&policy).unwrap();
+        assert_eq!(policy_json["version"], 1);
+        assert!(policy_json.get("eligibility").is_some());
+        assert!(policy_json.get("transition").is_some());
+    }
+
+    #[test]
+    fn curation_python_json_bridge_returns_plain_python_values() {
+        Python::initialize();
+        Python::attach(|py| {
+            let source = py
+                .import("json")
+                .unwrap()
+                .call_method1(
+                    "loads",
+                    (r#"{"preset":"chill","target_tracks":7,"seed_ids":[]}"#,),
+                )
+                .unwrap();
+            let brief: PlaylistBrief = from_python_json(py, &source, "brief").unwrap();
+            assert_eq!(brief.target_tracks, 7);
+
+            let output = to_python_json(py, &brief).unwrap();
+            let output = output.bind(py).cast::<PyDict>().unwrap();
+            assert_eq!(output.get_item("preset").unwrap().unwrap().extract::<String>().unwrap(), "chill");
+            assert_eq!(output.get_item("target_tracks").unwrap().unwrap().extract::<usize>().unwrap(), 7);
+            assert!(output.get_item("target_duration_sec").unwrap().unwrap().is_none());
+        });
     }
 }

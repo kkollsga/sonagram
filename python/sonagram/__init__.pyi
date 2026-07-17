@@ -36,4 +36,20 @@ def export_m3u(
     track_ids: Optional[list[str]] = ...,
     copy_to: Optional[str] = ...,
 ) -> str: ...
+def profile_library(kgl_path: str) -> dict[str, Any]: ...
+def curate_playlist(
+    kgl_path: str,
+    brief: dict[str, Any],
+    policy: Optional[dict[str, Any]] = ...,
+) -> dict[str, Any]: ...
+def audit_playlist(
+    kgl_path: str,
+    track_ids: list[str],
+    policy: Optional[dict[str, Any]] = ...,
+) -> dict[str, Any]: ...
+def explain_playlist(
+    kgl_path: str,
+    track_ids: list[str],
+    policy: Optional[dict[str, Any]] = ...,
+) -> dict[str, Any]: ...
 def _run_cli(argv: list[str]) -> int: ...

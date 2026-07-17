@@ -25,6 +25,13 @@ Public API (all implemented in the compiled `_sonagram` extension):
   folder (tracks copied as ``NN - Artist - Title.<ext>`` next to a
   relative-path ``.m3u8``) and returns that folder's playlist path. Copies
   only — source files are never moved or modified.
+- ``profile_library(kgl_path) -> dict`` — summarize curation-relevant graph stats.
+- ``curate_playlist(kgl_path, brief, policy=None) -> dict`` — deterministic
+  library-owned selection, sequencing, audit, repair, and explanation.
+- ``audit_playlist(kgl_path, track_ids, policy=None) -> dict`` — independently
+  enforce eligibility, diversity, transition, and arc gates.
+- ``explain_playlist(kgl_path, track_ids, policy=None) -> dict`` — return the
+  same per-track/per-transition score provenance used by the library.
 """
 
 from sonagram._sonagram import (  # noqa: F401 — re-exported native surface
@@ -35,6 +42,10 @@ from sonagram._sonagram import (  # noqa: F401 — re-exported native surface
     build,
     scan_and_build,
     export_m3u,
+    profile_library,
+    curate_playlist,
+    audit_playlist,
+    explain_playlist,
 )
 
 __all__ = [
@@ -45,4 +56,8 @@ __all__ = [
     "build",
     "scan_and_build",
     "export_m3u",
+    "profile_library",
+    "curate_playlist",
+    "audit_playlist",
+    "explain_playlist",
 ]
