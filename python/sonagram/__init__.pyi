@@ -28,4 +28,5 @@ def export_m3u(
     *,
     cypher: Optional[str] = ...,
     track_ids: Optional[list[str]] = ...,
+    copy_to: Optional[str] = ...,
 ) -> str: ...

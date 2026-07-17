@@ -106,6 +106,40 @@ def main():
         else:
             print("  note: energies tie → identical order (acceptable)")
 
+        # --- portable copy-folder (--copy-to) ---
+        folder = os.path.join(tmp_lib, "portable")
+        out_folder_m3u = os.path.join(tmp_lib, "portable_set.m3u8")
+        pl_path = sonagram.export_m3u(
+            kgl_path,
+            tmp_lib,
+            out_folder_m3u,
+            track_ids=ids,
+            copy_to=folder,
+        )
+        # Returns the folder's own .m3u8 path, named after out_path's stem.
+        assert pl_path == os.path.join(folder, "portable_set.m3u8"), pl_path
+        assert os.path.isfile(pl_path)
+        # out_path (absolute m3u8) is still written alongside.
+        assert os.path.isfile(out_folder_m3u)
+        # The folder holds the 5 copies + the .m3u8.
+        names = sorted(os.listdir(folder))
+        copies = [n for n in names if not n.endswith(".m3u8")]
+        assert len(copies) == 5, names
+        for n in copies:
+            assert n[:2].isdigit() and n[2:5] == " - ", f"NN prefix: {n}"
+        # The folder .m3u8 uses RELATIVE names (no separators, resolve inside).
+        with open(pl_path, "r", encoding="utf-8") as f:
+            rel_lines = [ln for ln in f.read().splitlines()
+                         if ln and not ln.startswith("#")]
+        assert len(rel_lines) == 5, rel_lines
+        for ln in rel_lines:
+            assert "/" not in ln and "\\" not in ln, f"relative name: {ln}"
+            assert os.path.isfile(os.path.join(folder, ln)), ln
+        # Copies only: sources are untouched.
+        for src in srcs:
+            assert os.path.exists(src), f"source moved: {src}"
+        print(f"  copy-to export: {len(copies)} tracks copied, relative .m3u8 written")
+
         # --- bad args: both cypher and track_ids → ValueError ---
         try:
             sonagram.export_m3u(kgl_path, tmp_lib, out_ids,

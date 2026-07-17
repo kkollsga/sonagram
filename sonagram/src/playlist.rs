@@ -35,7 +35,7 @@
 //! [`entries_from_graph`], so a hash that matches no `Track` surfaces in the
 //! same "missing ids" error regardless of which input path produced it.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -78,13 +78,11 @@ pub fn write_m3u8(entries: &[PlaylistEntry], out_path: &Path) -> Result<()> {
         ));
     }
 
-    let mut body = String::from("#EXTM3U\n");
-    for entry in entries {
-        body.push_str(&extinf_line(entry));
-        body.push('\n');
-        body.push_str(&entry.abs_path.to_string_lossy());
-        body.push('\n');
-    }
+    let abs_lines: Vec<String> = entries
+        .iter()
+        .map(|e| e.abs_path.to_string_lossy().into_owned())
+        .collect();
+    let body = m3u8_body(entries, &abs_lines);
 
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -94,6 +92,217 @@ pub fn write_m3u8(entries: &[PlaylistEntry], out_path: &Path) -> Result<()> {
     // UTF-8, no BOM: `String` bytes are written verbatim.
     fs::write(out_path, body)?;
     Ok(())
+}
+
+/// Build the extended-M3U body: a `#EXTM3U` header, then per entry an
+/// `#EXTINF:<seconds>,<label>` line followed by its path line. `path_lines`
+/// carries the exact text of each path line — the absolute path for
+/// [`write_m3u8`], the bare copied filename (relative) for [`export_folder`] —
+/// and must be the same length as `entries`. The `#EXTINF` formatting is shared
+/// so the two writers never drift.
+fn m3u8_body(entries: &[PlaylistEntry], path_lines: &[String]) -> String {
+    debug_assert_eq!(entries.len(), path_lines.len());
+    let mut body = String::from("#EXTM3U\n");
+    for (entry, path_line) in entries.iter().zip(path_lines) {
+        body.push_str(&extinf_line(entry));
+        body.push('\n');
+        body.push_str(path_line);
+        body.push('\n');
+    }
+    body
+}
+
+/// The outcome of an [`export_folder`] run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderExportReport {
+    /// Number of audio files copied into the destination folder.
+    pub copied: usize,
+    /// Total bytes copied (sum of the copied files' sizes).
+    pub bytes: u64,
+    /// Absolute-or-relative path to the written `.m3u8` inside the folder.
+    pub playlist_path: PathBuf,
+}
+
+/// Characters forbidden in a filesystem component on the common platforms
+/// (Windows/macOS/Linux union). Replaced with `_` during sanitization.
+const FORBIDDEN_CHARS: &[char] = &['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+
+/// Maximum bytes for a copied filename (stem + extension). 200 keeps well under
+/// the 255-byte limit common filesystems impose on a single component while
+/// leaving headroom for a ` (2)` dedupe suffix.
+const MAX_FILENAME_BYTES: usize = 200;
+
+/// Export a **self-contained, portable playlist folder**: copy each entry's
+/// audio file into `dest_dir` as `NN - Artist - Title.<ext>` and write a
+/// relative-path `<playlist_name>.m3u8` alongside them, so the folder can be
+/// moved to any device and still play.
+///
+/// **Copies only** — source files are never moved, retagged, or otherwise
+/// modified; this is explicitly *not* library maintenance. `dest_dir` is created
+/// (`create_dir_all`); a same-named file already there is overwritten. The
+/// `.m3u8` uses the same `#EXTM3U`/`#EXTINF` format as [`write_m3u8`] but its
+/// path lines are the bare copied filenames (relative), so the folder is
+/// self-referential.
+///
+/// On a per-file copy failure the error lists **all** failures (mirroring the
+/// missing-ids style); any files copied before the failure are left in place
+/// (partial folder — the caller may retry or clean up).
+pub fn export_folder(
+    entries: &[PlaylistEntry],
+    dest_dir: &Path,
+    playlist_name: &str,
+) -> Result<FolderExportReport> {
+    if entries.is_empty() {
+        return Err(SonagramError::Playlist(
+            "refusing to export an empty playlist folder (no tracks to copy — did \
+             the query match anything?)"
+                .to_string(),
+        ));
+    }
+
+    fs::create_dir_all(dest_dir)?;
+
+    // Resolve every copied filename up-front (position-prefixed, sanitized,
+    // deduped) so the .m3u8 path lines match the files exactly.
+    let mut used: BTreeSet<String> = BTreeSet::new();
+    let mut filenames: Vec<String> = Vec::with_capacity(entries.len());
+    for (i, entry) in entries.iter().enumerate() {
+        let base = copy_filename(entry, i + 1);
+        filenames.push(dedupe_name(&base, &mut used));
+    }
+
+    let mut copied = 0usize;
+    let mut bytes = 0u64;
+    let mut failures: Vec<String> = Vec::new();
+    for (entry, name) in entries.iter().zip(&filenames) {
+        let dest = dest_dir.join(name);
+        match fs::copy(&entry.abs_path, &dest) {
+            Ok(n) => {
+                copied += 1;
+                bytes += n;
+            }
+            Err(e) => failures.push(format!("{}: {e}", entry.abs_path.display())),
+        }
+    }
+
+    if !failures.is_empty() {
+        return Err(SonagramError::Playlist(format!(
+            "{} file(s) failed to copy into {} (partial copies left in place): [{}]",
+            failures.len(),
+            dest_dir.display(),
+            failures.join(", ")
+        )));
+    }
+
+    // Write the relative-path playlist inside the folder.
+    let body = m3u8_body(entries, &filenames);
+    let pl_name = {
+        let s = sanitize_component(playlist_name);
+        if s.is_empty() { "playlist".to_string() } else { s }
+    };
+    let playlist_path = dest_dir.join(format!("{pl_name}.m3u8"));
+    fs::write(&playlist_path, body)?;
+
+    Ok(FolderExportReport {
+        copied,
+        bytes,
+        playlist_path,
+    })
+}
+
+/// Build the copied filename for `entry` at 1-based `position`:
+/// `NN - Artist - Title.<ext>`, sanitized and byte-capped. Falls back to the
+/// source file's stem when artist/title are both absent, and preserves the
+/// source extension. CJK and other printable Unicode survive verbatim (no
+/// ASCII-folding).
+fn copy_filename(entry: &PlaylistEntry, position: usize) -> String {
+    let prefix = format!("{position:02} - ");
+
+    let ext_suffix = entry
+        .abs_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{}", sanitize_component(e)))
+        .filter(|s| s.len() > 1)
+        .unwrap_or_default();
+
+    let artist = entry.artist.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let title = entry.title.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let stem = match (artist, title) {
+        (Some(a), Some(t)) => format!("{} - {}", sanitize_component(a), sanitize_component(t)),
+        (None, Some(t)) => sanitize_component(t),
+        // No title → fall back to the source file's stem.
+        _ => entry
+            .abs_path
+            .file_stem()
+            .map(|s| sanitize_component(&s.to_string_lossy()))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_default(),
+    };
+    let stem = if stem.is_empty() { "track".to_string() } else { stem };
+
+    // Cap the whole filename at MAX_FILENAME_BYTES, truncating the stem on a
+    // UTF-8 boundary and preserving the NN prefix + extension.
+    let budget = MAX_FILENAME_BYTES.saturating_sub(prefix.len() + ext_suffix.len());
+    let stem = truncate_on_char_boundary(&stem, budget);
+    // Truncation can re-expose a trailing dot/space — re-trim the ends.
+    let stem = stem.trim_matches(|c: char| c == '.' || c == ' ');
+    let stem = if stem.is_empty() { "track" } else { stem };
+
+    format!("{prefix}{stem}{ext_suffix}")
+}
+
+/// Sanitize one filename component: replace filesystem-forbidden characters and
+/// control characters with `_`, then trim leading/trailing dots and spaces
+/// (which some filesystems treat specially). Interior Unicode — including CJK —
+/// passes through unchanged.
+fn sanitize_component(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if FORBIDDEN_CHARS.contains(&ch) || ch.is_control() {
+            out.push('_');
+        } else {
+            out.push(ch);
+        }
+    }
+    out.trim_matches(|c: char| c == '.' || c == ' ').to_string()
+}
+
+/// Truncate `s` to at most `max` bytes, never splitting a UTF-8 code point.
+fn truncate_on_char_boundary(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// Return a filename not already present in `used` (compared case-insensitively,
+/// since macOS/Windows filesystems are case-insensitive), appending ` (2)`,
+/// ` (3)`, … before the extension until unique. Records the chosen name.
+fn dedupe_name(base: &str, used: &mut BTreeSet<String>) -> String {
+    let mut candidate = base.to_string();
+    let mut n = 2;
+    while used.contains(&candidate.to_lowercase()) {
+        candidate = with_dedupe_suffix(base, n);
+        n += 1;
+    }
+    used.insert(candidate.to_lowercase());
+    candidate
+}
+
+/// Insert ` (n)` before the extension of `filename` (or at the end when there is
+/// no extension). A leading dot (hidden file) is not treated as an extension.
+fn with_dedupe_suffix(filename: &str, n: usize) -> String {
+    match filename.rfind('.') {
+        Some(dot) if dot > 0 && dot < filename.len() - 1 => {
+            format!("{} ({}){}", &filename[..dot], n, &filename[dot..])
+        }
+        _ => format!("{filename} ({n})"),
+    }
 }
 
 /// The `#EXTINF:<seconds>,<label>` line for one entry (no trailing newline).
@@ -344,6 +553,189 @@ mod tests {
         // Blank title with an artist still falls back to the file name.
         let e = entry(Some(100.0), Some("Some Artist"), Some(""), "/music/x/only.mp3");
         assert_eq!(extinf_line(&e), "#EXTINF:100,only.mp3");
+    }
+
+    // ───────────────── portable playlist folder (P13) ──────────────────
+
+    #[test]
+    fn sanitize_replaces_forbidden_and_control_chars() {
+        assert_eq!(sanitize_component("AC/DC"), "AC_DC");
+        assert_eq!(sanitize_component(r#"a:b*c?"d<e>f|g\h"#), "a_b_c__d_e_f_g_h");
+        // Control chars (tab, newline) become underscores.
+        assert_eq!(sanitize_component("a\tb\nc"), "a_b_c");
+        // Leading/trailing dots and spaces are trimmed; interior kept.
+        assert_eq!(sanitize_component("  . hello . world .  "), "hello . world");
+    }
+
+    #[test]
+    fn sanitize_preserves_cjk_verbatim() {
+        // No ASCII-folding: CJK passes through byte-for-byte.
+        assert_eq!(sanitize_component("薔薇と雨"), "薔薇と雨");
+        assert_eq!(sanitize_component("布袋寅泰"), "布袋寅泰");
+        // A forbidden char amid CJK is replaced, the rest survives.
+        assert_eq!(sanitize_component("東京/大阪"), "東京_大阪");
+    }
+
+    #[test]
+    fn truncate_respects_multibyte_boundaries() {
+        // Each CJK char is 3 bytes in UTF-8. Cap at 7 bytes → 2 chars (6 bytes),
+        // never a split 3rd char.
+        let s = "薔薇と雨"; // 12 bytes
+        let t = truncate_on_char_boundary(s, 7);
+        assert_eq!(t, "薔薇");
+        assert_eq!(t.len(), 6);
+        // Cap >= len returns the whole string.
+        assert_eq!(truncate_on_char_boundary(s, 100), s);
+        // ASCII truncates exactly.
+        assert_eq!(truncate_on_char_boundary("abcdef", 3), "abc");
+    }
+
+    #[test]
+    fn copy_filename_position_artist_title_ext() {
+        let e = entry(Some(230.0), Some("Bruno Mars"), Some("Marry You"), "/lib/04 Marry You.mp3");
+        assert_eq!(copy_filename(&e, 4), "04 - Bruno Mars - Marry You.mp3");
+    }
+
+    #[test]
+    fn copy_filename_cjk_intact() {
+        let e = entry(Some(212.0), Some("布袋寅泰"), Some("薔薇と雨"), "/lib/08 薔薇と雨.mp3");
+        assert_eq!(copy_filename(&e, 2), "02 - 布袋寅泰 - 薔薇と雨.mp3");
+    }
+
+    #[test]
+    fn copy_filename_sanitizes_slashes() {
+        let e = entry(Some(200.0), Some("AC/DC"), Some("Back in Black"), "/lib/x.mp3");
+        assert_eq!(copy_filename(&e, 1), "01 - AC_DC - Back in Black.mp3");
+    }
+
+    #[test]
+    fn copy_filename_missing_tags_falls_back_to_source_stem() {
+        // No artist/title → use the source file stem, keep NN + ext.
+        let e = entry(None, None, None, "/lib/some folder/mystery track.mp3");
+        assert_eq!(copy_filename(&e, 7), "07 - mystery track.mp3");
+        // Blank artist + present title → title only.
+        let e = entry(Some(10.0), Some("   "), Some("Just Title"), "/lib/z.flac");
+        assert_eq!(copy_filename(&e, 3), "03 - Just Title.flac");
+    }
+
+    #[test]
+    fn copy_filename_truncates_long_stem_at_200_bytes() {
+        let long_title = "é".repeat(300); // 2 bytes each → 600 bytes
+        let e = PlaylistEntry {
+            abs_path: PathBuf::from("/lib/x.mp3"),
+            duration_sec: None,
+            artist: None,
+            title: Some(long_title),
+        };
+        let name = copy_filename(&e, 1);
+        assert!(name.len() <= MAX_FILENAME_BYTES, "capped: {} bytes", name.len());
+        assert!(name.starts_with("01 - "));
+        assert!(name.ends_with(".mp3"));
+        // The stem is valid UTF-8 (no split code point) and non-empty.
+        assert!(name.chars().count() > 5);
+    }
+
+    #[test]
+    fn dedupe_appends_numeric_suffix_before_extension() {
+        let mut used = BTreeSet::new();
+        assert_eq!(dedupe_name("01 - A - T.mp3", &mut used), "01 - A - T.mp3");
+        // Same base again → " (2)" before the extension.
+        assert_eq!(dedupe_name("01 - A - T.mp3", &mut used), "01 - A - T (2).mp3");
+        assert_eq!(dedupe_name("01 - A - T.mp3", &mut used), "01 - A - T (3).mp3");
+        // Case-insensitive collision (macOS/Windows) also dedupes.
+        assert_eq!(dedupe_name("01 - a - t.MP3", &mut used), "01 - a - t (4).MP3");
+        // No extension → suffix appended at the end.
+        let mut used2 = BTreeSet::new();
+        assert_eq!(dedupe_name("noext", &mut used2), "noext");
+        assert_eq!(dedupe_name("noext", &mut used2), "noext (2)");
+    }
+
+    #[test]
+    fn export_folder_copies_and_writes_relative_m3u8() {
+        let dir = std::env::temp_dir().join(format!(
+            "sonagram-p13-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let src = dir.join("src");
+        let dest = dir.join("dest");
+        std::fs::create_dir_all(&src).unwrap();
+
+        // Two fake source files with known byte sizes.
+        let a = src.join("a.mp3");
+        let b = src.join("b.mp3");
+        std::fs::write(&a, b"AAAA").unwrap(); // 4 bytes
+        std::fs::write(&b, b"BBBBBB").unwrap(); // 6 bytes
+
+        let entries = vec![
+            PlaylistEntry {
+                abs_path: a,
+                duration_sec: Some(100.0),
+                artist: Some("布袋寅泰".to_string()),
+                title: Some("薔薇と雨".to_string()),
+            },
+            PlaylistEntry {
+                abs_path: b,
+                duration_sec: None,
+                artist: Some("AC/DC".to_string()),
+                title: Some("Back in Black".to_string()),
+            },
+        ];
+
+        let report = export_folder(&entries, &dest, "My Set").unwrap();
+        assert_eq!(report.copied, 2);
+        assert_eq!(report.bytes, 10);
+        assert_eq!(report.playlist_path, dest.join("My Set.m3u8"));
+
+        // Copied files exist under sanitized, position-prefixed names.
+        assert!(dest.join("01 - 布袋寅泰 - 薔薇と雨.mp3").exists());
+        assert!(dest.join("02 - AC_DC - Back in Black.mp3").exists());
+
+        // The .m3u8 path lines are the bare relative filenames, in order.
+        let text = std::fs::read_to_string(&report.playlist_path).unwrap();
+        assert!(!text.starts_with('\u{feff}'), "no BOM");
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines[0], "#EXTM3U");
+        assert_eq!(lines[1], "#EXTINF:100,布袋寅泰 - 薔薇と雨");
+        assert_eq!(lines[2], "01 - 布袋寅泰 - 薔薇と雨.mp3");
+        assert_eq!(lines[3], "#EXTINF:-1,AC/DC - Back in Black");
+        assert_eq!(lines[4], "02 - AC_DC - Back in Black.mp3");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_folder_empty_is_rejected() {
+        let dest = std::env::temp_dir().join(format!("sonagram-p13-empty-{}", std::process::id()));
+        let err = export_folder(&[], &dest, "x").unwrap_err();
+        assert!(matches!(err, SonagramError::Playlist(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn export_folder_missing_source_lists_failure() {
+        let dir = std::env::temp_dir().join(format!(
+            "sonagram-p13-fail-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let dest = dir.join("dest");
+        let entries = vec![entry(
+            Some(1.0),
+            Some("A"),
+            Some("T"),
+            "/nonexistent/does-not-exist.mp3",
+        )];
+        let err = export_folder(&entries, &dest, "x").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("does-not-exist.mp3"), "names the failing source: {msg}");
+        assert!(msg.contains("failed to copy"), "{msg}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

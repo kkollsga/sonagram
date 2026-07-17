@@ -8,7 +8,7 @@
 //! sonagram scan     <library_root>
 //! sonagram build    <library_root> <out.kgl>
 //! sonagram playlist <library_root> <graph.kgl> (--cypher '<q>' | --ids h1,h2)
-//!                   --out <file.m3u8>
+//!                   (--out <file.m3u8> and/or --copy-to <dir>)
 //! ```
 //!
 //! Progress and stage lines go to stderr; results (reports, paths, counts) go
@@ -91,12 +91,19 @@ SUBCOMMANDS:\n\
              save it to <out.kgl>. Run `scan` first. Auto-loads the Last.fm\n\
              enrichment cache when present (run `enrich` to populate it).\n\
 \n\
-    playlist <library_root> <graph.kgl> --out <file.m3u8>\n\
+    playlist <library_root> <graph.kgl>\n\
              (--cypher '<query>' | --ids <hash1,hash2,...>)\n\
-             Resolve a track set from the graph and write a .m3u8 playlist.\n\
-             --cypher runs a read-only query whose result is a Track-node or\n\
+             (--out <file.m3u8> and/or --copy-to <dir>)\n\
+             Resolve a track set from the graph and materialize it. --cypher\n\
+             runs a read-only query whose result is a Track-node or\n\
              content-hash column; --ids takes content hashes directly. Track\n\
              order is preserved (never re-sorted).\n\
+             --out writes an absolute-path .m3u8. --copy-to <dir> writes a\n\
+             SELF-CONTAINED, PORTABLE folder: the tracks copied as\n\
+             'NN - Artist - Title.<ext>' next to a relative-path .m3u8 (named\n\
+             after --out's stem, else the folder). Copies only — source files\n\
+             are never moved, retagged, or modified. Pass either flag or both;\n\
+             at least one is required.\n\
 \n\
 FLAGS:\n\
     -h, --help       Print this help\n\
@@ -107,7 +114,9 @@ EXAMPLES:\n\
     sonagram build ~/Music music.kgl\n\
     sonagram playlist ~/Music music.kgl \\\n\
         --cypher 'MATCH (t:Track) WHERE t.bpm > 120 RETURN t.content_hash ORDER BY t.energy' \\\n\
-        --out set.m3u8"
+        --out set.m3u8\n\
+    sonagram playlist ~/Music music.kgl \\\n\
+        --ids h1,h2,h3 --copy-to ~/Desktop/roadtrip"
     );
 }
 
@@ -218,6 +227,7 @@ fn cmd_playlist(args: &[String]) -> Result<()> {
     let mut cypher: Option<String> = None;
     let mut ids: Option<String> = None;
     let mut out: Option<PathBuf> = None;
+    let mut copy_to: Option<PathBuf> = None;
 
     let mut i = 2;
     while i < args.len() {
@@ -225,6 +235,7 @@ fn cmd_playlist(args: &[String]) -> Result<()> {
             "--cypher" => cypher = Some(flag_value(args, &mut i, "--cypher")?),
             "--ids" => ids = Some(flag_value(args, &mut i, "--ids")?),
             "--out" => out = Some(PathBuf::from(flag_value(args, &mut i, "--out")?)),
+            "--copy-to" => copy_to = Some(PathBuf::from(flag_value(args, &mut i, "--copy-to")?)),
             other => {
                 return Err(SonagramError::Playlist(format!(
                     "unexpected argument '{other}' to `playlist`"
@@ -234,7 +245,12 @@ fn cmd_playlist(args: &[String]) -> Result<()> {
         i += 1;
     }
 
-    let out = out.ok_or_else(|| SonagramError::Playlist("playlist: --out <file.m3u8> is required".into()))?;
+    // --out is required unless --copy-to gives the playlist a home of its own.
+    if out.is_none() && copy_to.is_none() {
+        return Err(SonagramError::Playlist(
+            "playlist: pass --out <file.m3u8> and/or --copy-to <dir>".into(),
+        ));
+    }
     if cypher.is_some() == ids.is_some() {
         return Err(SonagramError::Playlist(
             "playlist: pass exactly one of --cypher '<query>' or --ids <hashes>".into(),
@@ -256,9 +272,35 @@ fn cmd_playlist(args: &[String]) -> Result<()> {
         playlist::entries_from_graph(g.as_ref(), &root, &id_list)?
     };
 
-    playlist::write_m3u8(&entries, &out)?;
-    println!("wrote {} tracks → {}", entries.len(), out.display());
+    // Optional absolute-path .m3u8 (honored even alongside --copy-to).
+    if let Some(out) = &out {
+        playlist::write_m3u8(&entries, out)?;
+        println!("wrote {} tracks → {}", entries.len(), out.display());
+    }
+
+    // Optional portable copy-folder: copied audio + a relative-path .m3u8.
+    if let Some(dir) = &copy_to {
+        let name = playlist_name(out.as_deref(), dir);
+        let report = playlist::export_folder(&entries, dir, &name)?;
+        println!(
+            "copied {} tracks ({} bytes) → {}",
+            report.copied,
+            report.bytes,
+            report.playlist_path.display()
+        );
+    }
+
     Ok(())
+}
+
+/// The playlist name for a copy-folder `.m3u8`: the `--out` file stem when
+/// given, else the destination folder's own name, else `"playlist"`.
+fn playlist_name(out: Option<&Path>, dest_dir: &Path) -> String {
+    out.and_then(|p| p.file_stem())
+        .or_else(|| dest_dir.file_name())
+        .map(|s| s.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "playlist".to_string())
 }
 
 // ───────────────────────────── helpers ──────────────────────────────

@@ -334,15 +334,23 @@ fn scan_and_build(
     handoff_via_kgl(py, graph, out_path)
 }
 
-/// Export a `.m3u8` playlist from a saved graph.
+/// Export a playlist from a saved graph.
 ///
 /// Loads the graph from `kgl_path`, resolves a track set — pass **exactly one**
 /// of `cypher=` (a read-only query returning a Track-node or content-hash
-/// column) or `track_ids=` (content hashes, order preserved) — joins each
-/// track's relative path onto `library_root`, and writes a UTF-8 extended-M3U
-/// playlist to `out_path`. Returns `str(out_path)`.
+/// column) or `track_ids=` (content hashes, order preserved) — and joins each
+/// track's relative path onto `library_root`.
+///
+/// Always writes a UTF-8 extended-M3U playlist (absolute paths) to `out_path`.
+/// When `copy_to=` is given, ALSO exports a self-contained **portable folder**
+/// there: the tracks copied as `NN - Artist - Title.<ext>` next to a
+/// relative-path `.m3u8` (named after `out_path`'s stem). Copies only — source
+/// files are never moved, retagged, or modified.
+///
+/// Returns `str(copy_to's playlist path)` when `copy_to=` is set, else
+/// `str(out_path)`.
 #[pyfunction]
-#[pyo3(signature = (kgl_path, library_root, out_path, *, cypher=None, track_ids=None))]
+#[pyo3(signature = (kgl_path, library_root, out_path, *, cypher=None, track_ids=None, copy_to=None))]
 fn export_m3u(
     py: Python<'_>,
     kgl_path: PathBuf,
@@ -350,6 +358,7 @@ fn export_m3u(
     out_path: PathBuf,
     cypher: Option<String>,
     track_ids: Option<Vec<String>>,
+    copy_to: Option<PathBuf>,
 ) -> PyResult<String> {
     let selection = validate_export_selection(cypher.as_deref(), track_ids.as_deref())
         .map_err(PyValueError::new_err)?;
@@ -365,6 +374,18 @@ fn export_m3u(
             Selection::Ids(ids) => playlist::entries_from_graph(g.as_ref(), &library_root, ids)?,
         };
         playlist::write_m3u8(&entries, &out_path)?;
+
+        // Optional portable copy-folder: copied audio + a relative-path .m3u8,
+        // whose path is returned in place of out_path when requested.
+        if let Some(dir) = &copy_to {
+            let name = out_path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "playlist".to_string());
+            let report = playlist::export_folder(&entries, dir, &name)?;
+            return Ok::<String, SonagramError>(report.playlist_path.to_string_lossy().into_owned());
+        }
         Ok::<String, SonagramError>(out_path.to_string_lossy().into_owned())
     })
     .map_err(to_pyerr)

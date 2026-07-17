@@ -13,8 +13,12 @@ Public API (all implemented in the compiled `_sonagram` extension):
   Automatically folds in the Last.fm enrichment cache when present.
 - ``scan_and_build(library_root, out_path=None, *, progress=None)`` — the two
   above composed.
-- ``export_m3u(kgl_path, library_root, out_path, *, cypher=None, track_ids=None)
-  -> str`` — write a ``.m3u8`` playlist from a saved ``.kgl`` graph.
+- ``export_m3u(kgl_path, library_root, out_path, *, cypher=None, track_ids=None,
+  copy_to=None) -> str`` — write a ``.m3u8`` playlist from a saved ``.kgl``
+  graph. With ``copy_to=<dir>`` it also exports a self-contained portable
+  folder (tracks copied as ``NN - Artist - Title.<ext>`` next to a
+  relative-path ``.m3u8``) and returns that folder's playlist path. Copies
+  only — source files are never moved or modified.
 """
 
 from sonagram._sonagram import (  # noqa: F401 — re-exported native surface
