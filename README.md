@@ -81,3 +81,10 @@ tests/fixtures/    frozen TrackAnalysis records (never audio)
 ```
 
 License: MIT
+
+## Claude Code skill
+
+`skills/sonagram-playlist/` ships an invocable skill for Claude Code: copy it
+to `~/.claude/skills/` (filling in your library path), and "make me a work
+playlist" becomes a one-liner — the skill chains `status` → `scan`/`build`
+(only when stale) → graph curation per `AGENT-GUIDE.md` → `.m3u8` export.
