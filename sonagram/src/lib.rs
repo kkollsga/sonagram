@@ -32,6 +32,8 @@ pub mod enrich;
 
 pub mod playlist;
 
+pub mod skill;
+
 pub use error::{Result, SonagramError};
 
 /// The sonagram crate version, sourced from `Cargo.toml` at compile time.

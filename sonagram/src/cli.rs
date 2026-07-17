@@ -69,6 +69,7 @@ pub fn run(args: &[String]) -> i32 {
         "playlists" => finish(cmd_playlists(&args[1..])),
         "sources" => finish(cmd_sources(&args[1..])),
         "config" => finish(cmd_config(&args[1..])),
+        "skill" => finish(cmd_skill(&args[1..])),
         // `status` owns its exit code (0 fresh / 1 needs-scan / 2 no-cache), so
         // it is not funnelled through `finish`.
         "status" => cmd_status(&args[1..]),
@@ -156,12 +157,21 @@ SUBCOMMANDS:\n\
              Show the resolved config (incl. defaults + whether files exist), or\n\
              set the central graph / playlist-store location.\n\
 \n\
+    skill    show | install [--dir <skills_root>] [--force]\n\
+             Print the bundled sonagram-playlist agent skill, or install it to\n\
+             <skills_root>/sonagram-playlist/SKILL.md (default ~/.claude/skills).\n\
+             Install fills in your configured library path, refuses to overwrite\n\
+             without --force, and tells the agent to read + follow it in-session.\n\
+\n\
     playlists            List stored playlists (from `playlist --name`).\n\
     playlists show <slug>  Full metadata + tracklist for one stored playlist.\n\
 \n\
 CONFIG-DRIVEN FORMS (no path args — fan out over configured sources):\n\
     sonagram scan                 scan every configured source\n\
-    sonagram status               probe all sources (exit = worst-of)\n\
+    sonagram status               probe all sources + graph freshness; JSON adds\n\
+                                  per-source `graph_current` + top-level\n\
+                                  `graph_stale` (a stale graph is exit 1 even when\n\
+                                  caches are fresh — rebuild with `sonagram build`)\n\
     sonagram enrich               enrich all sources\n\
     sonagram build                multi-source build → the configured graph\n\
     sonagram playlist (--cypher|--ids ...) --name <name> [--description <text>]\n\
@@ -314,9 +324,12 @@ fn cmd_build_single(root: &Path, out: &Path) -> Result<()> {
     report_enrichment(enrichment.as_ref());
     eprintln!("[build] {} records → building graph", records.len());
     let source_root = abs_string(root);
+    // P19: stamp this source's scan-state fingerprint onto its Source node.
+    let scan_fingerprint = scan::load_scan_fingerprint(root)?;
     let sources = [SourceInput {
         root: source_root,
         records: &records,
+        scan_fingerprint,
     }];
     let library = LibraryInfo {
         root: library_label(root),
@@ -337,7 +350,7 @@ fn cmd_build_multi() -> Result<()> {
     let out = cfg.resolved_graph()?;
 
     // Load each source's records + merge its enrichment cache.
-    let mut loaded: Vec<(String, Vec<AnalysisRecord>)> = Vec::new();
+    let mut loaded: Vec<(String, Vec<AnalysisRecord>, Option<String>)> = Vec::new();
     let mut enrichment = EnrichmentData::default();
     let mut any_enrichment = false;
     for src in &sources {
@@ -347,9 +360,11 @@ fn cmd_build_multi() -> Result<()> {
             merge_enrichment(&mut enrichment, e);
             any_enrichment = true;
         }
-        loaded.push((abs_string(src), records));
+        // P19: stamp each source's scan-state fingerprint onto its Source node.
+        let scan_fingerprint = scan::load_scan_fingerprint(src)?;
+        loaded.push((abs_string(src), records, scan_fingerprint));
     }
-    if loaded.iter().all(|(_, r)| r.is_empty()) {
+    if loaded.iter().all(|(_, r, _)| r.is_empty()) {
         return Err(SonagramError::Playlist(
             "no cached records under any configured source — run `sonagram scan` first".into(),
         ));
@@ -364,9 +379,10 @@ fn cmd_build_multi() -> Result<()> {
 
     let source_inputs: Vec<SourceInput> = loaded
         .iter()
-        .map(|(root, records)| SourceInput {
+        .map(|(root, records, scan_fingerprint)| SourceInput {
             root: root.clone(),
             records,
+            scan_fingerprint: scan_fingerprint.clone(),
         })
         .collect();
     // One configured source keeps its real path as the Library label; the
@@ -750,6 +766,62 @@ fn cmd_config(args: &[String]) -> Result<()> {
     }
 }
 
+/// `sonagram skill show` (print the embedded skill) and
+/// `sonagram skill install [--dir <skills_root>] [--force]` (write it to
+/// `~/.claude/skills/` — P19 cold-start bootstrap).
+fn cmd_skill(args: &[String]) -> Result<()> {
+    match args.first().map(String::as_str) {
+        Some("show") => {
+            // The file already ends with a newline; `print!` avoids a double one.
+            print!("{}", crate::skill::SKILL_MD);
+            Ok(())
+        }
+        Some("install") => {
+            let mut dir: Option<PathBuf> = None;
+            let mut force = false;
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--dir" => dir = Some(PathBuf::from(flag_value(args, &mut i, "--dir")?)),
+                    "--force" => force = true,
+                    other => {
+                        return Err(SonagramError::Config(format!(
+                            "skill install: unexpected argument '{other}' — try [--dir <skills_root>] [--force]"
+                        )))
+                    }
+                }
+                i += 1;
+            }
+            let report = crate::skill::install(dir.as_deref(), force)?;
+            println!(
+                "installed the sonagram-playlist skill → {}",
+                report.path.display()
+            );
+            if let Some(lib) = &report.library_root {
+                println!("  library root: {lib}");
+            }
+            if let Some(bin) = &report.binary {
+                println!("  cli path:     {bin}");
+            }
+            // Skills load at session start, so this freshly written one is NOT yet
+            // active — the agent must read + follow it now, in-session.
+            println!(
+                "NEXT: READ AND FOLLOW {} NOW, in this session — a skill loads at session start, so \
+                 this newly written one is not yet active; open it and follow its steps to serve \
+                 the user's request.",
+                report.path.display()
+            );
+            Ok(())
+        }
+        None => Err(SonagramError::Config(
+            "skill: pass `show` or `install [--dir <skills_root>] [--force]`".into(),
+        )),
+        Some(other) => Err(SonagramError::Config(format!(
+            "skill: unknown subcommand '{other}' — try `show` or `install`"
+        ))),
+    }
+}
+
 /// `status <library_root> [--format json]` — the read-only freshness probe.
 ///
 /// Returns the exit code directly: `0` fresh, `1` needs scan, `2` no cache.
@@ -827,44 +899,126 @@ fn cmd_status(args: &[String]) -> i32 {
                     return 1;
                 }
             };
+            // P19: load the configured graph once (if built) so we can compare
+            // each Source's stamped scan_fingerprint against the current on-disk
+            // state — the graph self-describes its own freshness.
+            let graph_path = cfg.resolved_graph().ok();
+            let graph = graph_path
+                .as_ref()
+                .filter(|p| p.exists())
+                .and_then(|p| p.to_str())
+                .and_then(|s| kglite::api::io::load_file(s).ok());
+            let graph_present = graph.is_some();
+
             let mut worst = 0i32;
+            let mut any_graph_stale = false;
             let mut objs: Vec<serde_json::Value> = Vec::new();
-            let mut humans: Vec<(PathBuf, FreshnessReport, bool, i32)> = Vec::new();
+            let mut humans: Vec<(PathBuf, FreshnessReport, bool, i32, Option<bool>)> = Vec::new();
             for src in &sources {
-                match status_one(src) {
-                    Ok((code, report, has_enr)) => {
-                        worst = worst.max(code);
-                        if as_json {
-                            objs.push(status_json_obj(src, &report, has_enr, code));
-                        } else {
-                            humans.push((src.clone(), report, has_enr, code));
-                        }
-                    }
+                let (code, report, has_enr) = match status_one(src) {
+                    Ok(t) => t,
                     Err(e) => {
                         eprintln!("error: {}: {e}", src.display());
                         return 1;
                     }
+                };
+                worst = worst.max(code);
+                // Per-source graph freshness: does the graph's Source node carry a
+                // scan_fingerprint equal to the current disk state? `None` when
+                // there is no graph to compare against.
+                let graph_current: Option<bool> = graph.as_ref().map(|g| {
+                    let src_abs = abs_string(src);
+                    match graph_source_fingerprint(g.as_ref(), &src_abs) {
+                        // Source present and stamped → compare to a fresh disk walk.
+                        Some(Some(stored)) => scan::compute_scan_fingerprint(src)
+                            .map(|disk| disk == stored)
+                            .unwrap_or(false),
+                        // Source present but no fingerprint (pre-P19 graph), or the
+                        // source isn't in the graph at all → the graph must be rebuilt.
+                        _ => false,
+                    }
+                });
+                if graph_current == Some(false) {
+                    any_graph_stale = true;
+                }
+                if as_json {
+                    let mut obj = status_json_obj(src, &report, has_enr, code);
+                    obj["graph_current"] = match graph_current {
+                        Some(b) => json!(b),
+                        None => serde_json::Value::Null,
+                    };
+                    objs.push(obj);
+                } else {
+                    humans.push((src.clone(), report, has_enr, code, graph_current));
                 }
             }
+
+            // A missing graph (with sources configured) needs a build; so does any
+            // stale Source. Graph-staleness is action-worthy (exit 1) even when the
+            // caches are fully fresh.
+            let graph_stale = !graph_present || any_graph_stale;
+            let final_exit = worst.max(if graph_stale { 1 } else { 0 });
+            let overall = if worst != 0 {
+                status_label(worst)
+            } else if graph_stale {
+                "needs_build"
+            } else {
+                "fresh"
+            };
+
             if as_json {
                 let agg = json!({
                     "sources": objs,
                     "n_sources": sources.len(),
                     "needs_scan": worst != 0,
-                    "status": status_label(worst),
-                    "exit_code": worst,
+                    "graph": graph_path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+                    "graph_present": graph_present,
+                    "graph_stale": graph_stale,
+                    "status": overall,
+                    "exit_code": final_exit,
                 });
                 println!("{}", serde_json::to_string(&agg).expect("JSON value"));
             } else {
                 println!("status over {} configured source(s):", sources.len());
-                for (root, report, has_enr, code) in &humans {
+                for (root, report, has_enr, code, graph_current) in &humans {
                     print_status_human(root, report, *has_enr, *code);
+                    match graph_current {
+                        Some(true) => println!("  graph:              current"),
+                        Some(false) => println!("  graph:              STALE — run `sonagram build`"),
+                        None => {}
+                    }
                 }
                 println!("=> worst: {}", status_label(worst));
+                if !graph_present {
+                    println!("=> graph: not built yet — run `sonagram build`");
+                } else if graph_stale {
+                    println!("=> graph: STALE — run `sonagram build` (~1s from cache)");
+                } else {
+                    println!("=> graph: current");
+                }
             }
-            worst
+            final_exit
         }
     }
+}
+
+/// The `scan_fingerprint` stamped on the graph's `Source` node for `source_root`
+/// (P19). Returns `None` when there is no such `Source` node, `Some(None)` when
+/// the node exists but carries no fingerprint (a pre-P19 graph), and
+/// `Some(Some(fp))` otherwise.
+fn graph_source_fingerprint(
+    graph: &kglite::api::DirGraph,
+    source_root: &str,
+) -> Option<Option<String>> {
+    use kglite::api::cypher::resolve_node_property;
+    use kglite::api::Value;
+    let ni = graph.lookup_by_id_readonly("Source", &Value::String(source_root.to_string()))?;
+    let node = graph.get_node(ni)?;
+    let fp = match resolve_node_property(node, "scan_fingerprint", graph) {
+        Value::String(s) if !s.is_empty() => Some(s),
+        _ => None,
+    };
+    Some(fp)
 }
 
 /// Probe one library root: `(exit_code, report, has_enrichment)`.

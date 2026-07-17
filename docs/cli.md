@@ -86,6 +86,13 @@ Each content hash resolves to its on-disk path (`library_root` + the track's
 stored relative path). A hash matching no `Track` is reported, not silently
 dropped.
 
+**Central store (`--name`)**: pass `--name "<name>"` (with an optional
+`--description "<text>"`) to save the playlist into the configured playlist store
+(`~/.sonagram/playlists/`) as `<slug>.m3u8` + a `<slug>.meta.json` sidecar,
+retrievable later with `sonagram playlists`. `--name` is a destination in its own
+right — combine it with `--out`/`--copy-to` to also write those, or use it alone.
+In the config-driven form (no path args), `--name` reads the configured graph.
+
 ## `sonagram status`
 
 ```bash
@@ -115,6 +122,73 @@ with these keys:
 | `needs_scan` | bool | any stale/missing/deleted |
 | `status` | string | `fresh` \| `needs_scan` \| `no_cache` |
 | `exit_code` | int | `0` \| `1` \| `2`, matching the exit status |
+
+**Config-driven form** (`sonagram status`, no path): probes every configured
+source and also reports **graph freshness** — the graph self-describes whether it
+still reflects the library. Each source is compared against the configured graph's
+`Source.scan_fingerprint` (a blake3 over the sorted `rel_path|size|mtime` scan
+state, recomputed cheaply from disk with a stat-only walk). The aggregate JSON
+adds:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `sources[].graph_current` | bool\|null | source's fingerprint matches the graph (null if no graph) |
+| `graph` | string\|null | the configured graph path |
+| `graph_present` | bool | the graph file exists |
+| `graph_stale` | bool | the graph must be rebuilt (missing, or a source drifted) |
+
+A stale graph is **action-worthy: exit `1`** even when every cache is fresh
+(status `needs_build`) — the fix is a `sonagram build` (~1s from cache), the
+add/delete/rebuild mechanism.
+
+## `sonagram sources`
+
+```bash
+sonagram sources add <dir>      # register a library folder (canonicalized, deduped)
+sonagram sources remove <dir>   # unregister
+sonagram sources list           # show the registry
+```
+
+Manage the configured source registry (`~/.sonagram/config.json`). Once a source
+is registered, the bare config-driven forms (`sonagram scan` / `build` / `status`
+/ `enrich`, and `playlist ... --name`) fan out over every source with no path
+arguments.
+
+## `sonagram config`
+
+```bash
+sonagram config                             # show the resolved config
+sonagram config set graph <path>            # override the central graph location
+sonagram config set playlists_dir <path>    # override the playlist-store location
+```
+
+Show the resolved config — sources, the central graph and playlist-store paths
+(defaults under `~/.sonagram/`, flagged `[default]`), whether each file exists,
+and whether a Last.fm key is configured (the location only, never the key).
+
+## `sonagram playlists`
+
+```bash
+sonagram playlists              # list stored playlists (newest first)
+sonagram playlists show <slug>  # full metadata + tracklist for one playlist
+```
+
+Read the central playlist store built by `playlist --name`.
+
+## `sonagram skill`
+
+```bash
+sonagram skill show                          # print the bundled agent skill
+sonagram skill install [--dir <skills_root>] [--force]
+```
+
+`show` prints the embedded `sonagram-playlist` skill to stdout. `install` writes
+it to `<skills_root>/sonagram-playlist/SKILL.md` (default `~/.claude/skills`),
+creating any missing directories. Install personalizes the file from your config
+(substituting the library-root placeholder with your first configured source),
+refuses to overwrite an existing file unless `--force`, and prints a reminder to
+**read and follow the file now, in-session** — skills only auto-load at the next
+session start.
 
 ## Examples
 

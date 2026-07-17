@@ -19,6 +19,38 @@ export LASTFM_API_KEY=...      # optional: enables `enrich`
 The wheel's console script and the standalone binary run the same pure-Rust
 code, so `pip install sonagram` gives the same `sonagram` command either way.
 
+## For AI agents (the fastest path)
+
+If you are an AI agent a user pointed at their music library, you don't touch the
+flow below by hand — install the bundled skill and follow it:
+
+```bash
+pip install sonagram
+sonagram skill install     # writes ~/.claude/skills/sonagram-playlist/SKILL.md
+```
+
+Then **read and follow the installed `SKILL.md` now, in this session** (a skill
+only auto-loads next session). It walks library detection, scanning, the optional
+Last.fm setup, graph build, and playlist delivery.
+
+## Config-driven flow (register once, no path args)
+
+Register your music folders once and every command fans out over them into one
+central graph + playlist store — no `<library_root>` argument:
+
+```bash
+sonagram sources add ~/Music   # register a folder (repeatable); ~/.sonagram/config.json
+sonagram scan                  # scan every source
+sonagram build                 # merge all sources → the central ~/.sonagram/music.kgl
+sonagram status                # freshness of every source + graph (graph_stale)
+sonagram playlist --ids h1,h2,h3 --name "Deep Focus" --description "a calm work set"
+sonagram playlists             # list stored playlists
+```
+
+`sonagram config` shows the resolved graph + playlist-store paths. The explicit
+`<library_root>`-per-command forms below still work for scripting a single
+library.
+
 ## The end-to-end flow
 
 ```bash

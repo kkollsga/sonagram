@@ -43,6 +43,10 @@ with tempfile.TemporaryDirectory() as d:
     rc = main(["status", d, "--format", "json"])
     assert rc == 2, f"status --format json on an uncached dir should exit 2, got {rc}"
 
+# `skill show` prints the embedded skill and exits 0 (P19 cold-start bootstrap).
+rc = main(["skill", "show"])
+assert rc == 0, f"skill show should exit 0, got {rc}"
+
 # ── Layer 2: the real console script, if maturin installed it ──
 def find_console_script():
     # Same-interpreter bin dir first (venv), then PATH.
@@ -80,6 +84,11 @@ else:
 res = run(script, "--version")
 assert res.returncode == 0, f"--version rc={res.returncode}; stderr={res.stderr!r}"
 assert VERSION in res.stdout, f"--version stdout missing {VERSION}: {res.stdout!r}"
+
+# `skill show` prints the embedded skill (non-empty, names itself).
+res = run(script, "skill", "show")
+assert res.returncode == 0, f"skill show rc={res.returncode}; stderr={res.stderr!r}"
+assert "sonagram-playlist" in res.stdout, "skill show output names the skill"
 
 # status on an uncached dir exits 2 with parseable JSON under --format json.
 with tempfile.TemporaryDirectory() as d:

@@ -10,6 +10,25 @@ portable folder of copies) using the sonagram music knowledge graph. sonagram is
 **config-driven**: you register your music folders once, then every command fans
 out over them into one central graph + one playlist store.
 
+## Library detection (before First-run setup)
+Find the music library before registering anything — **never register a guess
+silently**:
+1. **Memory / context first.** Check your own memory and this conversation for a
+   library path the user already gave (or you used before). If you have one, skip
+   to step 3 and confirm it.
+2. **Probe the OS-standard locations** and count MP3s at each, so you can show the
+   user real evidence (a fast stat count, not a full analysis):
+   - macOS: `~/Music/Music/Media.localized/Music` (the Music.app library) first,
+     then `~/Music`
+   - Linux: `~/Music`
+   - Windows: `~\Music`
+   Count fast, e.g. `find "$HOME/Music" -iname '*.mp3' | head -20000 | wc -l`
+   (adjust the path per OS; try the macOS Music.app path first on a Mac).
+3. **Present findings and ASK.** Show each candidate with its MP3 count and ask
+   the user to confirm the right one (or paste another path). Only after they
+   confirm do you run `sonagram sources add <confirmed_path>`. Never register a
+   guessed path.
+
 ## First-run setup (once)
 - **Register the library**: `sonagram sources add <YOUR_LIBRARY_ROOT>` (repeat for
   each folder). Confirm with `sonagram sources list`.

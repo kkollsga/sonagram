@@ -115,10 +115,12 @@ fn dedup_from_source_and_source_root_resolution() {
         SourceInput {
             root: root_a.clone(),
             records: &records_a,
+            scan_fingerprint: None,
         },
         SourceInput {
             root: root_b.clone(),
             records: &records_b,
+            scan_fingerprint: None,
         },
     ];
     let library = LibraryInfo {

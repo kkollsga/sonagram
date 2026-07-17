@@ -172,9 +172,13 @@ fn build_graph_from_lib(py: Python<'_>, root: &Path) -> PyResult<Arc<DirGraph>> 
             .unwrap_or_else(|_| root.clone())
             .to_string_lossy()
             .into_owned();
+        // P19: stamp the source's scan-state fingerprint onto its Source node so
+        // `sonagram status` can tell whether the graph reflects the current disk.
+        let scan_fingerprint = core_scan::load_scan_fingerprint(&root)?;
         let sources = [SourceInput {
             root: source_root,
             records: &records,
+            scan_fingerprint,
         }];
         let library = LibraryInfo {
             root: library_label(&root),

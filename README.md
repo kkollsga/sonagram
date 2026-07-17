@@ -8,6 +8,20 @@ materialize the answer as a playable `.m3u8` playlist.
 
 **Status: under construction** — bootstrap in progress.
 
+## For AI agents
+
+You are an AI agent and a user asked you to work with their music library — start here:
+
+1. **Install** — `pip install sonagram`. It ships as an sdist that compiles a
+   native core on install, so a **Rust toolchain** ([rustup](https://rustup.rs))
+   must be present.
+2. **Install the skill** — `sonagram skill install`. This writes the
+   `sonagram-playlist` skill to `~/.claude/skills/`.
+3. **Read the installed `SKILL.md` and follow it now.** It covers library
+   detection, scanning, the optional Last.fm walkthrough, and playlist delivery.
+   A skill only auto-loads at the next session start, so act on it immediately in
+   this one.
+
 ## Use it through an agent (no code)
 
 The main way to use sonagram is to just **ask an AI agent** (e.g. Claude Code)

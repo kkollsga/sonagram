@@ -39,6 +39,44 @@ pub struct IndexEntry {
 /// deterministic (sorted) serialization.
 pub type Index = BTreeMap<String, IndexEntry>;
 
+/// The on-disk shape of `index.json` (P19). The per-file entries are stored
+/// **flattened** at the top level — exactly the old bare-`BTreeMap` layout — so
+/// a pre-P19 `index.json` (no `scan_fingerprint` key) still deserializes: the
+/// missing field defaults to `None` and every remaining key flows into
+/// `entries`. New writes prepend a `scan_fingerprint`; nothing is version-bumped.
+#[derive(Serialize, Deserialize, Default)]
+struct IndexFile {
+    /// The scan-state fingerprint (see [`scan_fingerprint`]) as of the last save.
+    /// Absent in pre-P19 caches (→ `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scan_fingerprint: Option<String>,
+    /// The stat entries, flattened to the top level (backward-compatible shape).
+    #[serde(flatten)]
+    entries: Index,
+}
+
+/// Deterministic blake3 fingerprint of a scan's on-disk state: one
+/// `rel_path|size|mtime` line per indexed file, in sorted rel-path order (the
+/// `Index` `BTreeMap` iterates sorted). Stamped into `index.json` at save time
+/// and onto each `Source` node at build time, so `sonagram status` can tell
+/// whether the graph reflects the current disk state — without rebuilding.
+///
+/// Only `(rel_path, size, mtime)` feed the hash; `content_hash` is deliberately
+/// excluded so a stat-only recompute from disk ([`crate::scan::compute_scan_fingerprint`])
+/// reproduces the identical fingerprint without hashing a single file.
+pub fn scan_fingerprint(index: &Index) -> String {
+    let mut hasher = blake3::Hasher::new();
+    for (rel, entry) in index {
+        hasher.update(rel.as_bytes());
+        hasher.update(b"|");
+        hasher.update(entry.size.to_string().as_bytes());
+        hasher.update(b"|");
+        hasher.update(entry.mtime_unix.to_string().as_bytes());
+        hasher.update(b"\n");
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
 /// Handle to a library's `.sonagram/` cache directory.
 pub struct Cache {
     root: PathBuf,
@@ -78,20 +116,37 @@ impl Cache {
         Ok(())
     }
 
-    /// Load the index, or an empty map if it does not exist yet.
-    pub fn load_index(&self) -> Result<Index> {
+    /// Load the parsed `index.json` (entries + fingerprint), or an empty default
+    /// if it does not exist yet.
+    fn load_index_file(&self) -> Result<IndexFile> {
         let path = self.index_path();
         if !path.exists() {
-            return Ok(Index::new());
+            return Ok(IndexFile::default());
         }
         let text = std::fs::read_to_string(&path)?;
         serde_json::from_str(&text).map_err(|e| SonagramError::Cache(format!("index.json: {e}")))
     }
 
-    /// Atomically write the index (pretty JSON, sorted by construction).
+    /// Load the index entries, or an empty map if it does not exist yet.
+    pub fn load_index(&self) -> Result<Index> {
+        Ok(self.load_index_file()?.entries)
+    }
+
+    /// Load the saved scan-state fingerprint (P19), or `None` when the cache is
+    /// absent or was written before fingerprints existed.
+    pub fn load_scan_fingerprint(&self) -> Result<Option<String>> {
+        Ok(self.load_index_file()?.scan_fingerprint)
+    }
+
+    /// Atomically write the index (pretty JSON, sorted by construction), stamping
+    /// the current [`scan_fingerprint`] over the entries.
     pub fn save_index(&self, index: &Index) -> Result<()> {
         self.ensure_dirs()?;
-        let json = serde_json::to_string_pretty(index)
+        let file = IndexFile {
+            scan_fingerprint: Some(scan_fingerprint(index)),
+            entries: index.clone(),
+        };
+        let json = serde_json::to_string_pretty(&file)
             .map_err(|e| SonagramError::Cache(format!("serialize index: {e}")))?;
         atomic_write(&self.index_path(), json.as_bytes())
     }
@@ -283,6 +338,70 @@ mod tests {
         cache.save_record(&rec).unwrap();
         assert!(cache.has_record("cafef00d"));
         assert_eq!(cache.load_record("cafef00d").unwrap().unwrap(), rec);
+    }
+
+    fn entry(size: u64, mtime: i64, hash: &str) -> IndexEntry {
+        IndexEntry { size, mtime_unix: mtime, content_hash: hash.to_string() }
+    }
+
+    #[test]
+    fn scan_fingerprint_is_deterministic_and_change_sensitive() {
+        let mut a = Index::new();
+        a.insert("x.mp3".to_string(), entry(10, 100, "h1"));
+        a.insert("y.mp3".to_string(), entry(20, 200, "h2"));
+        // A second, identically-built index → identical fingerprint.
+        let mut b = Index::new();
+        b.insert("y.mp3".to_string(), entry(20, 200, "hZ")); // content_hash is NOT part of it
+        b.insert("x.mp3".to_string(), entry(10, 100, "hZ"));
+        assert_eq!(scan_fingerprint(&a), scan_fingerprint(&b), "order + content_hash irrelevant");
+
+        // Changing a size moves the fingerprint.
+        let mut c = a.clone();
+        c.insert("x.mp3".to_string(), entry(11, 100, "h1"));
+        assert_ne!(scan_fingerprint(&a), scan_fingerprint(&c), "size change ⇒ new fingerprint");
+
+        // Changing an mtime moves the fingerprint.
+        let mut d = a.clone();
+        d.insert("x.mp3".to_string(), entry(10, 101, "h1"));
+        assert_ne!(scan_fingerprint(&a), scan_fingerprint(&d), "mtime change ⇒ new fingerprint");
+
+        // Adding a file moves the fingerprint.
+        let mut e = a.clone();
+        e.insert("z.mp3".to_string(), entry(1, 1, "h3"));
+        assert_ne!(scan_fingerprint(&a), scan_fingerprint(&e), "added file ⇒ new fingerprint");
+    }
+
+    #[test]
+    fn save_index_stamps_and_reloads_fingerprint() {
+        let lib = tmp_lib("fingerprint");
+        let cache = Cache::new(&lib);
+        let mut index = Index::new();
+        index.insert("a.mp3".to_string(), entry(1, 10, "aa"));
+        cache.save_index(&index).unwrap();
+        // The reload carries the fingerprint the save computed.
+        assert_eq!(
+            cache.load_scan_fingerprint().unwrap().as_deref(),
+            Some(scan_fingerprint(&index).as_str())
+        );
+        // And entries still round-trip unchanged.
+        assert_eq!(cache.load_index().unwrap(), index);
+    }
+
+    #[test]
+    fn pre_p19_bare_map_index_still_loads() {
+        // A cache written before P19 is a bare `{ "a.mp3": {..} }` map with no
+        // scan_fingerprint key — it must still load (fingerprint → None).
+        let lib = tmp_lib("legacy");
+        let cache = Cache::new(&lib);
+        cache.ensure_dirs().unwrap();
+        let legacy = r#"{
+  "a.mp3": { "size": 5, "mtime_unix": 42, "content_hash": "cafe" }
+}"#;
+        std::fs::write(cache.index_path(), legacy).unwrap();
+        let idx = cache.load_index().unwrap();
+        assert_eq!(idx.len(), 1);
+        assert_eq!(idx["a.mp3"], entry(5, 42, "cafe"));
+        assert!(cache.load_scan_fingerprint().unwrap().is_none(), "no fingerprint in a legacy cache");
     }
 
     #[test]

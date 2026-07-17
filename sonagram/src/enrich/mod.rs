@@ -849,7 +849,13 @@ mod tests {
         }
         let dir = std::env::temp_dir().join(format!("sonagram-nokey-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        // Pin SONAGRAM_HOME at this empty temp dir so the home `.env` fallback in
+        // `api_key` can't reach a real `~/.sonagram/.env` (a sibling test may have
+        // left SONAGRAM_HOME unset). Without this, a maintainer machine with a
+        // configured key fails a test that only guards the env var.
+        std::env::set_var("SONAGRAM_HOME", &dir);
         let err = api_key(&dir, None).unwrap_err();
+        std::env::remove_var("SONAGRAM_HOME");
         assert!(matches!(err, SonagramError::Enrich(_)));
         assert!(err.to_string().contains("no LASTFM_API_KEY"));
     }

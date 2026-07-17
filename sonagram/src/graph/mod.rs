@@ -141,6 +141,12 @@ pub struct SourceInput<'a> {
     pub root: String,
     /// The source's cached analysis records (need not be pre-sorted).
     pub records: &'a [AnalysisRecord],
+    /// P19: the source's scan-state fingerprint (blake3 over its `index.json` at
+    /// scan time), stamped as the `Source.scan_fingerprint` property so
+    /// `sonagram status` can compare the graph against the current disk state.
+    /// `None` for builds with no scan index (e.g. the frozen fixtures) — the
+    /// column is then omitted entirely, keeping the golden digest byte-unchanged.
+    pub scan_fingerprint: Option<String>,
 }
 
 /// Build a deterministic `DirGraph` from `records` per the music schema.
@@ -174,6 +180,7 @@ pub fn build_graph_with_enrichment(
     let source = SourceInput {
         root: library.root.clone(),
         records,
+        scan_fingerprint: None,
     };
     build_graph_from_sources(std::slice::from_ref(&source), enrichment, library)
 }
@@ -203,9 +210,15 @@ pub fn build_graph_from_sources(
     // content_hash → winning source root, and per-source winning-track counts.
     let mut source_of: BTreeMap<String, String> = BTreeMap::new();
     let mut source_counts: BTreeMap<String, i64> = BTreeMap::new();
+    // P19: source root → its scan-state fingerprint (if any). Parallel to
+    // `source_counts`, so `add_sources` can stamp `Source.scan_fingerprint`.
+    let mut source_fingerprints: BTreeMap<String, Option<String>> = BTreeMap::new();
     // Every configured source gets a node even if it wins no unique track.
     for s in &srcs {
         source_counts.entry(s.root.clone()).or_insert(0);
+        source_fingerprints
+            .entry(s.root.clone())
+            .or_insert_with(|| s.scan_fingerprint.clone());
     }
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     let mut sorted: Vec<&AnalysisRecord> = Vec::new();
@@ -285,7 +298,8 @@ pub fn build_graph_from_sources(
     add_energy_levels(&mut graph)?;
     add_decades(&mut graph, &decades)?;
     // P17: one Source node per configured source (endpoints for FROM_SOURCE).
-    add_sources(&mut graph, &source_counts)?;
+    // P19: also stamps each source's scan_fingerprint when available.
+    add_sources(&mut graph, &source_counts, &source_fingerprints)?;
 
     // ── Stage 3: Track nodes (single full-width pass) ───────────────────────
     add_tracks(&mut graph, &sorted, &source_of, enrichment)?;
@@ -538,19 +552,33 @@ fn add_decades(graph: &mut DirGraph, decades: &BTreeSet<String>) -> Result<()> {
 /// P17: one `Source` node per configured source, id = the absolute source root,
 /// with `path` (= id) and `n_tracks` (winning-track count). `BTreeMap`-iterated,
 /// so the node order is fixed.
-fn add_sources(graph: &mut DirGraph, source_counts: &BTreeMap<String, i64>) -> Result<()> {
+fn add_sources(
+    graph: &mut DirGraph,
+    source_counts: &BTreeMap<String, i64>,
+    source_fingerprints: &BTreeMap<String, Option<String>>,
+) -> Result<()> {
     if source_counts.is_empty() {
         return Ok(());
     }
     let ids: Vec<Option<String>> = source_counts.keys().map(|k| Some(k.clone())).collect();
     let paths = ids.clone();
     let counts: Vec<Option<i64>> = source_counts.values().map(|c| Some(*c)).collect();
-    let df = build_df(vec![
+    let mut cols = vec![
         ("id", ColumnType::String, ColumnData::String(ids)),
         ("path", ColumnType::String, ColumnData::String(paths)),
         ("n_tracks", ColumnType::Int64, ColumnData::Int64(counts)),
-    ]);
-    add(graph, df, SOURCE, "id", "path")
+    ];
+    // P19: stamp `scan_fingerprint` ONLY when at least one source carries one, so a
+    // fixture build (no index) omits the column entirely and the golden digest is
+    // byte-unchanged. Sources without a fingerprint get a null cell.
+    if source_fingerprints.values().any(Option::is_some) {
+        let fps: Vec<Option<String>> = source_counts
+            .keys()
+            .map(|k| source_fingerprints.get(k).cloned().flatten())
+            .collect();
+        cols.push(("scan_fingerprint", ColumnType::String, ColumnData::String(fps)));
+    }
+    add(graph, build_df(cols), SOURCE, "id", "path")
 }
 
 // ─────────────────────────────── Track builder ──────────────────────────────

@@ -286,6 +286,47 @@ pub fn load_records(library_root: &Path) -> Result<Vec<AnalysisRecord>> {
     Ok(records)
 }
 
+/// Load the saved scan-state fingerprint for `library_root` (P19), or `None`
+/// when there is no cache (or it predates fingerprints). Cheap: reads only the
+/// `index.json` meta, no walk. The graph build stamps this onto the `Source`
+/// node so `sonagram status` can compare graph freshness.
+pub fn load_scan_fingerprint(library_root: &Path) -> Result<Option<String>> {
+    Cache::new(library_root).load_scan_fingerprint()
+}
+
+/// Recompute the deterministic scan-state fingerprint of `library_root` directly
+/// from disk — a **stat walk only** (no hashing, no analysis), cheap enough for
+/// `sonagram status` to run on every probe.
+///
+/// Discovers the same `*.mp3` set a scan would, stats each for `(size, mtime)`,
+/// and hashes the sorted `rel_path|size|mtime` lines with the identical
+/// construction [`cache::scan_fingerprint`] applies to a saved index — so an
+/// unchanged, fully-scanned library reproduces the fingerprint stamped on its
+/// `Source` node at build time.
+pub fn compute_scan_fingerprint(library_root: &Path) -> Result<String> {
+    let cache = Cache::new(library_root);
+    let files = discover_mp3s(library_root, &cache);
+    let mut index = cache::Index::new();
+    for abs_path in &files {
+        let Some(rel) = relative_path(library_root, abs_path) else {
+            continue;
+        };
+        let Ok(meta) = std::fs::metadata(abs_path) else {
+            continue;
+        };
+        index.insert(
+            rel,
+            IndexEntry {
+                size: meta.len(),
+                mtime_unix: mtime_unix(&meta),
+                // Not part of the fingerprint; a stat walk never hashes bytes.
+                content_hash: String::new(),
+            },
+        );
+    }
+    Ok(cache::scan_fingerprint(&index))
+}
+
 /// True iff a cached record was produced by the sonara build we now link.
 ///
 /// A record is **fresh** when its analysis schema version matches sonara's
