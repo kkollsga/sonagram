@@ -185,11 +185,20 @@ resolves each hash's on-disk path (library_root + relative path) into the
 playlist. A hash matching no Track is reported, not silently dropped.
 
 ## Pitfalls
-- **Keys are unreliable right now** (dated 2026-07-17, remove when upstream
-  fixes it): sonara's key detection has a strong **F-major bias** — on the
-  15-track fixture set, 13 of 15 tracks read as `F major` / `7B`. Treat `key` /
-  `camelot` / harmonic-mixing (archetype 4) as low-confidence until the upstream
-  fix lands; cross-check with `key_confidence`.
+- **Keys are trustworthy** (sonara ≥ 0.2.3 / graph schema v2; the old F-major
+  bias is fixed and validated). Interpreting `key_confidence`: the scale runs
+  low — library mean ≈ 0.17; **≥ 0.3 is solid, ≥ 0.45 is strong**. Note that
+  high-energy dense mixes tend to score lower confidence, so a strict energy
+  floor and a strict confidence floor fight each other — relax one.
+- **`vocalness`/`instrumentalness` INVERT on real music — do not use them to
+  find instrumentals.** Screamed/distorted-vocal metal scores *lowest*
+  (0.13–0.27) and pitched solo instruments (sax, violin, flute) score *high*
+  (0.55–0.85): the heuristic keys on pitched voice-band content.
+  `instrumentalness` is exactly `1 − vocalness` (collinear — no added signal).
+  For "instrumental / no vocals": lead with genre/compilation tags +
+  `acousticness`, then eyeball artists. Within vocal-forward pop, higher
+  `vocalness` (~0.6–0.85) does track "singable" — it's usable *there*, as a
+  ranking signal.
 - **`genre_tag` is spotty real-world data** — it's whatever the file's ID3 tag
   says (or null). It is not an audio-derived classification. Expect missing,
   inconsistent, and idiosyncratic values (`"rap & hip-hop"` vs `"hip-hop"`).
@@ -238,3 +247,21 @@ playlist. A hash matching no Track is reported, not silently dropped.
 - **Close values need full precision**: two tracks can both display `0.462`
   yet differ at the 5th decimal — don't judge strict ordering from rounded
   output.
+- **For any hand-built arc (ramp, breather, harmonic chain), `--ids` is the
+  primary export path**, not `--cypher`: export candidates (`.to_dicts()`),
+  order client-side, feed the hash list — order is preserved verbatim. A
+  12-track Camelot chain or a mood arc with a mid-set dip cannot be expressed
+  as one `ORDER BY`.
+- **Mood-playlist recipe** (feel-good, chill, angry…): filter on the scalar
+  stack (`mood_*`, `valence`, `energy`, `vocalness` for singability,
+  `mood_aggressive` as an exclusion), calibrate thresholds against library
+  averages first, build the arc client-side. Check `duration_sec` — LP/extended
+  cuts (7–8 min) hide in compilations and derail pacing.
+- **Vibe-over-time recipe**: cross-tab Genre × Decade to find a vibe spanning
+  eras, hold it with a tight `acousticness`/`energy` band, and read
+  `avg(loudness_lufs)` per decade for production evolution. Caveat: `year` (→
+  `Decade`) is the file's tag — on compilations it may be the compilation's
+  release year, not the recording's.
+- **Compilation folders can beat scalars**: `genre_tag` and album names often
+  encode pre-curated mood buckets ("Deep Focus", "Morning Coffee") — exploit
+  them deliberately for mood/focus asks.
