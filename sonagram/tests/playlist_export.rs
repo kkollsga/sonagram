@@ -35,6 +35,11 @@ fn load_records() -> Vec<AnalysisRecord> {
         .collect()
 }
 
+// A platform-appropriate absolute root: a bare "/music/library" is NOT
+// absolute on Windows (no drive letter), which failed these tests in CI.
+#[cfg(windows)]
+const LIB_ROOT: &str = r"C:\music\library";
+#[cfg(not(windows))]
 const LIB_ROOT: &str = "/music/library";
 
 // P17: build the fixture graph with the source root = LIB_ROOT, so each Track's
