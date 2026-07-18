@@ -585,7 +585,10 @@ pub(crate) fn eligibility_issues(
     check_max(&mut issues, "arousal_too_high", "arousal", track.arousal, e.max_arousal);
     check_min(&mut issues, "tension_too_low", "tension", track.tension, e.min_tension);
     check_max(&mut issues, "tension_too_high", "tension", track.tension, e.max_tension);
-    let artist = [track.artist_key.as_str()];
+    // Artist filters are user-facing names. `artist_key` is the identity used
+    // for diversity and spacing, and may be an opaque MusicBrainz id.
+    let artist_name_key = group_key(track.artist.as_deref());
+    let artist = [artist_name_key.as_str()];
     check_categories(
         &mut issues,
         "artist_not_included",

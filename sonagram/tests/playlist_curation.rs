@@ -10,6 +10,7 @@ use sonagram::curation::{
     profile_library, PlaylistArc, PlaylistBrief, PlaylistPolicy, PlaylistPreset,
     RelativeDirection, SeedRole, SeedSimilarityPreference,
 };
+use sonagram::enrich::{ArtistEnrich, EnrichmentData};
 use sonagram::graph::{self, LibraryInfo};
 use sonagram::playlist;
 use sonagram::record::AnalysisRecord;
@@ -69,6 +70,43 @@ fn graph_from(records: Vec<AnalysisRecord>) -> std::sync::Arc<kglite::api::DirGr
         },
     )
     .unwrap()
+}
+
+fn alias_graph(records: Vec<AnalysisRecord>) -> std::sync::Arc<kglite::api::DirGraph> {
+    let mut enrichment = EnrichmentData::default();
+    for artist in ["Alias Ensemble", "The Alias Ensemble"] {
+        enrichment.artists.insert(
+            artist.into(),
+            ArtistEnrich {
+                queried_name: artist.into(),
+                mbid: Some("shared-musicbrainz-id".into()),
+                fetched: true,
+                ..ArtistEnrich::default()
+            },
+        );
+    }
+    graph::build_graph_with_enrichment(
+        &records,
+        Some(&enrichment),
+        &LibraryInfo {
+            root: "synthetic-artist-aliases".into(),
+            n_tracks: 2,
+        },
+    )
+    .unwrap()
+}
+
+fn alias_records() -> Vec<AnalysisRecord> {
+    let mut out = records()[..2].to_vec();
+    for (record, (artist, album)) in out.iter_mut().zip([
+        ("Alias Ensemble", "Alias Debut"),
+        ("The Alias Ensemble", "Alias Return"),
+    ]) {
+        let tags = record.tags.as_mut().unwrap();
+        tags.artist = Some(artist.into());
+        tags.album = Some(album.into());
+    }
+    out
 }
 
 fn ids() -> Vec<String> {
@@ -265,6 +303,56 @@ fn independent_audit_enforces_hard_artist_and_album_caps() {
     assert!(!audit.passed);
     assert!(codes.contains(&"artist_cap"));
     assert!(codes.contains(&"album_cap"));
+}
+
+#[test]
+fn shared_artist_mbid_groups_name_aliases_for_selection_caps_and_audit() {
+    let records = alias_records();
+    let graph = alias_graph(records.clone());
+    let selected = vec![format!("{:064x}", 0), format!("{:064x}", 1)];
+    let mut policy = PlaylistPolicy::default();
+    policy.eligibility.allow_low_quality = true;
+    policy.diversity.max_per_artist = 1;
+    policy.diversity.max_per_album = 2;
+    policy.audit.min_unique_artist_ratio = 0.0;
+    policy.audit.max_artist_share = 1.0;
+    policy.audit.max_album_share = 1.0;
+    policy.audit.min_mean_transition_score = 0.0;
+    policy.audit.min_worst_transition_score = 0.0;
+    policy.audit.max_mean_arc_error = 1.0;
+
+    let audit = audit_playlist(&graph, &selected, &policy).unwrap();
+    assert_eq!(audit.unique_artists, 1, "shared MBID must define artist identity");
+    assert!(audit.issues.iter().any(|issue| issue.code == "artist_cap"));
+
+    let result = curate_playlist(
+        &graph,
+        &PlaylistBrief {
+            target_tracks: 2,
+            ..PlaylistBrief::default()
+        },
+        &policy,
+    )
+    .unwrap();
+    assert!(!result.exportable);
+    assert!(result.audit.issues.iter().any(|issue| issue.code == "infeasible_selection"));
+
+    let mut reversed = records;
+    reversed.reverse();
+    let reversed_graph = alias_graph(reversed);
+    assert_eq!(audit, audit_playlist(&reversed_graph, &selected, &policy).unwrap());
+    assert_eq!(
+        result,
+        curate_playlist(
+            &reversed_graph,
+            &PlaylistBrief {
+                target_tracks: 2,
+                ..PlaylistBrief::default()
+            },
+            &policy,
+        )
+        .unwrap()
+    );
 }
 
 #[test]

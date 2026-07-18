@@ -53,6 +53,7 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
         };
         let kind = edge.connection_type_str(&graph.interner);
         if kind != "VERSION_OF"
+            && kind != "BY_ARTIST"
             && kind != "IN_STYLE"
             && kind != "IN_GENRE"
             && kind != "FROM_DECADE"
@@ -77,6 +78,21 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
         let entry = relations.entry(source.index()).or_default();
         match kind {
             "VERSION_OF" => entry.song_key = Some(target_id),
+            "BY_ARTIST" => {
+                if target_node.node_type_str(&graph.interner) == "Artist" {
+                    let mbid = prop_string(target_node, "mbid", graph)
+                        .map(|value| group_key(Some(value.as_str())))
+                        .filter(|value| !value.is_empty());
+                    if let Some(mbid) = mbid {
+                        // A malformed graph may contain more than one BY_ARTIST edge.
+                        // Keep the lexicographically first MBID so projection remains
+                        // deterministic regardless of edge insertion order.
+                        if entry.artist_mbid.as_ref().is_none_or(|current| mbid < *current) {
+                            entry.artist_mbid = Some(mbid);
+                        }
+                    }
+                }
+            }
             "IN_STYLE" => {
                 entry.styles.insert(group_key(Some(target_id.as_str())));
                 if let Some(name) = prop_string(target_node, "name", graph) {
@@ -111,7 +127,7 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
         out.push(TrackCandidate {
             id,
             title: prop_string(node, "title", graph),
-            artist_key: group_key(artist.as_deref()),
+            artist_key: relations.artist_mbid.unwrap_or_else(|| group_key(artist.as_deref())),
             artist,
             album_key: group_key(album.as_deref()),
             album,
@@ -146,6 +162,7 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
 
 #[derive(Default)]
 struct TrackRelations {
+    artist_mbid: Option<String>,
     song_key: Option<String>,
     styles: BTreeSet<String>,
     genres: BTreeSet<String>,
