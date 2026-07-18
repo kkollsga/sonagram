@@ -92,6 +92,12 @@ fn profile_curate_audit_explain_and_failed_save_contracts() {
     let profile_json = json_output(&profile);
     assert!(profile_json["tracks"].as_u64().unwrap() > 3);
 
+    let resolved = run(&home, &["policy", "--preset", "focus", "--format", "json"]);
+    assert!(resolved.status.success());
+    let resolved = json_output(&resolved);
+    assert_eq!(resolved["preset"], "focus");
+    assert_eq!(resolved["targets"]["seed_similarity"], "neutral");
+
     let curated = run(
         &home,
         &[
@@ -127,6 +133,24 @@ fn profile_curate_audit_explain_and_failed_save_contracts() {
     );
     assert!(audit.status.success());
     assert_eq!(json_output(&audit)["passed"], true);
+
+    let brief = serde_json::to_string(&curated_json["result"]["brief"]).unwrap();
+    let brief_audit = run(
+        &home,
+        &[
+            "audit",
+            "--ids",
+            &ids,
+            "--brief-json",
+            &brief,
+            "--policy-json",
+            &policy,
+            "--format",
+            "json",
+        ],
+    );
+    assert!(brief_audit.status.success());
+    assert_eq!(json_output(&brief_audit)["passed"], true);
 
     let explain = run(
         &home,

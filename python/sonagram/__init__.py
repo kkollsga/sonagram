@@ -26,12 +26,14 @@ Public API (all implemented in the compiled `_sonagram` extension):
   relative-path ``.m3u8``) and returns that folder's playlist path. Copies
   only — source files are never moved or modified.
 - ``profile_library(kgl_path) -> dict`` — summarize curation-relevant graph stats.
+- ``curation_policy(preset) -> dict`` — return a complete versioned preset policy.
 - ``curate_playlist(kgl_path, brief, policy=None) -> dict`` — deterministic
   library-owned selection, sequencing, audit, repair, and explanation.
-- ``audit_playlist(kgl_path, track_ids, policy=None) -> dict`` — independently
-  enforce eligibility, diversity, transition, and arc gates.
-- ``explain_playlist(kgl_path, track_ids, policy=None) -> dict`` — return the
-  same per-track/per-transition score provenance used by the library.
+- ``audit_playlist(kgl_path, track_ids, policy=None, brief=None) -> dict`` —
+  independently enforce policy gates and, when provided, the original brief.
+- ``explain_playlist(kgl_path, track_ids, policy=None, brief=None) -> dict`` —
+  return per-track/per-transition provenance, including seed evidence when the
+  original brief is provided.
 """
 
 from sonagram._sonagram import (  # noqa: F401 — re-exported native surface
@@ -43,6 +45,7 @@ from sonagram._sonagram import (  # noqa: F401 — re-exported native surface
     scan_and_build,
     export_m3u,
     profile_library,
+    curation_policy,
     curate_playlist,
     audit_playlist,
     explain_playlist,
@@ -57,6 +60,7 @@ __all__ = [
     "scan_and_build",
     "export_m3u",
     "profile_library",
+    "curation_policy",
     "curate_playlist",
     "audit_playlist",
     "explain_playlist",

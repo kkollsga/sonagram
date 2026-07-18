@@ -3,12 +3,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use kglite::api::DirGraph;
 
-use super::audit::{audit_playlist, eligibility_issues, explain_playlist};
+use super::audit::{
+    audit_playlist_for_brief, eligibility_issues, explain_playlist_for_brief,
+    max_seed_similarity, seed_constraint_issues, seed_directives_active, SeedBaselines,
+};
 use super::project::{embedding_similarity, project_tracks, TrackCandidate};
 use super::sequence::{compare_track_sequences, repair_tracks, sequence_tracks};
 use super::types::{
     AuditIssue, AuditSeverity, CuratedPlaylist, FamiliarityPreference, PlaylistBrief,
-    PlaylistPolicy,
+    PlaylistPolicy, RelativeDirection, SeedRole, SeedSimilarityPreference,
 };
 use crate::Result;
 
@@ -21,6 +24,8 @@ pub fn curate_playlist(
     let by_id: BTreeMap<&str, &TrackCandidate> = tracks.iter().map(|t| (t.id.as_str(), t)).collect();
     let mut selected: Vec<&TrackCandidate> = Vec::new();
     let mut selected_ids: BTreeSet<&str> = BTreeSet::new();
+    let mut seen_seed_ids: BTreeSet<&str> = BTreeSet::new();
+    let mut reference_seeds: Vec<&TrackCandidate> = Vec::new();
     let mut artist_counts = BTreeMap::new();
     let mut album_counts = BTreeMap::new();
     let mut song_counts = BTreeMap::new();
@@ -39,7 +44,7 @@ pub fn curate_playlist(
     if brief.target_tracks == 0 {
         selection_issues.push(error("invalid_target", "target_tracks must be greater than zero"));
     }
-    if brief.seed_ids.len() > brief.target_tracks {
+    if brief.seed_role != SeedRole::Reference && brief.seed_ids.len() > brief.target_tracks {
         selection_issues.push(error(
             "too_many_seeds",
             format!(
@@ -48,13 +53,12 @@ pub fn curate_playlist(
             ),
         ));
     }
-    if brief.preset != policy.preset {
+    if seed_directives_active(policy)
+        && !matches!(brief.seed_role, SeedRole::Reference | SeedRole::PinnedAndReference)
+    {
         selection_issues.push(error(
-            "preset_mismatch",
-            format!(
-                "brief preset {:?} does not match resolved policy preset {:?}",
-                brief.preset, policy.preset
-            ),
+            "seed_target_without_reference",
+            "seed-relative targets require seed_role reference or pinned_and_reference",
         ));
     }
     if policy.diversity.max_per_artist == 0
@@ -68,7 +72,7 @@ pub fn curate_playlist(
     }
 
     for id in &brief.seed_ids {
-        if !selected_ids.insert(id) {
+        if !seen_seed_ids.insert(id) {
             selection_issues.push(error("duplicate_seed", format!("seed {id} occurs more than once")));
             continue;
         }
@@ -76,6 +80,12 @@ pub fn curate_playlist(
             selection_issues.push(error("missing_seed", format!("seed {id} is not in the graph")));
             continue;
         };
+        if matches!(brief.seed_role, SeedRole::Reference | SeedRole::PinnedAndReference) {
+            reference_seeds.push(track);
+        }
+        if brief.seed_role == SeedRole::Reference {
+            continue;
+        }
         let eligibility = eligibility_issues(track, policy);
         if !eligibility.is_empty() {
             selection_issues.push(error(
@@ -100,14 +110,33 @@ pub fn curate_playlist(
             continue;
         }
         increment_counts(track, &mut artist_counts, &mut album_counts, &mut song_counts);
+        selected_ids.insert(id);
         selected.push(track);
     }
     let seed_count = selected.len();
+    let seed_baselines = SeedBaselines::from_tracks(&reference_seeds);
 
-    let eligible: Vec<&TrackCandidate> = tracks
+    let mut seed_rejections: BTreeMap<&'static str, (String, usize)> = BTreeMap::new();
+    let mut eligible = Vec::new();
+    for track in tracks
         .iter()
-        .filter(|t| eligibility_issues(t, policy).is_empty())
-        .collect();
+        .filter(|track| eligibility_issues(track, policy).is_empty())
+        .filter(|track| !seen_seed_ids.contains(track.id.as_str()))
+    {
+        let relative_issues = if reference_seeds.is_empty() {
+            Vec::new()
+        } else {
+            seed_constraint_issues(track, &reference_seeds, &seed_baselines, policy)
+        };
+        if relative_issues.is_empty() {
+            eligible.push(track);
+        } else {
+            for (code, message) in relative_issues {
+                let entry = seed_rejections.entry(code).or_insert((message, 0));
+                entry.1 += 1;
+            }
+        }
+    }
     while selected.len() < brief.target_tracks {
         let best = eligible
             .iter()
@@ -126,7 +155,14 @@ pub fn curate_playlist(
             })
             .map(|track| {
                 (
-                    selection_score(track, &selected, brief, policy),
+                    selection_score(
+                        track,
+                        &selected,
+                        &reference_seeds,
+                        &seed_baselines,
+                        brief,
+                        policy,
+                    ),
                     track,
                 )
             })
@@ -168,7 +204,7 @@ pub fn curate_playlist(
     let selected_pool = selected.clone();
     selected = sequence_tracks(&selected_pool, policy, 64);
     let mut track_ids: Vec<String> = selected.iter().map(|t| t.id.clone()).collect();
-    let mut audit = audit_playlist(graph, &track_ids, policy)?;
+    let mut audit = audit_playlist_for_brief(graph, &track_ids, brief, policy)?;
     let mut sequence_repair_attempts = 0;
     if sequencing_error_count(&audit) > 0 {
         sequence_repair_attempts = 1;
@@ -176,7 +212,7 @@ pub fn curate_playlist(
         if compare_track_sequences(&repaired, &selected, policy) == Ordering::Greater {
             selected = repaired;
             track_ids = selected.iter().map(|track| track.id.clone()).collect();
-            audit = audit_playlist(graph, &track_ids, policy)?;
+            audit = audit_playlist_for_brief(graph, &track_ids, brief, policy)?;
         }
         let (locally_repaired, local_attempts) = repair_tracks(&selected, policy, 8);
         sequence_repair_attempts += local_attempts;
@@ -185,7 +221,7 @@ pub fn curate_playlist(
         {
             selected = locally_repaired;
             track_ids = selected.iter().map(|track| track.id.clone()).collect();
-            audit = audit_playlist(graph, &track_ids, policy)?;
+            audit = audit_playlist_for_brief(graph, &track_ids, brief, policy)?;
         }
     }
     if track_ids.len() < brief.target_tracks {
@@ -196,21 +232,18 @@ pub fn curate_playlist(
                 track_ids.len(), brief.target_tracks
             ),
         ));
-    }
-    if let Some(target_duration) = brief.target_duration_sec {
-        if audit.total_duration_sec + f64::EPSILON < target_duration as f64 {
-            selection_issues.push(error(
-                "duration_shortfall",
-                format!(
-                    "selected duration {:.0}s is below requested {target_duration}s",
-                    audit.total_duration_sec
-                ),
-            ));
-        }
+        selection_issues.extend(seed_rejections.into_iter().map(
+            |(code, (message, count))| {
+                error(
+                    code,
+                    format!("{count} candidate(s) rejected by seed intent: {message}"),
+                )
+            },
+        ));
     }
     audit.issues.extend(selection_issues);
     audit.passed = !audit.issues.iter().any(|issue| issue.severity == AuditSeverity::Error);
-    let mut explanation = explain_playlist(graph, &track_ids, policy)?;
+    let mut explanation = explain_playlist_for_brief(graph, &track_ids, brief, policy)?;
     explanation.summary = vec![format!(
         "{} tracks, {} artists, audit {}",
         audit.track_count,
@@ -227,6 +260,12 @@ pub fn curate_playlist(
         "deterministic constrained selection and sequencing chose {} of {} requested tracks",
         track_ids.len(), brief.target_tracks
     ));
+    if seed_directives_active(policy) {
+        explanation.summary.push(format!(
+            "typed seed-relative policy applied against {} reference seed(s)",
+            reference_seeds.len()
+        ));
+    }
     if duration_fallback_used {
         explanation
             .summary
@@ -306,6 +345,8 @@ fn duration_first_selection<'a>(
 fn selection_score(
     track: &TrackCandidate,
     selected: &[&TrackCandidate],
+    reference_seeds: &[&TrackCandidate],
+    seed_baselines: &SeedBaselines,
     brief: &PlaylistBrief,
     policy: &PlaylistPolicy,
 ) -> f64 {
@@ -344,8 +385,13 @@ fn selection_score(
             .count() as f64
             / 3.0
     };
+    let reference_ids: BTreeSet<&str> = reference_seeds
+        .iter()
+        .map(|seed| seed.id.as_str())
+        .collect();
     let novelty = selected
         .iter()
+        .filter(|other| !reference_ids.contains(other.id.as_str()))
         .filter_map(|other| {
             track
                 .embedding
@@ -372,12 +418,87 @@ fn selection_score(
             })
         })
         .unwrap_or(0.5);
-    0.50 * relevance
-        + 0.20 * quality
-        + 0.10 * familiarity
-        + 0.10 * diversity
-        + 0.05 * novelty
-        + 0.05 * duration_fit
+    if seed_directives_active(policy) && !reference_seeds.is_empty() {
+        let seed_relevance = seed_relevance(track, reference_seeds, seed_baselines, policy);
+        0.45 * seed_relevance
+            + 0.30 * relevance
+            + 0.10 * quality
+            + 0.05 * familiarity
+            + 0.05 * diversity
+            + 0.025 * novelty
+            + 0.025 * duration_fit
+    } else {
+        0.50 * relevance
+            + 0.20 * quality
+            + 0.10 * familiarity
+            + 0.10 * diversity
+            + 0.05 * novelty
+            + 0.05 * duration_fit
+    }
+}
+
+fn seed_relevance(
+    track: &TrackCandidate,
+    seeds: &[&TrackCandidate],
+    baselines: &SeedBaselines,
+    policy: &PlaylistPolicy,
+) -> f64 {
+    let mut scores = Vec::new();
+    if let Some(similarity) = max_seed_similarity(track, seeds) {
+        match policy.targets.seed_similarity {
+            SeedSimilarityPreference::Avoid => scores.push(1.0 - similarity),
+            SeedSimilarityPreference::Neutral => {}
+            SeedSimilarityPreference::Prefer => scores.push(similarity),
+        }
+    }
+    for (actual, baseline, direction, margin) in [
+        (
+            track.energy,
+            baselines.energy,
+            policy.targets.relative_energy,
+            policy.targets.relative_energy_margin,
+        ),
+        (
+            track.arousal,
+            baselines.arousal,
+            policy.targets.relative_arousal,
+            policy.targets.relative_arousal_margin,
+        ),
+        (
+            track.tension,
+            baselines.tension,
+            policy.targets.relative_tension,
+            policy.targets.relative_tension_margin,
+        ),
+        (
+            track.vocalness,
+            baselines.vocalness,
+            policy.targets.relative_vocalness,
+            policy.targets.relative_vocalness_margin,
+        ),
+    ] {
+        if direction != RelativeDirection::Any {
+            scores.push(
+                actual
+                    .zip(baseline)
+                    .map(|(value, reference)| {
+                        let target = match direction {
+                            RelativeDirection::Lower => reference - margin,
+                            RelativeDirection::Similar | RelativeDirection::Any => reference,
+                            RelativeDirection::Higher => reference + margin,
+                        }
+                        .clamp(0.0, 1.0);
+                        (1.0 - (value - target).abs()).clamp(0.0, 1.0)
+                    })
+                    .unwrap_or(0.0),
+            );
+        }
+    }
+    if scores.is_empty() {
+        0.5
+    } else {
+        scores.iter().sum::<f64>() / scores.len() as f64
+    }
 }
 
 fn within_caps(

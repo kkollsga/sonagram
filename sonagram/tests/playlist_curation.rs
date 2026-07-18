@@ -6,8 +6,9 @@
 //! It is built from a frozen TrackAnalysis record; no audio is committed.
 
 use sonagram::curation::{
-    audit_playlist, curate_playlist, explain_playlist, profile_library, PlaylistBrief,
-    PlaylistArc, PlaylistPolicy, PlaylistPreset,
+    audit_playlist, audit_playlist_for_brief, curate_playlist, explain_playlist,
+    profile_library, PlaylistArc, PlaylistBrief, PlaylistPolicy, PlaylistPreset,
+    RelativeDirection, SeedRole, SeedSimilarityPreference,
 };
 use sonagram::graph::{self, LibraryInfo};
 use sonagram::playlist;
@@ -72,6 +73,41 @@ fn graph_from(records: Vec<AnalysisRecord>) -> std::sync::Arc<kglite::api::DirGr
 
 fn ids() -> Vec<String> {
     (0..12).map(|i| format!("{i:064x}")).collect()
+}
+
+fn seed_intent_records() -> Vec<AnalysisRecord> {
+    let mut out = records()[..5].to_vec();
+    let embeddings = [0.0, 0.05, 1.0, 0.02, 0.01];
+    let energies = [0.90, 0.25, 0.10, 1.00, 0.90];
+    for (index, record) in out.iter_mut().enumerate() {
+        let tags = record.tags.as_mut().unwrap();
+        tags.artist = Some(format!("Seed Artist {index}"));
+        tags.album = Some(format!("Seed Album {index}"));
+        tags.title = Some(format!("Seed Intent Track {index}"));
+        record.analysis.embedding = Some(vec![embeddings[index]; 48]);
+        record.analysis.energy = Some(energies[index]);
+    }
+    out
+}
+
+fn category_records() -> Vec<AnalysisRecord> {
+    let mut out = records()[..5].to_vec();
+    let genres = ["Ambient", "ambient", "Rock", "Ambient", "Ambient"];
+    let years = [2004, 2008, 2006, 1996, 2009];
+    for (index, record) in out.iter_mut().enumerate() {
+        let tags = record.tags.as_mut().unwrap();
+        tags.artist = Some(if index == 4 {
+            "Blocked Artist".into()
+        } else {
+            format!("Category Artist {index}")
+        });
+        tags.album = Some(format!("Category Album {index}"));
+        tags.title = Some(format!("Category Track {index}"));
+        tags.genre = Some(genres[index].into());
+        tags.year = Some(years[index]);
+        tags.original_year = None;
+    }
+    out
 }
 
 #[test]
@@ -375,6 +411,195 @@ fn independent_audit_reports_artist_spacing_positions() {
         .find(|issue| issue.code == "artist_gap")
         .expect("artist gap must be enforced by independent audit");
     assert_eq!(issue.positions, vec![1, 3]);
+}
+
+#[test]
+fn reference_seed_prefers_a_similar_but_calmer_track() {
+    let records = seed_intent_records();
+    let graph = graph_from(records.clone());
+    let brief = PlaylistBrief {
+        target_tracks: 1,
+        seed_ids: vec![format!("{:064x}", 0)],
+        seed_role: SeedRole::Reference,
+        ..PlaylistBrief::default()
+    };
+    let mut policy = PlaylistPolicy::default();
+    policy.eligibility.allow_low_quality = true;
+    policy.targets.seed_similarity = SeedSimilarityPreference::Prefer;
+    policy.targets.relative_energy = RelativeDirection::Lower;
+    policy.targets.relative_energy_margin = 0.10;
+    policy.transition.arc = PlaylistArc::None;
+    policy.audit.min_unique_artist_ratio = 0.0;
+    policy.audit.max_artist_share = 1.0;
+    policy.audit.max_album_share = 1.0;
+    policy.audit.min_mean_transition_score = 0.0;
+    policy.audit.min_worst_transition_score = 0.0;
+
+    let result = curate_playlist(&graph, &brief, &policy).unwrap();
+    assert!(result.exportable, "{:?}", result.audit.issues);
+    assert_eq!(result.track_ids, vec![format!("{:064x}", 1)]);
+    assert!(!result.track_ids.contains(&brief.seed_ids[0]));
+    assert!(result
+        .explanation
+        .summary
+        .iter()
+        .any(|line| line.contains("typed seed-relative policy")));
+    let contributions = &result.explanation.tracks[0].contributions;
+    assert!(contributions.iter().any(|item| item.component == "seed_similarity"));
+    assert!(contributions
+        .iter()
+        .any(|item| item.component == "seed_energy_baseline"));
+    assert!(contributions
+        .iter()
+        .any(|item| item.component == "seed_energy_delta" && item.value < 0.0));
+
+    let mut reversed = records;
+    reversed.reverse();
+    let again = curate_playlist(&graph_from(reversed), &brief, &policy).unwrap();
+    assert_eq!(result.track_ids, again.track_ids);
+
+    let violating = vec![format!("{:064x}", 3)];
+    let audit = audit_playlist_for_brief(&graph, &violating, &brief, &policy).unwrap();
+    assert!(audit
+        .issues
+        .iter()
+        .any(|issue| issue.code == "seed_relative_not_lower"));
+
+    let equal_energy = vec![format!("{:064x}", 4)];
+    let audit = audit_playlist_for_brief(&graph, &equal_energy, &brief, &policy).unwrap();
+    assert!(audit
+        .issues
+        .iter()
+        .any(|issue| issue.code == "seed_relative_not_lower"));
+}
+
+#[test]
+fn categorical_policy_is_enforced_by_selection_and_independent_audit() {
+    let graph = graph_from(category_records());
+    let brief = PlaylistBrief {
+        target_tracks: 2,
+        ..PlaylistBrief::default()
+    };
+    let mut policy = PlaylistPolicy::default();
+    policy.eligibility.allow_low_quality = true;
+    policy.eligibility.include_genres = vec![" AMBIENT ".into()];
+    policy.eligibility.include_decades = vec!["2000S".into()];
+    policy.eligibility.exclude_artists = vec!["blocked artist".into()];
+    policy.transition.arc = PlaylistArc::None;
+    policy.audit.min_unique_artist_ratio = 0.0;
+    policy.audit.max_artist_share = 1.0;
+    policy.audit.max_album_share = 1.0;
+    policy.audit.min_mean_transition_score = 0.0;
+    policy.audit.min_worst_transition_score = 0.0;
+
+    let result = curate_playlist(&graph, &brief, &policy).unwrap();
+    assert!(result.exportable, "{:?}", result.audit.issues);
+    assert_eq!(
+        result.track_ids.iter().cloned().collect::<std::collections::BTreeSet<_>>(),
+        [format!("{:064x}", 0), format!("{:064x}", 1)]
+            .into_iter()
+            .collect()
+    );
+
+    let violating = vec![
+        format!("{:064x}", 2),
+        format!("{:064x}", 3),
+        format!("{:064x}", 4),
+    ];
+    let audit = audit_playlist(&graph, &violating, &policy).unwrap();
+    let codes: Vec<&str> = audit.issues.iter().map(|issue| issue.code.as_str()).collect();
+    assert!(codes.contains(&"genre_not_included"), "{codes:?}");
+    assert!(codes.contains(&"decade_not_included"), "{codes:?}");
+    assert!(codes.contains(&"artist_excluded"), "{codes:?}");
+}
+
+#[test]
+fn old_policy_and_brief_json_default_new_intent_fields() {
+    let mut brief = serde_json::to_value(PlaylistBrief::default()).unwrap();
+    brief.as_object_mut().unwrap().remove("seed_role");
+    brief.as_object_mut().unwrap().remove("unsupported_intents");
+    let brief: PlaylistBrief = serde_json::from_value(brief).unwrap();
+    assert_eq!(brief.seed_role, SeedRole::Pinned);
+
+    let mut policy = serde_json::to_value(PlaylistPolicy::default()).unwrap();
+    let eligibility = policy["eligibility"].as_object_mut().unwrap();
+    for field in [
+        "include_artists",
+        "exclude_artists",
+        "include_genres",
+        "exclude_genres",
+        "include_styles",
+        "exclude_styles",
+        "include_decades",
+        "exclude_decades",
+        "min_year",
+        "max_year",
+    ] {
+        eligibility.remove(field);
+    }
+    let targets = policy["targets"].as_object_mut().unwrap();
+    for field in [
+        "seed_similarity",
+        "min_seed_similarity",
+        "relative_energy",
+        "relative_energy_margin",
+        "relative_arousal",
+        "relative_arousal_margin",
+        "relative_tension",
+        "relative_tension_margin",
+        "relative_vocalness",
+        "relative_vocalness_margin",
+    ] {
+        targets.remove(field);
+    }
+    let policy: PlaylistPolicy = serde_json::from_value(policy).unwrap();
+    assert_eq!(policy.targets.seed_similarity, SeedSimilarityPreference::Neutral);
+    assert!(policy.eligibility.include_genres.is_empty());
+}
+
+#[test]
+fn unusable_seed_measurements_are_structured_infeasibility() {
+    let mut records = seed_intent_records()[..2].to_vec();
+    for record in &mut records {
+        record.analysis.embedding = None;
+        record.analysis.energy = None;
+    }
+    let graph = graph_from(records);
+    let brief = PlaylistBrief {
+        target_tracks: 1,
+        seed_ids: vec![format!("{:064x}", 0)],
+        seed_role: SeedRole::Reference,
+        ..PlaylistBrief::default()
+    };
+    let mut policy = PlaylistPolicy::default();
+    policy.eligibility.allow_low_quality = true;
+    policy.targets.seed_similarity = SeedSimilarityPreference::Prefer;
+    policy.targets.relative_energy = RelativeDirection::Similar;
+    policy.transition.arc = PlaylistArc::None;
+    policy.audit.min_unique_artist_ratio = 0.0;
+
+    let result = curate_playlist(&graph, &brief, &policy).unwrap();
+    let codes: Vec<&str> = result.audit.issues.iter().map(|item| item.code.as_str()).collect();
+    assert!(!result.exportable);
+    assert!(codes.contains(&"seed_similarity_missing"), "{codes:?}");
+    assert!(codes.contains(&"seed_relative_missing"), "{codes:?}");
+}
+
+#[test]
+fn unsupported_or_unknown_intent_never_falls_through_to_agent_guesswork() {
+    let graph = graph();
+    let brief = PlaylistBrief {
+        target_tracks: 1,
+        unsupported_intents: vec!["lyrical theme: no breakup songs".into()],
+        ..PlaylistBrief::default()
+    };
+    let result = curate_playlist(&graph, &brief, &PlaylistPolicy::default()).unwrap();
+    assert!(!result.exportable);
+    assert!(result.audit.issues.iter().any(|issue| issue.code == "unsupported_intent"));
+
+    let unknown = r#"{"preset":"focus","target_tracks":1,"lyrical_theme":"hopeful"}"#;
+    let error = serde_json::from_str::<PlaylistBrief>(unknown).unwrap_err();
+    assert!(error.to_string().contains("unknown field `lyrical_theme`"));
 }
 
 #[test]

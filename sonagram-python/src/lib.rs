@@ -35,7 +35,9 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use kglite::api::DirGraph;
-use sonagram::curation::{self as core_curation, PlaylistBrief, PlaylistPolicy};
+use sonagram::curation::{
+    self as core_curation, PlaylistBrief, PlaylistPolicy, PlaylistPreset,
+};
 use sonagram::enrich::{self, EnrichOptions, EnrichReport, EnrichmentData};
 use sonagram::graph::{self, LibraryInfo, SourceInput};
 use sonagram::pipeline;
@@ -524,6 +526,16 @@ fn profile_library(py: Python<'_>, kgl_path: PathBuf) -> PyResult<Py<PyAny>> {
     to_python_json(py, &profile)
 }
 
+/// Return the complete versioned policy for a named preset.
+#[pyfunction]
+fn curation_policy(py: Python<'_>, preset: &str) -> PyResult<Py<PyAny>> {
+    let preset = serde_json::from_value::<PlaylistPreset>(serde_json::Value::String(
+        preset.to_ascii_lowercase(),
+    ))
+    .map_err(|error| PyValueError::new_err(format!("invalid preset: {error}")))?;
+    to_python_json(py, &PlaylistPolicy::for_preset(preset))
+}
+
 /// Curate from a JSON-compatible brief and optional resolved policy.
 #[pyfunction]
 #[pyo3(signature = (kgl_path, brief, policy=None))]
@@ -548,47 +560,79 @@ fn curate_playlist(
     to_python_json(py, &result)
 }
 
-/// Audit an ordered id list against an optional JSON-compatible policy.
+/// Audit an ordered id list against an optional policy and original brief.
 #[pyfunction]
-#[pyo3(signature = (kgl_path, track_ids, policy=None))]
+#[pyo3(signature = (kgl_path, track_ids, policy=None, brief=None))]
 fn audit_playlist(
     py: Python<'_>,
     kgl_path: PathBuf,
     track_ids: Vec<String>,
     policy: Option<Py<PyAny>>,
+    brief: Option<Py<PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     validate_ordered_track_ids(&track_ids).map_err(PyValueError::new_err)?;
-    let policy = match policy {
-        Some(value) => from_python_json(py, value.bind(py), "policy")?,
-        None => PlaylistPolicy::default(),
+    let brief = match brief {
+        Some(value) => Some(from_python_json(py, value.bind(py), "brief")?),
+        None => None,
+    };
+    let policy = match (policy, brief.as_ref()) {
+        (Some(value), Some(brief)) => resolve_curation_policy(
+            brief,
+            Some(from_python_json(py, value.bind(py), "policy")?),
+        )
+        .map_err(PyValueError::new_err)?,
+        (Some(value), None) => from_python_json(py, value.bind(py), "policy")?,
+        (None, Some(brief)) => PlaylistPolicy::for_preset(brief.preset),
+        (None, None) => PlaylistPolicy::default(),
     };
     let audit = py
         .detach(move || {
             let graph = load_saved_graph(&kgl_path)?;
-            core_curation::audit_playlist(&graph, &track_ids, &policy)
+            match brief {
+                Some(brief) => {
+                    core_curation::audit_playlist_for_brief(&graph, &track_ids, &brief, &policy)
+                }
+                None => core_curation::audit_playlist(&graph, &track_ids, &policy),
+            }
         })
         .map_err(to_pyerr)?;
     to_python_json(py, &audit)
 }
 
-/// Explain an ordered id list against an optional JSON-compatible policy.
+/// Explain an ordered id list against an optional policy and original brief.
 #[pyfunction]
-#[pyo3(signature = (kgl_path, track_ids, policy=None))]
+#[pyo3(signature = (kgl_path, track_ids, policy=None, brief=None))]
 fn explain_playlist(
     py: Python<'_>,
     kgl_path: PathBuf,
     track_ids: Vec<String>,
     policy: Option<Py<PyAny>>,
+    brief: Option<Py<PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     validate_ordered_track_ids(&track_ids).map_err(PyValueError::new_err)?;
-    let policy = match policy {
-        Some(value) => from_python_json(py, value.bind(py), "policy")?,
-        None => PlaylistPolicy::default(),
+    let brief = match brief {
+        Some(value) => Some(from_python_json(py, value.bind(py), "brief")?),
+        None => None,
+    };
+    let policy = match (policy, brief.as_ref()) {
+        (Some(value), Some(brief)) => resolve_curation_policy(
+            brief,
+            Some(from_python_json(py, value.bind(py), "policy")?),
+        )
+        .map_err(PyValueError::new_err)?,
+        (Some(value), None) => from_python_json(py, value.bind(py), "policy")?,
+        (None, Some(brief)) => PlaylistPolicy::for_preset(brief.preset),
+        (None, None) => PlaylistPolicy::default(),
     };
     let explanation = py
         .detach(move || {
             let graph = load_saved_graph(&kgl_path)?;
-            core_curation::explain_playlist(&graph, &track_ids, &policy)
+            match brief {
+                Some(brief) => core_curation::explain_playlist_for_brief(
+                    &graph, &track_ids, &brief, &policy,
+                ),
+                None => core_curation::explain_playlist(&graph, &track_ids, &policy),
+            }
         })
         .map_err(to_pyerr)?;
     to_python_json(py, &explanation)
@@ -620,6 +664,7 @@ fn _sonagram(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(scan_and_build, m)?)?;
     m.add_function(wrap_pyfunction!(export_m3u, m)?)?;
     m.add_function(wrap_pyfunction!(profile_library, m)?)?;
+    m.add_function(wrap_pyfunction!(curation_policy, m)?)?;
     m.add_function(wrap_pyfunction!(curate_playlist, m)?)?;
     m.add_function(wrap_pyfunction!(audit_playlist, m)?)?;
     m.add_function(wrap_pyfunction!(explain_playlist, m)?)?;

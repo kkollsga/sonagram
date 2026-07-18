@@ -2,7 +2,7 @@
 
 You are an AI agent with MCP access to a **sonagram** knowledge graph: a music
 library mapped into [kglite](https://github.com/kkollsga/kglite) and served by
-`kglite-mcp-server`. You have two tools that matter:
+`kglite-mcp-server`. Three MCP tools matter:
 
 - **`cypher_query`** — run one openCypher query, get up to ~15 rows inline.
   It takes a single `query` string and **nothing else**: there is no parameter
@@ -10,6 +10,48 @@ library mapped into [kglite](https://github.com/kkollsga/kglite) and served by
   `[0.1, ...]`) — a `$param` reference errors with `Missing parameter`.
 - **`graph_overview`** — the node/edge inventory with live counts and sample
   ids. Call it first on an unfamiliar graph to see the library's shape.
+- **`music_library_profile`** — fast eligible counts, per-axis coverage, and
+  means before unusual curation requests.
+
+KGLite 0.14.0 does not expose Sonagram's typed curate/audit/store operations as
+MCP tools. Final playlist work therefore requires a host shell or Python
+runtime; an MCP-only host must report that limitation and never hand-author IDs.
+
+These graph tools are for exploration and explanation. For a final playlist,
+the agent translates intent into a `PlaylistBrief` / preset and invokes
+Sonagram's curation engine. Sonagram—not the agent—owns candidate selection,
+Song/version deduplication, sequencing, repair, audit, and stored provenance.
+Never hand-select or reorder final IDs from Cypher rows.
+
+## Playlist curation contract
+
+Use `sonagram profile --format json` for calibration, then call `sonagram
+curate --preset <focus|party|workout|chill|discovery|general> --tracks <N>
+--name "..." --description "..." --format json`. Python exposes the same
+contract as `profile_library`, `curate_playlist`, `audit_playlist`, and
+`explain_playlist` over a saved `.kgl` path.
+
+Resolve the complete versioned preset with `sonagram policy --preset <name>
+--format json` or Python `sonagram.curation_policy(name)`. The typed request
+contract supports:
+
+- seed roles `pinned` (default), `reference`, and `pinned_and_reference`;
+- positive/negative seed similarity, optional minimum similarity, and
+  `lower|similar|any|higher` targets for energy, arousal, tension, and vocalness;
+  optional per-feature margins require a measurable relative change;
+- include/exclude filters for artists, genres, detected styles, and decades,
+  plus exact year bounds.
+
+Reference-only seeds anchor ranking and hard relative gates but are never
+exported. Curated output is re-audited against the brief, so the request cannot
+disappear after selection. Unknown JSON fields are rejected; put a known
+unenforceable constraint in `brief.unsupported_intents` to receive a structured
+`unsupported_intent` failure instead of improvising IDs.
+
+A result is deliverable only when `exportable` and `audit.passed` are true.
+Never silently relax hard constraints or repair a poor result with private
+agent logic. If a library-curated result is weak despite passing, capture the
+measurable defect as a Sonagram library issue.
 
 ## Mental model
 Every audio file is one **`Track`** node — the fat hub. Every signal an agent
@@ -213,8 +255,8 @@ store, not as a property — `t.embedding` is null; only `embedding_norm(t,
 'similarity')` exposes a scalar). Obtain a seed vector out-of-band (e.g. the
 Python API) or just use `SIMILAR_TO`.
 
-**4 — Sequence** (harmonic step + energy ramp, for a DJ set) — walk to a
-Camelot-adjacent key and pick a higher-energy, tempo-close track:
+**4 — Inspect sequence evidence** — a Camelot-adjacent, energy-rising query is
+useful for explaining possible transitions. It is not a final sequencer:
 ```cypher
 MATCH (a:Track)-[:IN_KEY]->(k1:Key)-[e:CAMELOT_ADJACENT]->(k2:Key)<-[:IN_KEY]-(b:Track)
 WHERE a.title = 'Just Like a Woman' AND b.is_music AND b.is_canonical
@@ -223,34 +265,23 @@ RETURN b.title, b.artist_name, b.bpm, b.energy, e.transition
 ORDER BY b.energy LIMIT 10
 ```
 
-## Materializing a playlist
-A query answers *which tracks in what order*; you turn that into a playable
-`.m3u8` outside the graph, via the sonagram CLI or Python. Both take the
-`content_hash` values a query returns (`RETURN t.content_hash`, or `RETURN t`).
+## Creating and materializing a playlist
 
-CLI — pass the query directly (order is preserved verbatim, never re-sorted):
+For agent-created playlists, use the curation engine directly:
+
 ```sh
-sonagram playlist <library_root> music.kgl \
-  --cypher 'MATCH (t:Track) WHERE t.bpm >= 110 AND t.bpm < 125 RETURN t.content_hash ORDER BY t.energy DESC' \
-  --out house.m3u8
-# or from an explicit id list you already have:
-sonagram playlist <library_root> music.kgl --ids <hash1>,<hash2> --out set.m3u8
+sonagram curate --preset focus --tracks 25 \
+  --name "Focused Thinking" --description "focused work" --format json
 ```
 
-Python:
-```python
-import sonagram
-# from a query:
-sonagram.export_m3u("music.kgl", "<library_root>", "house.m3u8",
-                    cypher="MATCH (t:Track) WHERE t.bpm>=110 AND t.bpm<125 "
-                           "RETURN t.content_hash ORDER BY t.energy DESC")
-# or from ids:
-sonagram.export_m3u("music.kgl", "<library_root>", "set.m3u8",
-                    track_ids=["<hash1>", "<hash2>"])
-```
-`content_hash` is the stable join key end to end: a query returns hashes → export
-resolves each hash's on-disk path (library_root + relative path) into the
-playlist. A hash matching no Track is reported, not silently dropped.
+The stored `.m3u8` preserves the returned order and its `.meta.json` records the
+brief, resolved policy, audit, explanation, repair attempts, graph path, and
+ordered IDs. Use `sonagram playlists show <slug>` to retrieve that evidence.
+
+The lower-level `sonagram playlist --ids/--cypher` and Python `export_m3u`
+remain available for explicit human-authored/manual exports. They preserve
+caller order but do not curate it, so agents must not use them as a substitute
+for `curate_playlist`.
 
 ## Pitfalls
 - **Keys are trustworthy** (sonara ≥ 0.2.3 / graph schema v2; the old F-major
@@ -326,10 +357,10 @@ playlist. A hash matching no Track is reported, not silently dropped.
 - **One `SIMILAR_TO` hop spans only ±~0.06 energy.** For "like this but
   calmer/wilder", chain: `-[:SIMILAR_TO*1..2]->` with a `DISTINCT` and your
   energy bound — that's the real wind-down archetype.
-- **Multi-constraint ordering isn't a Cypher `ORDER BY`.** A dual ramp (smooth
-  BPM steps AND strictly climbing energy) needs candidate export + client-side
-  selection (the two signals are typically uncorrelated). Fetch rows, plan
-  outside, then export with `--ids` (order is preserved verbatim).
+- **Multi-constraint ordering isn't a Cypher `ORDER BY`.** This is why final
+  ordering belongs to Sonagram's pairwise sequencer: it combines embeddings,
+  feature deltas, reliable tempo/key evidence, artist spacing, and an explicit
+  arc under one deterministic audit.
 - **Python results are a `kglite.ResultView`**: use `.to_dicts()` /
   `.to_df()` / `.scalar()` / `.one()`. Printed reprs TRUNCATE rows and long
   strings (content hashes become `"8fdb…d63"`) — never copy values from a repr;
@@ -350,18 +381,15 @@ playlist. A hash matching no Track is reported, not silently dropped.
 - **Close values need full precision**: two tracks can both display `0.462`
   yet differ at the 5th decimal — don't judge strict ordering from rounded
   output.
-- **For any hand-built arc (ramp, breather, harmonic chain), `--ids` is the
-  primary export path**, not `--cypher`: export candidates (`.to_dicts()`),
-  order client-side, feed the hash list — order is preserved verbatim. A
-  12-track Camelot chain or a mood arc with a mid-set dip cannot be expressed
-  as one `ORDER BY`.
+- **Never hand-build a final arc.** A ramp, breather, harmonic chain, or mood
+  dip cannot be expressed as one `ORDER BY`; express the requested arc in the
+  typed policy and let Sonagram sequence, repair, and audit it.
 - **Mood-playlist recipe** (feel-good, chill, angry…): begin with
   `t.is_music AND t.is_canonical`, require the mood axes you use to be non-null,
   and curate from `arousal_index`/`tension_index` percentiles plus curve features
   such as `flow_smoothness` and `chord_entropy`. Treat `valence_index` as a
-  ranking hint, then cross-check with `mood_*`, `energy`, and `vocalness` for
-  singability. Build the arc client-side. Check `duration_sec` — LP/extended
-  cuts (7–8 min) hide in compilations and derail pacing.
+  ranking hint, then cross-check with `mood_*`, `energy`, and `vocalness` when
+  diagnosing results. The curation policy owns the arc and duration bounds.
 - **Vibe-over-time recipe**: cross-tab Genre × Decade to find a vibe spanning
   eras, hold it with a tight `acousticness`/`energy` band, and read
   `avg(loudness_lufs)` per decade for production evolution. HARD RULE, now
@@ -390,7 +418,8 @@ playlist. A hash matching no Track is reported, not silently dropped.
   pop clusters at 0.50–0.63, too flat to carry an arc; build arcs from musical
   character. And the scalar UNDERSELLS sparse guitar-band anthems (Mr.
   Brightside 0.58, Don't Stop Me Now 0.55 — the biggest felt peaks in the
-  room): hand-rank the critical peak slots. For intra-track builds
+  room). A poor peak slot is a measurable library-selection defect, not a cue
+  to hand-rank the result. For intra-track builds
   ("a song that swells"), cross high `dynamic_range_db` (>20) with your own
   knowledge of the song — whole-track energy averages hide crescendos.
 - **`duration_sec` is the trustworthy workhorse** — reliable everywhere, the
@@ -398,37 +427,19 @@ playlist. A hash matching no Track is reported, not silently dropped.
   actively misleading (a fingerpicked ballad reads 157) — never sequence calm
   material by bpm.
 - **Compilation folders can beat scalars**: `genre_tag` and album names often
-  encode pre-curated mood buckets ("Deep Focus", "Morning Coffee") — exploit
-  them deliberately for mood/focus asks.
+  encode pre-curated mood buckets ("Deep Focus", "Morning Coffee"). If the
+  library engine misses that signal, record it as a selection-feature gap.
 
-## Quality bar (every playlist, before you export)
-QC audits grade on these; treat them as requirements, not suggestions:
-0. **Filter `t.is_music AND t.is_canonical` and prefer
-   `quality_tier <> 'low'` by DEFAULT.**
-   On collector libraries the candidate pool is otherwise flooded with session
-   chatter/non-music, outtakes, bootlegs, and duplicate takes that pass scalar
-   filters. Only drop the canonical guard when the brief explicitly wants
-   rarities/outtakes; keep the music guard. For mood asks, also require each used
-   axis `IS NOT NULL`, curate on `arousal_index`/`tension_index` percentiles +
-   curve features like `flow_smoothness` and `chord_entropy`, and treat
-   `valence_index` as a ranking hint, never a hard filter. For a familiar or
-   mainstream brief, optionally order candidates by `has_lastfm_match DESC,
-   popularity DESC, recording_quality DESC`; popularity is song-level and must
-   not be presented as proof of a particular master.
-1. **Duration check every pick.** Casual/mood playlists default to
-   radio-length cuts (`duration_sec <= 330`) unless the brief wants epics —
-   a 8:15 LP cut mid-road-trip reads as a pacing defect. Always `RETURN
-   t.duration_sec` in your candidate query.
-2. **Era claims: audit `era_source` first, then fall back to YOUR knowledge.**
-   When `t.era_source = 'original_year'` the decade is the true release year —
-   graph-auditable, trust it. When `era_source = 'file_year'` (the common case)
-   `year` is the file tag, which on compilations/reissues is the reissue date (a
-   1958 Sinatra recording tagged 2011); validate each such pick against what you
-   know about the artist/recording and drop picks you can't vouch for.
-3. **Critical slots need style-world cohesion, not just scalar fit.** The
-   finale of a singalong set, the seed-side of a "like this" set, the peak of
-   a genre set: check the pick belongs to the brief's musical world (genre
-   family + your own knowledge of the track), because scalars will happily
-   pass a rap track into a disco set.
-4. **Sanity-read the final tracklist as a human would** — artist/title, in
-   order, out loud. If any pick needs a defensive explanation, swap it.
+## Acceptance evidence (diagnose; never hand-fix)
+
+The library audit—not an agent checklist—is the export gate. It enforces music
+and canonical eligibility, quality/duration bounds, Track/Song deduplication,
+artist/album concentration and spacing, transitions, and requested arc. Inspect
+its metrics and the explanation before claiming quality.
+
+Some human-facing claims remain useful diagnostics: an era request should be
+supported by `era_source = 'original_year'`; a genre-critical peak should belong
+to the requested style world; an unexpectedly long cut can still feel wrong for
+the brief. Sanity-read artist/title/order and report concrete mismatches. If a
+passing playlist is poor, do **not** drop, swap, or reorder tracks—file the
+missing constraint/signal as a Sonagram library defect and improve the engine.

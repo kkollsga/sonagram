@@ -1,8 +1,9 @@
 //! The embedded `sonagram-playlist` skill + the `sonagram skill show|install`
 //! subcommands (P19 — cold-start bootstrap).
 //!
-//! The repo's **portable** skill copy (`skills/sonagram-playlist/SKILL.md`) is
-//! the single source of truth: it is compiled INTO the binary via `include_str!`,
+//! The packaged asset (`sonagram/assets/sonagram-playlist.md`) is compiled INTO
+//! the binary via `include_str!`; the repo-facing portable skill at
+//! `skills/sonagram-playlist/SKILL.md` is byte-checked against it in tests,
 //! so `pip install sonagram` ships the skill and `sonagram skill install` writes
 //! it to `~/.claude/skills/` with no repo checkout. This is what carries a cold
 //! prompt ("make me a work playlist") from a bare install to a delivered
@@ -20,10 +21,9 @@ use std::path::{Path, PathBuf};
 use crate::config::Config;
 use crate::{Result, SonagramError};
 
-/// The portable `sonagram-playlist` skill, embedded at compile time. The repo
-/// copy is the source of truth; this is exactly what `skill install` writes and
-/// `skill show` prints.
-pub const SKILL_MD: &str = include_str!("../../skills/sonagram-playlist/SKILL.md");
+/// The portable `sonagram-playlist` skill, embedded at compile time. This is
+/// exactly what `skill install` writes and `skill show` prints.
+pub const SKILL_MD: &str = include_str!("../assets/sonagram-playlist.md");
 
 /// The skill's install slug — the directory under a skills root, and the name an
 /// agent recognizes it by.
@@ -173,6 +173,11 @@ mod tests {
         assert!(SKILL_MD.contains(PLACEHOLDER_LIBRARY_ROOT));
         // The library-detection ladder (P19) is embedded.
         assert!(SKILL_MD.contains("Library detection"));
+        let repo_copy = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../skills/sonagram-playlist/SKILL.md");
+        if repo_copy.is_file() {
+            assert_eq!(std::fs::read_to_string(repo_copy).unwrap(), SKILL_MD);
+        }
     }
 
     #[test]

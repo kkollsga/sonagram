@@ -28,6 +28,18 @@ with tempfile.TemporaryDirectory() as tmp:
     assert profile["tracks"] >= 12
     assert profile["stats"]["energy"]["present"] > 0
 
+    focus_policy = sonagram.curation_policy("focus")
+    assert focus_policy["preset"] == "focus"
+    assert focus_policy["version"] == 1
+    assert focus_policy["targets"]["seed_similarity"] == "neutral"
+    assert focus_policy["eligibility"]["include_genres"] == []
+    try:
+        sonagram.curation_policy("not-a-preset")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unknown preset must raise ValueError")
+
     brief = {
         "preset": "general",
         "target_tracks": 3,
@@ -53,8 +65,16 @@ with tempfile.TemporaryDirectory() as tmp:
     assert curated["exportable"] is True, curated["audit"]["issues"]
     assert len(curated["track_ids"]) == 3
 
-    audit = sonagram.audit_playlist(str(graph_path), curated["track_ids"], policy)
+    audit = sonagram.audit_playlist(
+        str(graph_path), curated["track_ids"], policy, brief=brief
+    )
     assert audit == curated["audit"]
+    short_audit = sonagram.audit_playlist(
+        str(graph_path), curated["track_ids"][:-1], policy, brief=brief
+    )
+    assert any(
+        issue["code"] == "target_track_count" for issue in short_audit["issues"]
+    )
     explanation = sonagram.explain_playlist(
         str(graph_path), curated["track_ids"], policy
     )

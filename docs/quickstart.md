@@ -50,9 +50,15 @@ sonagram sources add ~/Music   # register a folder (repeatable); ~/.sonagram/con
 sonagram scan                  # scan every source
 sonagram build                 # merge all sources → the central ~/.sonagram/music.kgl
 sonagram status                # freshness of every source + graph (graph_stale)
-sonagram playlist --ids h1,h2,h3 --name "Deep Focus" --description "a calm work set"
+sonagram curate --preset focus --tracks 25 --name "Deep Focus" \
+    --description "a calm work set" --format json
 sonagram playlists             # list stored playlists
+sonagram mcp install           # manifest + revealed music skills
 ```
+
+For seed-relative or categorical requests, start from `sonagram policy
+--preset <name> --format json` (or Python `sonagram.curation_policy`) and amend
+the typed policy; Sonagram still owns the resulting selection and audit.
 
 `sonagram config` shows the resolved graph + playlist-store paths. The explicit
 `<library_root>`-per-command forms below still work for scripting a single
@@ -64,7 +70,8 @@ library.
 sonagram scan   ~/Music                 # walk, hash, analyze → .sonagram/ cache
 sonagram enrich ~/Music                 # optional: fold in Last.fm metadata
 sonagram build  ~/Music music.kgl       # cached analysis → queryable .kgl graph
-kglite-mcp-server --graph music.kgl     # serve the graph to an AI agent over MCP
+sonagram config set graph music.kgl
+sonagram mcp install                    # prints the safe absolute server command
 ```
 
 Each step is **incremental and read-only where it can be**: `scan` re-analyzes
@@ -79,9 +86,9 @@ only changed files, and `enrich` skips already-fetched entities. See the
    `~/Music/.sonagram/lastfm/`. Needs `LASTFM_API_KEY` (env or a `.env` file).
 3. **`build`** maps the cached records into a kglite `.kgl` graph, auto-folding in
    the Last.fm cache when present.
-4. **serve** the `.kgl` to an AI agent with `kglite-mcp-server --graph music.kgl`.
-   The agent explores the graph with `graph_overview` and `cypher_query` — see
-   the [Agent guide](agent-guide.md).
+4. **install MCP assets** with `sonagram mcp install`, then use its printed
+   absolute server command. The agent explores with graph tools but invokes
+   Sonagram's typed engine for every final playlist.
 
 ## Freshness probe for automation
 
@@ -98,7 +105,19 @@ stale / newly-added / deleted tracks and checking each record against the
 current sonara analysis schema — without hashing a file or running analysis.
 Chain it as `status` → `scan`/`build` if needed → query via MCP.
 
-## Materialize a playlist
+## Create a playlist
+
+Let Sonagram select, sequence, audit, explain, and store the result:
+
+```bash
+sonagram curate --preset focus --tracks 25 \
+  --name "Focused Thinking" --description "focused work" --format json
+```
+
+The older materializer below is for explicit human-authored/manual exports; it
+preserves caller order but does not curate it.
+
+## Manual materialization
 
 Once an agent (or you) has a query that answers *which tracks, in what order*,
 turn it into a playable `.m3u8`. Track order is preserved verbatim, never
@@ -128,5 +147,4 @@ programmatic equivalent.
 `skills/sonagram-playlist/` in the repo ships an invocable skill for Claude
 Code: copy it to `~/.claude/skills/` (filling in your library path), and "make
 me a work playlist" becomes a one-liner — the skill chains `status` →
-`scan`/`build` (only when stale) → graph curation per the
-[Agent guide](agent-guide.md) → `.m3u8` export.
+`scan`/`build` (only when stale) → typed library curation/audit → stored `.m3u8`.

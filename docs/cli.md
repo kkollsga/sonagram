@@ -57,6 +57,10 @@ contains.
 
 ## `sonagram playlist`
 
+This is the lower-level materializer for explicit human-authored IDs/queries.
+It preserves caller order but does not curate it. Agents should use `sonagram
+curate` below for final playlists.
+
 ```bash
 sonagram playlist <library_root> <graph.kgl> \
     (--cypher '<query>' | --ids <hash1,hash2,...>) \
@@ -92,6 +96,31 @@ dropped.
 retrievable later with `sonagram playlists`. `--name` is a destination in its own
 right — combine it with `--out`/`--copy-to` to also write those, or use it alone.
 In the config-driven form (no path args), `--name` reads the configured graph.
+
+## `sonagram profile` / `curate` / `audit` / `explain`
+
+```bash
+sonagram profile --format json
+sonagram policy --preset focus --format json
+sonagram curate --preset focus --tracks 25 \
+    --name "Focused Thinking" --description "focused work" --format json
+sonagram audit --ids h1,h2,h3 --preset focus --format json
+sonagram explain --ids h1,h2,h3 --preset focus --format json
+```
+
+These are one deterministic library contract. `profile` reports curation
+coverage/distributions. `curate` resolves a versioned preset policy, selects,
+sequences, repairs, audits, explains, and stores only a passing playlist.
+`audit` and `explain` independently evaluate an existing order. JSON callers
+may pass complete `--brief-json` / `--policy-json` values; a preset mismatch is
+rejected. A failed result is never silently relaxed or saved.
+
+`policy` prints the complete preset DTO for safe typed amendments. Advanced
+briefs distinguish pinned seeds from reference-only anchors; policies support
+seed similarity/relative feature targets plus artist, genre, detected-style,
+decade, and year eligibility. Unknown fields are rejected. Known constraints
+that cannot be enforced belong in `brief.unsupported_intents` and make the
+result structurally non-exportable.
 
 ## `sonagram status`
 
@@ -189,6 +218,20 @@ creating any missing directories. Install personalizes the file from your config
 refuses to overwrite an existing file unless `--force`, and prints a reminder to
 **read and follow the file now, in-session** — skills only auto-load at the next
 session start.
+
+## `sonagram mcp`
+
+```bash
+sonagram mcp install [--force]
+```
+
+Install an auto-detected `<graph>_mcp.yaml` plus five live-gated project skills
+beside the configured graph. Re-running identical assets is a no-op; differing
+operator files require `--force`. The manifest exposes only a dedicated empty
+source sandbox, never the graph/config parent, and prints the absolute executable
+`kglite-mcp-server` sibling from the installed environment when available
+(`RUN (PowerShell)` on Windows). Typed curation remains the
+CLI/Python authority until kglite's downstream domain-tool seam is released.
 
 ## Examples
 

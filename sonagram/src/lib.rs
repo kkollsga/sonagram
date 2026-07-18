@@ -40,6 +40,8 @@ pub mod progress;
 
 pub mod skill;
 
+pub mod mcp;
+
 pub use error::{Result, SonagramError};
 
 /// The sonagram crate version, sourced from `Cargo.toml` at compile time.

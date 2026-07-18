@@ -2,10 +2,11 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use kglite::api::DirGraph;
 
-use super::project::{candidate_map, embedding_similarity, TrackCandidate};
+use super::project::{candidate_map, embedding_similarity, group_key, TrackCandidate};
 use super::types::{
-    AuditIssue, AuditSeverity, PlaylistArc, PlaylistAudit, PlaylistExplanation, PlaylistPolicy,
-    ScoreContribution, TrackExplanation, TransitionScore,
+    AuditIssue, AuditSeverity, PlaylistArc, PlaylistAudit, PlaylistBrief, PlaylistExplanation,
+    PlaylistPolicy, RelativeDirection, ScoreContribution, SeedRole, SeedSimilarityPreference,
+    TrackExplanation, TransitionScore,
 };
 use crate::Result;
 
@@ -265,6 +266,171 @@ pub fn audit_playlist(
     })
 }
 
+/// Audits both the resolved execution policy and the request-specific seed intent.
+///
+/// [`audit_playlist`] remains the backward-compatible policy-only entry point;
+/// curated output uses this stricter variant so seed-relative intent cannot be
+/// lost between selection and export.
+pub fn audit_playlist_for_brief(
+    graph: &DirGraph,
+    track_ids: &[String],
+    brief: &PlaylistBrief,
+    policy: &PlaylistPolicy,
+) -> Result<PlaylistAudit> {
+    let mut audit = audit_playlist(graph, track_ids, policy)?;
+    let candidates = candidate_map(graph)?;
+    let output_ids: BTreeSet<&str> = track_ids.iter().map(String::as_str).collect();
+    for unsupported in &brief.unsupported_intents {
+        audit.issues.push(issue(
+            AuditSeverity::Error,
+            "unsupported_intent",
+            format!("typed curation contract cannot enforce: {unsupported}"),
+            Vec::new(),
+        ));
+    }
+    if brief.target_tracks == 0 {
+        audit.issues.push(issue(
+            AuditSeverity::Error,
+            "invalid_target",
+            "target_tracks must be greater than zero".into(),
+            Vec::new(),
+        ));
+    } else if track_ids.len() != brief.target_tracks {
+        audit.issues.push(issue(
+            AuditSeverity::Error,
+            "target_track_count",
+            format!(
+                "playlist has {} IDs but the brief requires {}",
+                track_ids.len(), brief.target_tracks
+            ),
+            Vec::new(),
+        ));
+    }
+    if audit.total_duration_sec + f64::EPSILON
+        < brief.target_duration_sec.unwrap_or_default() as f64
+    {
+        audit.issues.push(issue(
+            AuditSeverity::Error,
+            "duration_shortfall",
+            format!(
+                "playlist duration {:.0}s is below requested {}s",
+                audit.total_duration_sec,
+                brief.target_duration_sec.unwrap_or_default()
+            ),
+            Vec::new(),
+        ));
+    }
+    if brief.preset != policy.preset {
+        audit.issues.push(issue(
+            AuditSeverity::Error,
+            "preset_mismatch",
+            format!(
+                "brief preset {:?} does not match resolved policy preset {:?}",
+                brief.preset, policy.preset
+            ),
+            Vec::new(),
+        ));
+    }
+    let mut seeds = Vec::new();
+    let mut seen_seeds = BTreeSet::new();
+    for id in &brief.seed_ids {
+        if !seen_seeds.insert(id.as_str()) {
+            audit.issues.push(issue(
+                AuditSeverity::Error,
+                "duplicate_seed",
+                format!("seed {id} occurs more than once"),
+                Vec::new(),
+            ));
+            continue;
+        }
+        let Some(seed) = candidates.get(id) else {
+            audit.issues.push(issue(
+                AuditSeverity::Error,
+                "missing_seed",
+                format!("seed {id} is not in the graph"),
+                Vec::new(),
+            ));
+            continue;
+        };
+        match brief.seed_role {
+            SeedRole::Pinned | SeedRole::PinnedAndReference
+                if !output_ids.contains(id.as_str()) =>
+            {
+                audit.issues.push(issue(
+                    AuditSeverity::Error,
+                    "pinned_seed_missing",
+                    format!("pinned seed {id} is absent from the playlist"),
+                    Vec::new(),
+                ));
+            }
+            SeedRole::Reference if output_ids.contains(id.as_str()) => {
+                audit.issues.push(issue(
+                    AuditSeverity::Error,
+                    "reference_seed_exported",
+                    format!("reference-only seed {id} was exported"),
+                    Vec::new(),
+                ));
+            }
+            _ => {}
+        }
+        if matches!(brief.seed_role, SeedRole::Reference | SeedRole::PinnedAndReference) {
+            seeds.push(seed);
+        }
+    }
+
+    if !(0.0..=1.0).contains(&policy.targets.min_seed_similarity.unwrap_or(0.0)) {
+        audit.issues.push(issue(
+            AuditSeverity::Error,
+            "invalid_seed_similarity",
+            "min_seed_similarity must be between 0 and 1".into(),
+            Vec::new(),
+        ));
+    }
+    for (feature, margin) in [
+        ("energy", policy.targets.relative_energy_margin),
+        ("arousal", policy.targets.relative_arousal_margin),
+        ("tension", policy.targets.relative_tension_margin),
+        ("vocalness", policy.targets.relative_vocalness_margin),
+    ] {
+        if !(0.0..=1.0).contains(&margin) {
+            audit.issues.push(issue(
+                AuditSeverity::Error,
+                "invalid_relative_margin",
+                format!("relative {feature} margin must be between 0 and 1"),
+                Vec::new(),
+            ));
+        }
+    }
+    if seed_directives_active(policy) && seeds.is_empty() {
+        audit.issues.push(issue(
+            AuditSeverity::Error,
+            "seed_target_without_reference",
+            "seed-relative targets require seed_role reference or pinned_and_reference".into(),
+            Vec::new(),
+        ));
+    } else if !seeds.is_empty() {
+        let baselines = SeedBaselines::from_tracks(&seeds);
+        for (position, id) in track_ids.iter().enumerate() {
+            if seen_seeds.contains(id.as_str()) {
+                continue;
+            }
+            let Some(track) = candidates.get(id) else {
+                continue;
+            };
+            for (code, message) in seed_constraint_issues(track, &seeds, &baselines, policy) {
+                audit.issues.push(issue(
+                    AuditSeverity::Error,
+                    code,
+                    message,
+                    vec![position + 1],
+                ));
+            }
+        }
+    }
+    audit.passed = !audit.issues.iter().any(|item| item.severity == AuditSeverity::Error);
+    Ok(audit)
+}
+
 pub fn explain_playlist(
     graph: &DirGraph,
     track_ids: &[String],
@@ -299,6 +465,102 @@ pub fn explain_playlist(
     })
 }
 
+pub fn explain_playlist_for_brief(
+    graph: &DirGraph,
+    track_ids: &[String],
+    brief: &PlaylistBrief,
+    policy: &PlaylistPolicy,
+) -> Result<PlaylistExplanation> {
+    let candidates = candidate_map(graph)?;
+    let references: Vec<&TrackCandidate> = if matches!(
+        brief.seed_role,
+        SeedRole::Reference | SeedRole::PinnedAndReference
+    ) {
+        brief
+            .seed_ids
+            .iter()
+            .filter_map(|id| candidates.get(id))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let baselines = SeedBaselines::from_tracks(&references);
+    let mut explanation = explain_playlist(graph, track_ids, policy)?;
+    if !references.is_empty() && seed_directives_active(policy) {
+        for track in &mut explanation.tracks {
+            let Some(candidate) = candidates.get(&track.content_hash) else {
+                continue;
+            };
+            if let Some(similarity) = max_seed_similarity(candidate, &references) {
+                track.contributions.push(ScoreContribution {
+                    component: "seed_similarity".into(),
+                    value: similarity,
+                });
+            }
+            for (feature, actual, baseline, direction, margin) in [
+                (
+                    "energy",
+                    candidate.energy,
+                    baselines.energy,
+                    policy.targets.relative_energy,
+                    policy.targets.relative_energy_margin,
+                ),
+                (
+                    "arousal",
+                    candidate.arousal,
+                    baselines.arousal,
+                    policy.targets.relative_arousal,
+                    policy.targets.relative_arousal_margin,
+                ),
+                (
+                    "tension",
+                    candidate.tension,
+                    baselines.tension,
+                    policy.targets.relative_tension,
+                    policy.targets.relative_tension_margin,
+                ),
+                (
+                    "vocalness",
+                    candidate.vocalness,
+                    baselines.vocalness,
+                    policy.targets.relative_vocalness,
+                    policy.targets.relative_vocalness_margin,
+                ),
+            ] {
+                if direction != RelativeDirection::Any {
+                    if let Some(seed) = baseline {
+                        track.contributions.push(ScoreContribution {
+                            component: format!("seed_{feature}_baseline"),
+                            value: seed,
+                        });
+                        track.contributions.push(ScoreContribution {
+                            component: format!("seed_{feature}_margin"),
+                            value: margin,
+                        });
+                    }
+                    if let Some(delta) = actual.zip(baseline).map(|(value, seed)| value - seed) {
+                        track.contributions.push(ScoreContribution {
+                            component: format!("seed_{feature}_delta"),
+                            value: delta,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    let audit = audit_playlist_for_brief(graph, track_ids, brief, policy)?;
+    explanation.summary = vec![format!(
+        "{} tracks, {} artists, audit {}",
+        audit.track_count,
+        audit.unique_artists,
+        if audit.passed { "passed" } else { "failed" }
+    )];
+    explanation
+        .summary
+        .extend(audit.issues.iter().map(|item| format!("{}: {}", item.code, item.message)));
+    Ok(explanation)
+}
+
 pub(crate) fn eligibility_issues(
     track: &TrackCandidate,
     policy: &PlaylistPolicy,
@@ -323,7 +585,248 @@ pub(crate) fn eligibility_issues(
     check_max(&mut issues, "arousal_too_high", "arousal", track.arousal, e.max_arousal);
     check_min(&mut issues, "tension_too_low", "tension", track.tension, e.min_tension);
     check_max(&mut issues, "tension_too_high", "tension", track.tension, e.max_tension);
+    let artist = [track.artist_key.as_str()];
+    check_categories(
+        &mut issues,
+        "artist_not_included",
+        "artist_excluded",
+        "artist",
+        &artist,
+        &e.include_artists,
+        &e.exclude_artists,
+    );
+    check_categories(
+        &mut issues,
+        "genre_not_included",
+        "genre_excluded",
+        "genre",
+        &track.genre_keys.iter().map(String::as_str).collect::<Vec<_>>(),
+        &e.include_genres,
+        &e.exclude_genres,
+    );
+    check_categories(
+        &mut issues,
+        "style_not_included",
+        "style_excluded",
+        "style",
+        &track.style_keys.iter().map(String::as_str).collect::<Vec<_>>(),
+        &e.include_styles,
+        &e.exclude_styles,
+    );
+    check_categories(
+        &mut issues,
+        "decade_not_included",
+        "decade_excluded",
+        "decade",
+        &track.decade_keys.iter().map(String::as_str).collect::<Vec<_>>(),
+        &e.include_decades,
+        &e.exclude_decades,
+    );
+    match track.year {
+        Some(year) => {
+            if e.min_year.is_some_and(|min| year < min) {
+                issues.push(("year_too_early", format!("year {year} is before the minimum")));
+            }
+            if e.max_year.is_some_and(|max| year > max) {
+                issues.push(("year_too_late", format!("year {year} is after the maximum")));
+            }
+        }
+        None if e.min_year.is_some() || e.max_year.is_some() => {
+            issues.push(("year_missing", "track has no usable original/file year".into()));
+        }
+        None => {}
+    }
     issues
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct SeedBaselines {
+    pub energy: Option<f64>,
+    pub arousal: Option<f64>,
+    pub tension: Option<f64>,
+    pub vocalness: Option<f64>,
+}
+
+impl SeedBaselines {
+    pub(crate) fn from_tracks(tracks: &[&TrackCandidate]) -> Self {
+        Self {
+            energy: optional_mean(tracks.iter().filter_map(|track| track.energy)),
+            arousal: optional_mean(tracks.iter().filter_map(|track| track.arousal)),
+            tension: optional_mean(tracks.iter().filter_map(|track| track.tension)),
+            vocalness: optional_mean(tracks.iter().filter_map(|track| track.vocalness)),
+        }
+    }
+}
+
+pub(crate) fn seed_directives_active(policy: &PlaylistPolicy) -> bool {
+    policy.targets.seed_similarity != SeedSimilarityPreference::Neutral
+        || policy.targets.min_seed_similarity.is_some()
+        || policy.targets.relative_energy != RelativeDirection::Any
+        || policy.targets.relative_arousal != RelativeDirection::Any
+        || policy.targets.relative_tension != RelativeDirection::Any
+        || policy.targets.relative_vocalness != RelativeDirection::Any
+}
+
+pub(crate) fn seed_constraint_issues(
+    track: &TrackCandidate,
+    seeds: &[&TrackCandidate],
+    baselines: &SeedBaselines,
+    policy: &PlaylistPolicy,
+) -> Vec<(&'static str, String)> {
+    let mut issues = Vec::new();
+    if policy.targets.seed_similarity != SeedSimilarityPreference::Neutral
+        || policy.targets.min_seed_similarity.is_some()
+    {
+        match max_seed_similarity(track, seeds) {
+            Some(value)
+                if policy
+                    .targets
+                    .min_seed_similarity
+                    .is_some_and(|minimum| value + f64::EPSILON < minimum) =>
+            {
+                let minimum = policy.targets.min_seed_similarity.unwrap_or_default();
+                issues.push((
+                    "seed_similarity_too_low",
+                    format!("seed similarity {value:.3} is below {minimum:.3}"),
+                ));
+            }
+            None => issues.push((
+                "seed_similarity_missing",
+                "track or reference seed has no usable similarity embedding".into(),
+            )),
+            _ => {}
+        }
+    }
+    check_relative(
+        &mut issues,
+        "energy",
+        track.energy,
+        baselines.energy,
+        policy.targets.relative_energy,
+        policy.targets.relative_energy_margin,
+    );
+    check_relative(
+        &mut issues,
+        "arousal",
+        track.arousal,
+        baselines.arousal,
+        policy.targets.relative_arousal,
+        policy.targets.relative_arousal_margin,
+    );
+    check_relative(
+        &mut issues,
+        "tension",
+        track.tension,
+        baselines.tension,
+        policy.targets.relative_tension,
+        policy.targets.relative_tension_margin,
+    );
+    check_relative(
+        &mut issues,
+        "vocalness",
+        track.vocalness,
+        baselines.vocalness,
+        policy.targets.relative_vocalness,
+        policy.targets.relative_vocalness_margin,
+    );
+    issues
+}
+
+pub(crate) fn max_seed_similarity(
+    track: &TrackCandidate,
+    seeds: &[&TrackCandidate],
+) -> Option<f64> {
+    seeds
+        .iter()
+        .filter_map(|seed| {
+            track
+                .embedding
+                .as_deref()
+                .zip(seed.embedding.as_deref())
+                .and_then(|(a, b)| embedding_similarity(a, b))
+        })
+        .max_by(f64::total_cmp)
+}
+
+fn check_relative(
+    issues: &mut Vec<(&'static str, String)>,
+    feature: &'static str,
+    actual: Option<f64>,
+    baseline: Option<f64>,
+    direction: RelativeDirection,
+    margin: f64,
+) {
+    if direction == RelativeDirection::Any {
+        return;
+    }
+    match (actual, baseline) {
+        (Some(value), Some(reference)) => {
+            let (code, violates) = match direction {
+                RelativeDirection::Lower if margin <= f64::EPSILON => {
+                    ("seed_relative_not_lower", value + f64::EPSILON >= reference)
+                }
+                RelativeDirection::Lower => (
+                    "seed_relative_not_lower",
+                    value > reference - margin + f64::EPSILON,
+                ),
+                RelativeDirection::Higher if margin <= f64::EPSILON => {
+                    ("seed_relative_not_higher", value <= reference + f64::EPSILON)
+                }
+                RelativeDirection::Higher => (
+                    "seed_relative_not_higher",
+                    value + f64::EPSILON < reference + margin,
+                ),
+                RelativeDirection::Similar => (
+                    "seed_relative_not_similar",
+                    margin > 0.0 && (value - reference).abs() > margin + f64::EPSILON,
+                ),
+                RelativeDirection::Any => unreachable!(),
+            };
+            if violates {
+                issues.push((
+                    code,
+                    format!(
+                        "{feature} {value:.3} does not satisfy {:?} against seed baseline {reference:.3} with margin {margin:.3}",
+                        direction
+                    ),
+                ));
+            }
+        }
+        _ => issues.push((
+            "seed_relative_missing",
+            format!("{feature} is missing on the track or every reference seed"),
+        )),
+    }
+}
+
+fn optional_mean(values: impl Iterator<Item = f64>) -> Option<f64> {
+    let (sum, count) = values.fold((0.0, 0usize), |(sum, count), value| {
+        (sum + value, count + 1)
+    });
+    (count > 0).then_some(sum / count as f64)
+}
+
+fn check_categories(
+    issues: &mut Vec<(&'static str, String)>,
+    include_code: &'static str,
+    exclude_code: &'static str,
+    label: &str,
+    track_values: &[&str],
+    include: &[String],
+    exclude: &[String],
+) {
+    let track_values: BTreeSet<String> =
+        track_values.iter().map(|value| group_key(Some(*value))).collect();
+    let include: BTreeSet<String> =
+        include.iter().map(|value| group_key(Some(value.as_str()))).collect();
+    let exclude: BTreeSet<String> =
+        exclude.iter().map(|value| group_key(Some(value.as_str()))).collect();
+    if !include.is_empty() && track_values.is_disjoint(&include) {
+        issues.push((include_code, format!("track does not match an included {label}")));
+    }
+    if !exclude.is_empty() && !track_values.is_disjoint(&exclude) {
+        issues.push((exclude_code, format!("track matches an excluded {label}")));
+    }
 }
 
 pub(crate) fn transition_score(

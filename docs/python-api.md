@@ -100,6 +100,9 @@ persisting the `.kgl` to `out_path` when given.
 
 ## `export_m3u`
 
+`export_m3u` is a lower-level materializer: it preserves caller order but does
+not curate it. Agent-created playlists should use `curate_playlist`.
+
 ```python
 sonagram.export_m3u(
     kgl_path,
@@ -131,11 +134,46 @@ sonagram.export_m3u("music.kgl", "~/Music", "set.m3u8",
                     track_ids=["<hash1>", "<hash2>"])
 ```
 
+## Curation: `profile_library`, `curate_playlist`, `audit_playlist`, `explain_playlist`
+
+```python
+profile = sonagram.profile_library("music.kgl")
+policy = sonagram.curation_policy("focus")
+brief = {
+    "preset": "focus",
+    "target_tracks": 25,
+    "target_duration_sec": None,
+    "seed_ids": [],
+    "seed_role": "pinned",
+    "unsupported_intents": [],
+}
+result = sonagram.curate_playlist("music.kgl", brief, policy)
+assert result["exportable"] and result["audit"]["passed"]
+
+audit = sonagram.audit_playlist(
+    "music.kgl", result["track_ids"], result["policy"], brief=brief
+)
+explanation = sonagram.explain_playlist(
+    "music.kgl", result["track_ids"], result["policy"], brief=brief
+)
+```
+
+All inputs/outputs are plain JSON-compatible Python values serialized from the
+same Rust DTOs as the CLI. A missing policy resolves from the brief preset for
+curation and to `general` for standalone audit/explain. Malformed values,
+brief/policy preset mismatches, and empty ID lists raise `ValueError`; graph/IO
+failures raise `RuntimeError`. A non-exportable curation result is returned
+normally with structured audit issues.
+
+`curation_policy(preset)` returns the complete versioned DTO before you amend
+typed seed-relative targets or categorical eligibility. Unknown keys are
+rejected; `brief.unsupported_intents` records constraints the library cannot
+enforce and deliberately produces a non-exportable result.
+
 ## Errors
 
-Bad-argument / bad-input failures (playlist resolution: missing ids, empty set,
-unusable Cypher result) raise `ValueError`; scan / graph / IO failures raise
-`RuntimeError`.
+Bad-argument / bad-input failures raise `ValueError`; scan / graph / IO failures
+raise `RuntimeError`.
 
 ## Reference stubs
 

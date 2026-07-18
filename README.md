@@ -5,7 +5,9 @@ a file any music app can play.**
 
 sonagram listens to every track you own (tempo, energy, mood, key, how songs
 *feel*), organizes what it learns into a fast, searchable map of your library,
-and hands that map to an AI agent. From there, playlists are a sentence:
+and lets an AI agent translate your sentence into a typed request. Sonagram's
+deterministic library engine—not the agent—then selects, orders, audits, and
+explains the playlist:
 
 > *"Make me a deep-focus work playlist."*
 > *"A party mix for Saturday that builds."*
@@ -76,9 +78,11 @@ sonagram status                  # is everything up to date? (exit 0/1/2)
 sonagram scan                    # analyze new/changed files → local cache
 sonagram enrich                  # optional: fold in Last.fm metadata (needs a key)
 sonagram build                   # merge all sources → the central graph
-sonagram playlist --ids h1,h2,h3 \
-    --name "Deep Focus" --description "a calm work playlist"
+sonagram profile --format json   # curation-relevant coverage/distributions
+sonagram curate --preset focus --tracks 25 \
+    --name "Deep Focus" --description "a calm work playlist" --format json
 sonagram playlists               # list stored playlists (newest first)
+sonagram mcp install             # native kglite manifest + revealed music skills
 ```
 
 `sonagram config` shows where everything lives (defaults under `~/.sonagram/`)
@@ -93,22 +97,32 @@ finishes in well under a second.
 
 ## For building your own agents / integrations
 
-Serve the graph to any MCP-speaking agent, or drive sonagram from Python:
+Install Sonagram's safe kglite manifest/revealed skills, then use the absolute
+launch command it prints—or drive the same library contract from Python:
 
 ```bash
-kglite-mcp-server --graph ~/.sonagram/music.kgl   # expose the graph over MCP
+sonagram mcp install
+# RUN: '/absolute/path/kglite-mcp-server' --graph '/.../music.kgl'
 ```
+
+The released KGLite 0.14.0 server reveals Sonagram methodology and read-only
+profile/query tools; typed curate/audit/store calls require an agent host with a
+shell or Python runtime until KGLite's downstream domain-tool seam ships.
 
 ```python
 import sonagram
 sonagram.scan("~/Music")
 g = sonagram.build("~/Music", out_path="music.kgl")   # a live kglite graph
-sonagram.export_m3u("music.kgl", "~/Music", "set.m3u8",
-                    cypher="MATCH (t:Track) RETURN t.content_hash ORDER BY t.energy")
+brief = {"preset": "focus", "target_tracks": 25,
+         "target_duration_sec": None, "seed_ids": [],
+         "seed_role": "pinned", "unsupported_intents": []}
+result = sonagram.curate_playlist("music.kgl", brief)
+assert result["exportable"] and result["audit"]["passed"]
 ```
 
 Agents get a full manual (`AGENT-GUIDE.md`: the schema, a query cookbook, and a
-curation quality bar) — it ships with the repo and powers the bundled skill.
+typed curation contract) plus live-gated kglite skills. Both route final
+selection/order/audit through the library rather than agent-authored heuristics.
 
 ## How it works (the short version)
 

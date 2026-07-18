@@ -5,10 +5,9 @@ a file any music app can play.**
 
 sonagram listens to every track you own (tempo, energy, mood, key — how songs
 *feel*), organizes what it learns into a fast, searchable map of your library,
-and hands that map to an AI agent. From there, playlists are a sentence: *"make
-me a deep-focus work playlist"*, *"a party mix that builds"*, *"songs like this
-one, but calmer"*. Your files are never modified or uploaded — everything runs
-on your machine.
+and lets an AI agent translate a sentence into a typed request. Sonagram's
+deterministic library engine then selects, orders, audits, and explains the
+playlist. Your files are never modified or uploaded — everything runs locally.
 
 ```{tip}
 **Just want playlists?** You don't need most of this documentation. Install
@@ -48,10 +47,10 @@ schema between them, and nothing else:
         │  sonagram build     map records → nodes + edges + embeddings
         ▼
   music.kgl  (a kglite knowledge graph)
-        │  kglite-mcp-server --graph music.kgl
+        │  sonagram mcp install → kglite-mcp-server
         ▼
-  AI agent  ──cypher_query / graph_overview──▶  a track set + order
-        │  sonagram playlist  resolve content-hashes → .m3u8 (+ portable folder)
+  AI agent  ──preset + typed brief──▶  sonagram curate
+        │  library selection → sequencing → audit → provenance
         ▼
   playable .m3u8 playlist
 ```

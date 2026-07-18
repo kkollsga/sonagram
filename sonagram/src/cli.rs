@@ -70,6 +70,7 @@ pub fn run(args: &[String]) -> i32 {
         "build" => finish(cmd_build(&args[1..])),
         "playlist" => finish(cmd_playlist(&args[1..])),
         "profile" => finish(cmd_profile(&args[1..])),
+        "policy" => finish(cmd_policy(&args[1..])),
         "curate" => finish(cmd_curate(&args[1..])),
         "audit" => finish(cmd_audit(&args[1..])),
         "explain" => finish(cmd_explain(&args[1..])),
@@ -77,6 +78,7 @@ pub fn run(args: &[String]) -> i32 {
         "sources" => finish(cmd_sources(&args[1..])),
         "config" => finish(cmd_config(&args[1..])),
         "skill" => finish(cmd_skill(&args[1..])),
+        "mcp" => finish(cmd_mcp(&args[1..])),
         "progress" => finish(cmd_progress(&args[1..])),
         // `status` owns its exit code (0 fresh / 1 needs-scan / 2 no-cache), so
         // it is not funnelled through `finish`.
@@ -150,6 +152,10 @@ SUBCOMMANDS:\n\
     profile  [--format json|human]\n\
              Summarize curation-relevant statistics from the configured graph.\n\
 \n\
+    policy   [--preset <name>] [--format json|human]\n\
+             Print the complete versioned policy for a preset, ready to amend\n\
+             and pass through --policy-json or the Python API.\n\
+\n\
     curate   [--preset <name>] [--tracks N] [--duration-sec N]\n\
              [--seed-ids <hashes>] [--brief-json <json>]\n\
              [--policy-json <json>] [--name <name>] [--description <text>]\n\
@@ -157,11 +163,13 @@ SUBCOMMANDS:\n\
              Select, sequence, audit, and optionally store a playlist through\n\
              the library-owned curation engine. Failed audits are never saved.\n\
 \n\
-    audit    --ids <hashes> [--preset <name> | --policy-json <json>]\n\
+    audit    --ids <hashes> [--brief-json <json>]\n\
+             [--preset <name> | --policy-json <json>]\n\
              [--format json|human]\n\
              Independently audit an ordered playlist against a typed policy.\n\
 \n\
-    explain  --ids <hashes> [--preset <name> | --policy-json <json>]\n\
+    explain  --ids <hashes> [--brief-json <json>]\n\
+             [--preset <name> | --policy-json <json>]\n\
              [--format json|human]\n\
              Explain track, transition, and arc contributions for an order.\n\
 \n\
@@ -198,6 +206,11 @@ SUBCOMMANDS:\n\
              Install fills in your configured library path, refuses to overwrite\n\
              without --force, and tells the agent to read + follow it in-session.\n\
 \n\
+    mcp      install [--force]\n\
+             Install a kglite-native manifest and live-gated music skills next\n\
+             to the configured graph. Identical assets are an idempotent no-op;\n\
+             differing operator files require --force.\n\
+\n\
     playlists                 List stored playlists (from `curate --name`).\n\
     playlists show <slug>     Full metadata + tracklist for one stored playlist.\n\
     playlists update <slug>   Set/clear the stored request description.\n\
@@ -212,8 +225,9 @@ CONFIG-DRIVEN FORMS (no path args — fan out over configured sources):\n\
     sonagram enrich               enrich all sources\n\
     sonagram build                multi-source build → the configured graph\n\
     sonagram playlist (--cypher|--ids ...) --name <name> [--description <text>]\n\
-                                  curate from the configured graph and store the\n\
-                                  playlist (.m3u8 + .meta.json) centrally\n\
+                                  manually materialize caller-selected IDs\n\
+    sonagram curate --preset focus --name <name>\n\
+                                  library-select, audit, and store a playlist\n\
 \n\
 FLAGS:\n\
     -h, --help       Print this help\n\
@@ -223,7 +237,7 @@ EXAMPLES:\n\
     sonagram sources add ~/Music\n\
     sonagram scan\n\
     sonagram build\n\
-    sonagram playlist --ids h1,h2,h3 --name 'Deep Focus' --description 'work playlist'\n\
+    sonagram curate --preset focus --tracks 25 --name 'Deep Focus' --description 'work playlist'\n\
     sonagram playlists\n\
     # explicit-path forms still work:\n\
     sonagram build ~/Music music.kgl\n\
@@ -585,6 +599,39 @@ fn cmd_profile(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn cmd_policy(args: &[String]) -> Result<()> {
+    let mut preset = PlaylistPreset::General;
+    let mut as_json = false;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--preset" => preset = parse_preset(&flag_value(args, &mut i, "--preset")?)?,
+            "--format" => {
+                as_json = parse_format_value("policy", &flag_value(args, &mut i, "--format")?)?;
+            }
+            "--json" => as_json = true,
+            other => {
+                return Err(SonagramError::Playlist(format!(
+                    "policy: unexpected argument '{other}'"
+                )))
+            }
+        }
+        i += 1;
+    }
+    let policy = PlaylistPolicy::for_preset(preset);
+    if as_json {
+        print_json(&policy)?;
+    } else {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&policy).map_err(|error| {
+                SonagramError::Playlist(format!("serialize policy JSON: {error}"))
+            })?
+        );
+    }
+    Ok(())
+}
+
 fn cmd_curate(args: &[String]) -> Result<()> {
     let mut preset = None;
     let mut target_tracks = None;
@@ -725,9 +772,12 @@ fn emit_curate_result(
 }
 
 fn cmd_audit(args: &[String]) -> Result<()> {
-    let (ids, policy, as_json) = parse_order_policy_args("audit", args)?;
+    let (ids, policy, brief, as_json) = parse_order_policy_args("audit", args)?;
     let (_, _, graph) = load_configured_graph()?;
-    let audit = curation::audit_playlist(&graph, &ids, &policy)?;
+    let audit = match brief {
+        Some(brief) => curation::audit_playlist_for_brief(&graph, &ids, &brief, &policy)?,
+        None => curation::audit_playlist(&graph, &ids, &policy)?,
+    };
     if as_json {
         print_json(&audit)?;
     } else {
@@ -749,9 +799,12 @@ fn cmd_audit(args: &[String]) -> Result<()> {
 }
 
 fn cmd_explain(args: &[String]) -> Result<()> {
-    let (ids, policy, as_json) = parse_order_policy_args("explain", args)?;
+    let (ids, policy, brief, as_json) = parse_order_policy_args("explain", args)?;
     let (_, _, graph) = load_configured_graph()?;
-    let explanation = curation::explain_playlist(&graph, &ids, &policy)?;
+    let explanation = match brief {
+        Some(brief) => curation::explain_playlist_for_brief(&graph, &ids, &brief, &policy)?,
+        None => curation::explain_playlist(&graph, &ids, &policy)?,
+    };
     if as_json {
         print_json(&explanation)?;
     } else {
@@ -779,10 +832,11 @@ fn cmd_explain(args: &[String]) -> Result<()> {
 fn parse_order_policy_args(
     command: &str,
     args: &[String],
-) -> Result<(Vec<String>, PlaylistPolicy, bool)> {
+) -> Result<(Vec<String>, PlaylistPolicy, Option<PlaylistBrief>, bool)> {
     let mut ids = None;
     let mut preset = None;
     let mut policy_json = None;
+    let mut brief_json = None;
     let mut as_json = false;
     let mut i = 0;
     while i < args.len() {
@@ -790,6 +844,9 @@ fn parse_order_policy_args(
             "--ids" => ids = Some(parse_ids(&flag_value(args, &mut i, "--ids")?)),
             "--preset" => preset = Some(parse_preset(&flag_value(args, &mut i, "--preset")?)?),
             "--policy-json" => policy_json = Some(flag_value(args, &mut i, "--policy-json")?),
+            "--brief-json" if matches!(command, "audit" | "explain") => {
+                brief_json = Some(flag_value(args, &mut i, "--brief-json")?)
+            }
             "--format" => {
                 as_json = parse_format_value(command, &flag_value(args, &mut i, "--format")?)?;
             }
@@ -805,8 +862,21 @@ fn parse_order_policy_args(
     let ids = ids.filter(|value| !value.is_empty()).ok_or_else(|| {
         SonagramError::Playlist(format!("{command}: pass --ids <hash1,hash2,...>"))
     })?;
-    let policy = parse_policy(policy_json.as_deref(), preset, command)?;
-    Ok((ids, policy, as_json))
+    let brief = brief_json
+        .map(|raw| {
+            serde_json::from_str::<PlaylistBrief>(&raw).map_err(|error| {
+                SonagramError::Playlist(format!("{command}: invalid --brief-json: {error}"))
+            })
+        })
+        .transpose()?;
+    if preset.is_some_and(|value| brief.as_ref().is_some_and(|brief| brief.preset != value)) {
+        return Err(SonagramError::Playlist(
+            format!("{command}: --preset does not match --brief-json"),
+        ));
+    }
+    let expected_preset = brief.as_ref().map(|brief| brief.preset).or(preset);
+    let policy = parse_policy(policy_json.as_deref(), expected_preset, command)?;
+    Ok((ids, policy, brief, as_json))
 }
 
 fn parse_policy(
@@ -1322,6 +1392,52 @@ fn cmd_skill(args: &[String]) -> Result<()> {
         )),
         Some(other) => Err(SonagramError::Config(format!(
             "skill: unknown subcommand '{other}' — try `show` or `install`"
+        ))),
+    }
+}
+
+/// Install the embedded kglite manifest and project skill layer beside the
+/// configured graph, where kglite's `<basename>_mcp.yaml` discovery finds it.
+fn cmd_mcp(args: &[String]) -> Result<()> {
+    match args.first().map(String::as_str) {
+        Some("install") => {
+            let mut force = false;
+            for arg in &args[1..] {
+                match arg.as_str() {
+                    "--force" => force = true,
+                    other => {
+                        return Err(SonagramError::Config(format!(
+                            "mcp install: unexpected argument '{other}' — try [--force]"
+                        )))
+                    }
+                }
+            }
+            let report = crate::mcp::install(force)?;
+            println!("installed Sonagram MCP assets");
+            println!("  graph:     {}", report.graph_path.display());
+            println!("  manifest:  {}", report.manifest_path.display());
+            println!("  skills:    {}", report.skills_dir.display());
+            println!("  sandbox:   {}", report.public_source_dir.display());
+            if let Some(binary) = &report.server_binary {
+                println!("  server:    {}", binary.display());
+            }
+            println!("  changed:   {}", report.written);
+            println!("  unchanged: {}", report.unchanged);
+            match report.launch_command() {
+                Some(command) => println!("{}: {command}", crate::mcp::launch_label()),
+                None => println!(
+                    "NEXT: configure your MCP client with an absolute path to \
+                     `kglite-mcp-server` and --graph {}",
+                    report.graph_path.display()
+                ),
+            }
+            Ok(())
+        }
+        None => Err(SonagramError::Config(
+            "mcp: pass `install [--force]`".into(),
+        )),
+        Some(other) => Err(SonagramError::Config(format!(
+            "mcp: unknown subcommand '{other}' — try `install`"
         ))),
     }
 }

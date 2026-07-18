@@ -18,6 +18,9 @@ pub(crate) struct TrackCandidate {
     pub album_key: String,
     pub song_key: Option<String>,
     pub style_keys: Vec<String>,
+    pub genre_keys: Vec<String>,
+    pub decade_keys: Vec<String>,
+    pub year: Option<i64>,
     pub duration_sec: Option<f64>,
     pub is_music: bool,
     pub is_canonical: bool,
@@ -42,14 +45,18 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
         .get(TRACK)
         .map(|nodes| nodes.to_vec())
         .unwrap_or_default();
-    let mut relations: BTreeMap<usize, (Option<String>, BTreeSet<String>)> = BTreeMap::new();
+    let mut relations: BTreeMap<usize, TrackRelations> = BTreeMap::new();
     let stable = graph.graph.as_stable_digraph();
     for edge_idx in stable.edge_indices() {
         let Some(edge) = stable.edge_weight(edge_idx) else {
             continue;
         };
         let kind = edge.connection_type_str(&graph.interner);
-        if kind != "VERSION_OF" && kind != "IN_STYLE" {
+        if kind != "VERSION_OF"
+            && kind != "IN_STYLE"
+            && kind != "IN_GENRE"
+            && kind != "FROM_DECADE"
+        {
             continue;
         }
         let Some((source, target)) = stable.edge_endpoints(edge_idx) else {
@@ -68,10 +75,21 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
             continue;
         };
         let entry = relations.entry(source.index()).or_default();
-        if kind == "VERSION_OF" {
-            entry.0 = Some(target_id);
-        } else {
-            entry.1.insert(target_id);
+        match kind {
+            "VERSION_OF" => entry.song_key = Some(target_id),
+            "IN_STYLE" => {
+                entry.styles.insert(group_key(Some(target_id.as_str())));
+                if let Some(name) = prop_string(target_node, "name", graph) {
+                    entry.styles.insert(group_key(Some(name.as_str())));
+                }
+            }
+            "IN_GENRE" => {
+                entry.genres.insert(group_key(Some(target_id.as_str())));
+            }
+            "FROM_DECADE" => {
+                entry.decades.insert(group_key(Some(target_id.as_str())));
+            }
+            _ => {}
         }
     }
 
@@ -88,7 +106,8 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
             .ok_or_else(|| SonagramError::Graph("Track has no string content_hash".into()))?;
         let artist = prop_string(node, "artist_name", graph);
         let album = prop_string(node, "album_name", graph);
-        let (song_key, styles) = relations.remove(&idx.index()).unwrap_or_default();
+        let relations = relations.remove(&idx.index()).unwrap_or_default();
+        let year = prop_i64(node, "original_year", graph).or_else(|| prop_i64(node, "year", graph));
         out.push(TrackCandidate {
             id,
             title: prop_string(node, "title", graph),
@@ -96,8 +115,11 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
             artist,
             album_key: group_key(album.as_deref()),
             album,
-            song_key,
-            style_keys: styles.into_iter().collect(),
+            song_key: relations.song_key,
+            style_keys: relations.styles.into_iter().collect(),
+            genre_keys: relations.genres.into_iter().collect(),
+            decade_keys: relations.decades.into_iter().collect(),
+            year,
             duration_sec: prop_f64(node, "duration_sec", graph),
             is_music: prop_bool(node, "is_music", graph).unwrap_or(true),
             is_canonical: prop_bool(node, "is_canonical", graph).unwrap_or(true),
@@ -120,6 +142,14 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(out)
+}
+
+#[derive(Default)]
+struct TrackRelations {
+    song_key: Option<String>,
+    styles: BTreeSet<String>,
+    genres: BTreeSet<String>,
+    decades: BTreeSet<String>,
 }
 
 pub(crate) fn candidate_map(graph: &DirGraph) -> Result<BTreeMap<String, TrackCandidate>> {
@@ -165,6 +195,13 @@ fn prop_f64(node: &NodeData, name: &str, graph: &DirGraph) -> Option<f64> {
     match resolve_node_property(node, name, graph) {
         Value::Float64(value) if value.is_finite() => Some(value),
         Value::Int64(value) => Some(value as f64),
+        _ => None,
+    }
+}
+
+fn prop_i64(node: &NodeData, name: &str, graph: &DirGraph) -> Option<i64> {
+    match resolve_node_property(node, name, graph) {
+        Value::Int64(value) => Some(value),
         _ => None,
     }
 }

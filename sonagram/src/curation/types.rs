@@ -27,6 +27,37 @@ pub enum FamiliarityPreference {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+pub enum SeedSimilarityPreference {
+    Avoid,
+    #[default]
+    Neutral,
+    Prefer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SeedRole {
+    /// Seeds are required playlist entries, preserving the v1 behaviour.
+    #[default]
+    Pinned,
+    /// Seeds are references only and are never exported as playlist entries.
+    Reference,
+    /// Seeds are both required entries and references for relative targets.
+    PinnedAndReference,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RelativeDirection {
+    Lower,
+    Similar,
+    #[default]
+    Any,
+    Higher,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum PlaylistArc {
     None,
     #[default]
@@ -41,6 +72,7 @@ fn default_target_tracks() -> usize {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PlaylistBrief {
     #[serde(default)]
     pub preset: PlaylistPreset,
@@ -50,6 +82,12 @@ pub struct PlaylistBrief {
     pub target_duration_sec: Option<u64>,
     #[serde(default)]
     pub seed_ids: Vec<String>,
+    #[serde(default)]
+    pub seed_role: SeedRole,
+    /// Intent the typed v1 contract cannot represent. Non-empty means the
+    /// library must return a structured non-exportable result, never guess.
+    #[serde(default)]
+    pub unsupported_intents: Vec<String>,
 }
 
 impl Default for PlaylistBrief {
@@ -59,11 +97,14 @@ impl Default for PlaylistBrief {
             target_tracks: default_target_tracks(),
             target_duration_sec: None,
             seed_ids: Vec::new(),
+            seed_role: SeedRole::Pinned,
+            unsupported_intents: Vec::new(),
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct EligibilityPolicy {
     pub require_music: bool,
     pub require_canonical: bool,
@@ -77,6 +118,26 @@ pub struct EligibilityPolicy {
     pub max_arousal: Option<f64>,
     pub min_tension: Option<f64>,
     pub max_tension: Option<f64>,
+    #[serde(default)]
+    pub include_artists: Vec<String>,
+    #[serde(default)]
+    pub exclude_artists: Vec<String>,
+    #[serde(default)]
+    pub include_genres: Vec<String>,
+    #[serde(default)]
+    pub exclude_genres: Vec<String>,
+    #[serde(default)]
+    pub include_styles: Vec<String>,
+    #[serde(default)]
+    pub exclude_styles: Vec<String>,
+    #[serde(default)]
+    pub include_decades: Vec<String>,
+    #[serde(default)]
+    pub exclude_decades: Vec<String>,
+    #[serde(default)]
+    pub min_year: Option<i64>,
+    #[serde(default)]
+    pub max_year: Option<i64>,
 }
 
 impl Default for EligibilityPolicy {
@@ -94,11 +155,22 @@ impl Default for EligibilityPolicy {
             max_arousal: None,
             min_tension: None,
             max_tension: None,
+            include_artists: Vec::new(),
+            exclude_artists: Vec::new(),
+            include_genres: Vec::new(),
+            exclude_genres: Vec::new(),
+            include_styles: Vec::new(),
+            exclude_styles: Vec::new(),
+            include_decades: Vec::new(),
+            exclude_decades: Vec::new(),
+            min_year: None,
+            max_year: None,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DiversityPolicy {
     pub max_per_artist: usize,
     pub max_per_album: usize,
@@ -118,12 +190,33 @@ impl Default for DiversityPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FeatureTargets {
     pub energy: Option<f64>,
     pub arousal: Option<f64>,
     pub tension: Option<f64>,
     pub vocalness: Option<f64>,
     pub familiarity: FamiliarityPreference,
+    #[serde(default)]
+    pub seed_similarity: SeedSimilarityPreference,
+    #[serde(default)]
+    pub min_seed_similarity: Option<f64>,
+    #[serde(default)]
+    pub relative_energy: RelativeDirection,
+    #[serde(default)]
+    pub relative_energy_margin: f64,
+    #[serde(default)]
+    pub relative_arousal: RelativeDirection,
+    #[serde(default)]
+    pub relative_arousal_margin: f64,
+    #[serde(default)]
+    pub relative_tension: RelativeDirection,
+    #[serde(default)]
+    pub relative_tension_margin: f64,
+    #[serde(default)]
+    pub relative_vocalness: RelativeDirection,
+    #[serde(default)]
+    pub relative_vocalness_margin: f64,
 }
 
 impl Default for FeatureTargets {
@@ -134,11 +227,22 @@ impl Default for FeatureTargets {
             tension: None,
             vocalness: None,
             familiarity: FamiliarityPreference::Neutral,
+            seed_similarity: SeedSimilarityPreference::Neutral,
+            min_seed_similarity: None,
+            relative_energy: RelativeDirection::Any,
+            relative_energy_margin: 0.0,
+            relative_arousal: RelativeDirection::Any,
+            relative_arousal_margin: 0.0,
+            relative_tension: RelativeDirection::Any,
+            relative_tension_margin: 0.0,
+            relative_vocalness: RelativeDirection::Any,
+            relative_vocalness_margin: 0.0,
         }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TransitionPolicy {
     pub embedding_weight: f64,
     pub feature_weight: f64,
@@ -162,6 +266,7 @@ impl Default for TransitionPolicy {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AuditThresholds {
     pub min_unique_artist_ratio: f64,
     pub max_artist_share: f64,
@@ -185,6 +290,7 @@ impl Default for AuditThresholds {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PlaylistPolicy {
     pub version: u32,
     pub preset: PlaylistPreset,

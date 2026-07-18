@@ -1,14 +1,16 @@
 # Agent guide
 
 sonagram is built for AI agents: the graph is served over MCP by
-`kglite-mcp-server`, and an agent curates playlists by querying it. The repo
+`kglite-mcp-server`, and an agent translates intent into a typed Sonagram
+curation brief. The library—not the agent—selects, orders, repairs, audits, and
+stores playlists. The repo
 ships the full agent-facing manual as **`AGENT-GUIDE.md`** at its root, plus an
 invocable Claude Code skill at **`skills/sonagram-playlist/`**. This page is the
 orientation; the manual is the reference.
 
-## The two tools
+## The three tools
 
-An agent works the graph through two MCP tools:
+An agent works the graph through three MCP tools:
 
 - **`graph_overview`** — the node/edge inventory with live counts and sample ids.
   Call it first on an unfamiliar graph to see the library's shape.
@@ -16,6 +18,12 @@ An agent works the graph through two MCP tools:
   takes only a `query` string: there is **no parameter binding over MCP**, so
   inline every literal (`{title:'Marry You'}`, `[0.1, ...]`). A `$param`
   reference errors.
+- **`music_library_profile`** — report eligible counts, axis coverage, and
+  means before translating an unusual request.
+
+On KGLite 0.14.0, typed curate/audit/store calls still require the agent host's
+shell or Python runtime; an MCP-only host can explore but must not invent final
+IDs. The upstream domain-tool seam is tracked for a future direct MCP route.
 
 The [graph schema](graph-schema.md) is the node/edge/property reference those
 queries run against.
@@ -32,36 +40,26 @@ queries run against.
    what's in an unfamiliar library.
 3. **Similarity** — the `SIMILAR_TO` hop ("like this, but calmer") composes with
    any `WHERE`; chain `-[:SIMILAR_TO*1..2]->` to reach beyond the top-10 horizon.
-4. **Sequence** — walk `CAMELOT_ADJACENT` for a harmonic step plus an energy ramp
-   to build a DJ set.
+4. **Sequence evidence** — inspect `CAMELOT_ADJACENT`, tempo, and energy to
+   explain transitions; the Sonagram sequencer still owns the final order.
 
-## Materializing the answer
+## Creating and accepting the answer
 
-A query answers *which tracks, in what order*; you turn that into a playable
-`.m3u8` outside the graph via [`sonagram playlist`](cli.md#sonagram-playlist) or
-[`export_m3u`](python-api.md#export_m3u), passing the `content_hash` values a
-query returns. Order is preserved verbatim, so for any hand-built arc (a ramp, a
-breather, a harmonic chain) the `--ids` / `track_ids=` path — export candidates,
-order them client-side, feed the hash list — is the primary route, not one big
-`ORDER BY`.
+Use graph tools for exploration, then run [`sonagram curate`](cli.md#sonagram-profile--curate--audit--explain)
+or [`curate_playlist`](python-api.md#curation-profile_library-curate_playlist-audit_playlist-explain_playlist).
+Choose a preset plus size/duration/seeds; do not hand-select or reorder returned
+IDs. Accept only `exportable: true` with `audit.passed: true`.
 
-## The quality bar
+For advanced intent, resolve the preset with `sonagram policy` or Python
+`sonagram.curation_policy`, then use typed reference-seed similarity/relative
+targets and eligibility filters for artist, genre, style, decade, and year.
+Unknown fields are rejected; explicitly unsupported intent produces a
+structured non-exportable result.
 
-`AGENT-GUIDE.md` grades every playlist against four requirements before export —
-treat them as requirements, not suggestions:
-
-1. **Duration-check every pick.** Casual/mood playlists default to radio-length
-   cuts (`duration_sec <= 330`) unless the brief wants epics — always `RETURN
-   t.duration_sec` in the candidate query.
-2. **Audit `era_source` first, then fall back to your own knowledge.** When
-   `era_source = 'original_year'` the decade is era-true; when `'file_year'` the
-   `year` is the file tag (often a reissue/compilation date), so validate era
-   claims yourself.
-3. **Critical slots need style-world cohesion, not just scalar fit.** Finales,
-   the seed side of a "like this" set, and genre-set peaks must belong to the
-   brief's musical world — scalars will happily pass a rap track into a disco set.
-4. **Sanity-read the final tracklist as a human would** — artist/title, in order.
-   If a pick needs a defensive explanation, swap it.
+The independent audit enforces eligibility, Track/Song deduplication,
+artist/album concentration and spacing, duration, transitions, and arc error.
+If a passing result is still poor, record that measurable defect as a Sonagram
+library issue rather than hiding it with an agent-only heuristic.
 
 The manual also carries extensive **pitfalls and field notes** from live agent
 validation (e.g. gate `bpm` on `bpm_confidence`; `mood_aggressive` inverts on
