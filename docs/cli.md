@@ -229,9 +229,10 @@ Install an auto-detected `<graph>_mcp.yaml` plus five live-gated project skills
 beside the configured graph. Re-running identical assets is a no-op; differing
 operator files require `--force`. The manifest exposes only a dedicated empty
 source sandbox, never the graph/config parent, and prints the absolute executable
-`kglite-mcp-server` sibling from the installed environment when available
-(`RUN (PowerShell)` on Windows). Typed curation remains the
-CLI/Python authority until kglite's downstream domain-tool seam is released.
+`sonagram-mcp-server` sibling from the installed environment when available
+(`RUN (PowerShell)` on Windows). This thin KGLite 0.14.1 frontend adds typed
+profile/policy/curate/audit/explain and playlist-store tools while preserving
+KGLite's generic server and live graph lifecycle.
 
 ## Examples
 

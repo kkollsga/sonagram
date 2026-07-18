@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 
 pub const CURATION_POLICY_VERSION: u32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum PlaylistPreset {
     #[default]
@@ -16,7 +18,9 @@ pub enum PlaylistPreset {
     Discovery,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum FamiliarityPreference {
     Avoid,
@@ -25,7 +29,9 @@ pub enum FamiliarityPreference {
     Prefer,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SeedSimilarityPreference {
     Avoid,
@@ -34,7 +40,9 @@ pub enum SeedSimilarityPreference {
     Prefer,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum SeedRole {
     /// Seeds are required playlist entries, preserving the v1 behaviour.
@@ -46,7 +54,9 @@ pub enum SeedRole {
     PinnedAndReference,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RelativeDirection {
     Lower,
@@ -56,7 +66,9 @@ pub enum RelativeDirection {
     Higher,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema, Default,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum PlaylistArc {
     None,
@@ -71,7 +83,7 @@ fn default_target_tracks() -> usize {
     25
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PlaylistBrief {
     #[serde(default)]
@@ -103,7 +115,7 @@ impl Default for PlaylistBrief {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EligibilityPolicy {
     pub require_music: bool,
@@ -169,7 +181,7 @@ impl Default for EligibilityPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct DiversityPolicy {
     pub max_per_artist: usize,
@@ -189,7 +201,7 @@ impl Default for DiversityPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FeatureTargets {
     pub energy: Option<f64>,
@@ -241,7 +253,7 @@ impl Default for FeatureTargets {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TransitionPolicy {
     pub embedding_weight: f64,
@@ -265,7 +277,7 @@ impl Default for TransitionPolicy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct AuditThresholds {
     pub min_unique_artist_ratio: f64,
@@ -289,7 +301,7 @@ impl Default for AuditThresholds {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PlaylistPolicy {
     pub version: u32,

@@ -651,6 +651,25 @@ fn _run_cli(py: Python<'_>, argv: Vec<String>) -> i32 {
     py.detach(|| sonagram::cli::run(&argv))
 }
 
+/// Run Sonagram's thin KGLite MCP frontend to completion over stdio.
+///
+/// The Python console shim passes arguments without argv[0]. The GIL stays
+/// released for the server lifetime; tool registration and handlers are the
+/// same Rust implementation used by the standalone Cargo binary.
+#[pyfunction]
+fn _run_mcp_server(py: Python<'_>, argv: Vec<String>) -> i32 {
+    let mut full_argv = Vec::with_capacity(argv.len() + 1);
+    full_argv.push(std::ffi::OsString::from("sonagram-mcp-server"));
+    full_argv.extend(argv.into_iter().map(std::ffi::OsString::from));
+    match py.detach(|| sonagram::mcp_server::run(full_argv)) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("sonagram-mcp-server: {error:#}");
+            1
+        }
+    }
+}
+
 /// The compiled `_sonagram` module. Imported by `python/sonagram/__init__.py`.
 #[pymodule]
 fn _sonagram(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -669,6 +688,7 @@ fn _sonagram(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(audit_playlist, m)?)?;
     m.add_function(wrap_pyfunction!(explain_playlist, m)?)?;
     m.add_function(wrap_pyfunction!(_run_cli, m)?)?;
+    m.add_function(wrap_pyfunction!(_run_mcp_server, m)?)?;
     Ok(())
 }
 

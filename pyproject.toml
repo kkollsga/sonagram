@@ -34,7 +34,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 dependencies = [
-    "kglite>=0.14",
+    "kglite>=0.14.1",
 ]
 
 # Bundled Rust console script. The CLI is linked into this wheel's existing
@@ -44,6 +44,7 @@ dependencies = [
 # from one shared code path — no separate build, no drift.
 [project.scripts]
 sonagram = "sonagram.cli:main"
+sonagram-mcp-server = "sonagram.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/kkollsga/sonagram"

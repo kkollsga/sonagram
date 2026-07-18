@@ -2,8 +2,9 @@
 //!
 //! The assets are embedded so both Cargo and PyPI installs can materialize a
 //! deployment next to the configured `.kgl` graph without a repository checkout.
-//! Kglite owns the server and generic graph tools; this module only installs
-//! Sonagram's declarative manifest and domain methodology.
+//! Kglite owns the server and generic graph tools; Sonagram's thin frontend
+//! registers only the typed music-domain methods through Kglite's extension
+//! seam and installs the declarative manifest plus domain methodology.
 
 use std::path::{Path, PathBuf};
 
@@ -184,7 +185,7 @@ fn validate_public_source_dir(path: &Path) -> Result<()> {
 }
 
 fn resolve_server_binary() -> Option<PathBuf> {
-    let executable = format!("kglite-mcp-server{}", std::env::consts::EXE_SUFFIX);
+    let executable = format!("sonagram-mcp-server{}", std::env::consts::EXE_SUFFIX);
     let sibling = std::env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(|parent| parent.join(executable)));
@@ -361,7 +362,7 @@ mod tests {
     #[test]
     fn bundled_assets_carry_native_skill_gates_and_contract() {
         assert!(MANIFEST_YAML.contains("skills: true"));
-        assert!(MANIFEST_YAML.contains("name: music_library_profile"));
+        assert!(!MANIFEST_YAML.contains("name: music_library_profile"));
         for (name, body) in SKILL_ASSETS {
             assert!(body.contains("references_tools:"), "{name}");
             assert!(body.contains("applies_when:"), "{name}");
@@ -429,7 +430,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let graph = temp_graph("non-executable");
-        let fake = graph.parent().unwrap().join("kglite-mcp-server");
+        let fake = graph.parent().unwrap().join("sonagram-mcp-server");
         std::fs::write(&fake, b"not executable").unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o644)).unwrap();
         assert!(!is_executable_file(&fake));

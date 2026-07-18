@@ -87,8 +87,8 @@ only changed files, and `enrich` skips already-fetched entities. See the
 3. **`build`** maps the cached records into a kglite `.kgl` graph, auto-folding in
    the Last.fm cache when present.
 4. **install MCP assets** with `sonagram mcp install`, then use its printed
-   absolute server command. The agent explores with graph tools but invokes
-   Sonagram's typed engine for every final playlist.
+   absolute `sonagram-mcp-server` command. The agent explores with graph tools
+   and invokes Sonagram's typed MCP engine for every final playlist.
 
 ## Freshness probe for automation
 

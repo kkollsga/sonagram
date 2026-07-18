@@ -5,15 +5,12 @@ source_root: ./.sonagram-mcp-public
 instructions: |
   This graph describes a local music library built by Sonagram. Use
   graph_overview and cypher_query for exploration and the typed
-  music_library_profile tool for quick calibration. For any final playlist,
-  Sonagram's curation engine owns selection, ordering, audit, and explanation;
-  an agent translates intent into a preset/brief and invokes `sonagram curate`
-  or the equivalent Python API. KGLite 0.14.0 does not expose those typed
-  methods as MCP tools: final creation requires the agent host to provide a
-  shell or Python runtime. An MCP-only host can explore and explain, but must
-  report that limitation instead of hand-authoring IDs. Never hand-select or
-  reorder a final playlist
-  from Cypher rows. Generic graph access is read-only here.
+  music_library_profile tool for quick calibration. Translate playlist intent
+  into typed brief/policy arguments, then use music_curate_playlist; use the
+  typed audit, explanation, and store tools for acceptance and persistence.
+  Sonagram owns selection, ordering, repair, audit, explanation, and storage.
+  Never hand-select or reorder a final playlist from Cypher rows. Generic graph
+  access is read-only here.
 
 overview_prefix: |
   Playlist reminder: explore with this graph, but create final ordered IDs only
@@ -29,21 +26,3 @@ tools:
     hidden: true
   - bundled: list_source
     hidden: true
-
-  - name: music_library_profile
-    description: Fast read-only coverage and distribution summary for calibrating a music request before invoking Sonagram's typed curation engine.
-    cypher: |
-      MATCH (t:Track)
-      RETURN count(t) AS tracks,
-             sum(CASE WHEN t.is_music THEN 1 ELSE 0 END) AS music_tracks,
-             sum(CASE WHEN t.is_canonical THEN 1 ELSE 0 END) AS canonical_tracks,
-             sum(CASE WHEN t.is_music AND t.is_canonical THEN 1 ELSE 0 END) AS eligible_tracks,
-             round(avg(CASE WHEN t.is_music AND t.is_canonical THEN t.energy ELSE NULL END), 3) AS mean_energy,
-             sum(CASE WHEN t.is_music AND t.is_canonical AND t.energy IS NOT NULL THEN 1 ELSE 0 END) AS energy_present,
-             round(avg(CASE WHEN t.is_music AND t.is_canonical THEN t.arousal_index ELSE NULL END), 3) AS mean_arousal,
-             sum(CASE WHEN t.is_music AND t.is_canonical AND t.arousal_index IS NOT NULL THEN 1 ELSE 0 END) AS arousal_present,
-             round(avg(CASE WHEN t.is_music AND t.is_canonical THEN t.tension_index ELSE NULL END), 3) AS mean_tension,
-             sum(CASE WHEN t.is_music AND t.is_canonical AND t.tension_index IS NOT NULL THEN 1 ELSE 0 END) AS tension_present,
-             round(avg(CASE WHEN t.is_music AND t.is_canonical THEN t.vocalness ELSE NULL END), 3) AS mean_vocalness,
-             sum(CASE WHEN t.is_music AND t.is_canonical AND t.vocalness IS NOT NULL THEN 1 ELSE 0 END) AS vocalness_present,
-             sum(CASE WHEN t.is_music AND t.is_canonical AND t.popularity IS NOT NULL THEN 1 ELSE 0 END) AS popularity_present

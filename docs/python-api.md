@@ -28,7 +28,7 @@ share a live Rust graph object, so `build()`:
 
 The result is a genuine `kglite.KnowledgeGraph`, so every downstream kglite API
 (`.cypher()`, `.describe()`, persistence, …) works unchanged. When `out_path` is
-given the `.kgl` is persisted (that is the file `kglite-mcp-server` serves);
+given the `.kgl` is persisted (that is the file `sonagram-mcp-server` serves);
 otherwise a temp file carries the bytes and is deleted once the graph is
 materialized. This is why `sonagram` depends on `kglite` at runtime.
 
@@ -80,7 +80,7 @@ sonagram.build(
 Build the graph from `library_root`'s cached analysis records and return a live
 `kglite.KnowledgeGraph`. Run `scan()` first (this reads the cache under
 `<library_root>/.sonagram/`). If `out_path` is given the `.kgl` is written there
-and kept — that is the file `kglite-mcp-server --graph` serves. Auto-folds in the
+and kept — that is the file `sonagram-mcp-server --graph` serves. Auto-folds in the
 Last.fm enrichment cache when present.
 
 ## `scan_and_build`

@@ -1,8 +1,9 @@
 ---
 name: music_curation_policy
 description: "TRIGGER for every request to create, improve, or vary a playlist. Translate intent into a Sonagram preset and compact brief, then invoke the library curation method. SKIP hand-authored candidate selection or ordering: Cypher is exploratory, never the final playlist engine."
-references_tools: [music_library_profile]
+references_tools: [music_library_profile, music_curation_policy, music_curate_playlist]
 applies_when:
+  tool_registered: music_curate_playlist
   graph_has_property: {node_type: Track, prop_name: is_music}
 ---
 
@@ -22,8 +23,10 @@ then an anchor, not an exported track. Optional `relative_*_margin` values in
 Hard categorical intent belongs in policy eligibility: normalized
 `include_*` / `exclude_*` lists cover artists, genres, detected styles, and
 decades; `min_year` / `max_year` cover exact ranges. Exclusion dominates.
-Resolve a complete preset policy with `sonagram policy --preset <name> --format
-json` or `sonagram.curation_policy(<name>)`, amend only typed fields, then invoke:
+Resolve a complete preset policy with `music_curation_policy`, amend only typed
+fields, then invoke `music_curate_playlist` with the brief and optional policy.
+Pass `store.name` only when the result should be persisted; the tool refuses to
+store a failed audit. CLI/Python parity remains available as:
 
 ```sh
 sonagram curate --preset focus --tracks 25 --name "Focused Thinking" \
@@ -31,9 +34,6 @@ sonagram curate --preset focus --tracks 25 --name "Focused Thinking" \
 ```
 
 Python parity is `sonagram.curate_playlist(kgl_path, brief, policy=None)`.
-On KGLite 0.14.0 these typed operations are not MCP tools: the host must expose
-a shell or Python runtime. In an MCP-only host, stop after exploration and
-report the capability gap; never substitute Cypher-selected IDs.
 Selection, Song deduplication, sequencing, repair, audit, and explanations are
 library behavior. Do not fetch candidates and choose/reorder them yourself. A
 non-exportable result is a structured library failure: inspect its issues and

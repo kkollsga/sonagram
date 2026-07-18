@@ -11,6 +11,7 @@ repository = "https://github.com/kkollsga/sonagram"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+schemars = "1"
 blake3 = "1"
 walkdir = "2"
 thiserror = "2"
@@ -20,9 +21,11 @@ ureq = { version = "2", features = ["json"] }
 
 # Upstreams — consumed as cargo libraries, read-only here. `version` must be
 # satisfiable by the LOCAL path checkout: sonara 0.2.2 (needs the tags/mood
-# features), kglite 0.14.0. See dev-docs/designs/upstream-contracts.md.
+# features), kglite 0.14.1 (domain-tool composition). See
+# dev-docs/designs/upstream-contracts.md.
 sonara = { version = "0.2", path = "../sonara/sonara" }
-kglite = { version = "0.14", path = "../KGLite/crates/kglite", default-features = false }
+kglite = { version = "0.14.1", path = "../KGLite/crates/kglite", default-features = false }
+kglite-mcp-server = { version = "0.14.1", path = "../KGLite/crates/kglite-mcp-server", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;

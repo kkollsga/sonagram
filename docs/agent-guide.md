@@ -1,14 +1,14 @@
 # Agent guide
 
-sonagram is built for AI agents: the graph is served over MCP by
-`kglite-mcp-server`, and an agent translates intent into a typed Sonagram
+sonagram is built for AI agents: the graph is served by
+`sonagram-mcp-server`, a thin KGLite 0.14.1 frontend, and an agent translates intent into a typed Sonagram
 curation brief. The library—not the agent—selects, orders, repairs, audits, and
 stores playlists. The repo
 ships the full agent-facing manual as **`AGENT-GUIDE.md`** at its root, plus an
 invocable Claude Code skill at **`skills/sonagram-playlist/`**. This page is the
 orientation; the manual is the reference.
 
-## The three tools
+## Generic and typed tools
 
 An agent works the graph through three MCP tools:
 
@@ -21,9 +21,10 @@ An agent works the graph through three MCP tools:
 - **`music_library_profile`** — report eligible counts, axis coverage, and
   means before translating an unusual request.
 
-On KGLite 0.14.0, typed curate/audit/store calls still require the agent host's
-shell or Python runtime; an MCP-only host can explore but must not invent final
-IDs. The upstream domain-tool seam is tracked for a future direct MCP route.
+Typed `music_curation_policy`, `music_curate_playlist`,
+`music_audit_playlist`, `music_explain_playlist`, and `music_playlist*` store
+tools call Sonagram's library methods against the same live graph. MCP-only
+hosts therefore use the full contract without inventing final IDs.
 
 The [graph schema](graph-schema.md) is the node/edge/property reference those
 queries run against.
@@ -45,8 +46,9 @@ queries run against.
 
 ## Creating and accepting the answer
 
-Use graph tools for exploration, then run [`sonagram curate`](cli.md#sonagram-profile--curate--audit--explain)
-or [`curate_playlist`](python-api.md#curation-profile_library-curate_playlist-audit_playlist-explain_playlist).
+Use graph tools for exploration, then call `music_curate_playlist`, run
+[`sonagram curate`](cli.md#sonagram-profile--curate--audit--explain), or use
+[`curate_playlist`](python-api.md#curation-profile_library-curate_playlist-audit_playlist-explain_playlist).
 Choose a preset plus size/duration/seeds; do not hand-select or reorder returned
 IDs. Accept only `exportable: true` with `audit.passed: true`.
 

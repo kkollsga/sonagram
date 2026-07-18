@@ -2,7 +2,7 @@
 
 You are an AI agent with MCP access to a **sonagram** knowledge graph: a music
 library mapped into [kglite](https://github.com/kkollsga/kglite) and served by
-`kglite-mcp-server`. Three MCP tools matter:
+`sonagram-mcp-server`, a thin KGLite 0.14.1 frontend. Generic exploration uses:
 
 - **`cypher_query`** — run one openCypher query, get up to ~15 rows inline.
   It takes a single `query` string and **nothing else**: there is no parameter
@@ -13,9 +13,11 @@ library mapped into [kglite](https://github.com/kkollsga/kglite) and served by
 - **`music_library_profile`** — fast eligible counts, per-axis coverage, and
   means before unusual curation requests.
 
-KGLite 0.14.0 does not expose Sonagram's typed curate/audit/store operations as
-MCP tools. Final playlist work therefore requires a host shell or Python
-runtime; an MCP-only host must report that limitation and never hand-author IDs.
+Typed library operations are **`music_curation_policy`**,
+**`music_curate_playlist`**, **`music_audit_playlist`**,
+**`music_explain_playlist`**, and the `music_playlist*` list/show/update/delete
+store tools. They call the same Rust methods as CLI/Python against KGLite's live
+graph; MCP-only agents never need to hand-author IDs.
 
 These graph tools are for exploration and explanation. For a final playlist,
 the agent translates intent into a `PlaylistBrief` / preset and invokes
@@ -25,11 +27,9 @@ Never hand-select or reorder final IDs from Cypher rows.
 
 ## Playlist curation contract
 
-Use `sonagram profile --format json` for calibration, then call `sonagram
-curate --preset <focus|party|workout|chill|discovery|general> --tracks <N>
---name "..." --description "..." --format json`. Python exposes the same
-contract as `profile_library`, `curate_playlist`, `audit_playlist`, and
-`explain_playlist` over a saved `.kgl` path.
+Use `music_library_profile` for calibration, resolve a preset with
+`music_curation_policy`, then call `music_curate_playlist` with a typed brief
+and optional `store`. CLI `sonagram curate` and Python expose the same contract.
 
 Resolve the complete versioned preset with `sonagram policy --preset <name>
 --format json` or Python `sonagram.curation_policy(name)`. The typed request

@@ -102,12 +102,13 @@ launch command it prints—or drive the same library contract from Python:
 
 ```bash
 sonagram mcp install
-# RUN: '/absolute/path/kglite-mcp-server' --graph '/.../music.kgl'
+# RUN: '/absolute/path/sonagram-mcp-server' --graph '/.../music.kgl'
 ```
 
-The released KGLite 0.14.0 server reveals Sonagram methodology and read-only
-profile/query tools; typed curate/audit/store calls require an agent host with a
-shell or Python runtime until KGLite's downstream domain-tool seam ships.
+The thin Sonagram frontend embeds KGLite 0.14.1's server and registers typed
+profile/policy/curate/audit/explain/store tools against its live graph. KGLite
+still owns MCP, Cypher, graph lifecycle, and generic tools; Sonagram owns only
+the music-domain handlers.
 
 ```python
 import sonagram

@@ -1427,7 +1427,7 @@ fn cmd_mcp(args: &[String]) -> Result<()> {
                 Some(command) => println!("{}: {command}", crate::mcp::launch_label()),
                 None => println!(
                     "NEXT: configure your MCP client with an absolute path to \
-                     `kglite-mcp-server` and --graph {}",
+                     `sonagram-mcp-server` and --graph {}",
                     report.graph_path.display()
                 ),
             }

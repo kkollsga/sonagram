@@ -42,6 +42,8 @@ pub mod skill;
 
 pub mod mcp;
 
+pub mod mcp_server;
+
 pub use error::{Result, SonagramError};
 
 /// The sonagram crate version, sourced from `Cargo.toml` at compile time.

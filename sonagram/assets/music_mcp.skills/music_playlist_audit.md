@@ -1,8 +1,9 @@
 ---
 name: music_playlist_audit
 description: "TRIGGER when evaluating an ordered playlist or before claiming one is ready. Use Sonagram's independent audit/explanation methods and report their metrics/issues. SKIP subjective quality claims unsupported by the audit and track metadata."
-references_tools: [music_library_profile]
+references_tools: [music_audit_playlist, music_explain_playlist]
 applies_when:
+  tool_registered: music_audit_playlist
   graph_has_property: {node_type: Track, prop_name: is_canonical}
 ---
 
@@ -11,9 +12,11 @@ applies_when:
 # Audit is the acceptance gate
 
 For library-curated results, require `exportable: true` and `audit.passed:
-true`. For an existing order run `sonagram audit --ids ... --format json`, then
-`sonagram explain --ids ... --format json` when diagnosis is useful. Python
-parity is `audit_playlist` / `explain_playlist`.
+true`. For an existing order call `music_audit_playlist`, then
+`music_explain_playlist` when diagnosis is useful. Include the original brief
+when available so target count, duration, seed-relative, and categorical intent
+are independently checked. CLI/Python parity is `audit`/`explain` and
+`audit_playlist`/`explain_playlist`.
 
 Check hard eligibility, duplicate Track/Song IDs, artist/album concentration,
 artist spacing, mean and worst transition scores, duration, and arc error. If

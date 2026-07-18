@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Maps music-library analysis (sonara) into a kglite knowledge graph"
+default-run = "sonagram"
 readme = "../README.md"
 keywords = ["music", "knowledge-graph", "audio", "playlist", "cypher"]
 categories = ["multimedia::audio", "database"]
@@ -12,6 +13,7 @@ categories = ["multimedia::audio", "database"]
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+schemars = { workspace = true }
 blake3 = { workspace = true }
 walkdir = { workspace = true }
 thiserror = { workspace = true }
@@ -19,6 +21,11 @@ rayon = { workspace = true }
 ureq = { workspace = true }
 sonara = { workspace = true }
 kglite = { workspace = true }
+kglite-mcp-server = { workspace = true }
+
+[[bin]]
+name = "sonagram-mcp-server"
+path = "src/bin/sonagram-mcp-server.rs"
 
 [dev-dependencies]
 # Test-only: precise mtime control for the incremental-rescan stat fast-path

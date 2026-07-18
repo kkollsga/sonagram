@@ -5,6 +5,7 @@ import os
 import queue
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -37,7 +38,7 @@ def notify(process, method):
     process.stdin.flush()
 
 
-def inspect_server(graph_path, server):
+def inspect_server(graph_path, server, env=None):
     process = subprocess.Popen(
         [server, "--graph", str(graph_path)],
         stdin=subprocess.PIPE,
@@ -45,6 +46,7 @@ def inspect_server(graph_path, server):
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        env=env,
     )
     process.responses = queue.Queue()
 
@@ -78,9 +80,19 @@ def inspect_server(graph_path, server):
         raise
 
 
+def tool_payload(result):
+    text = "\n".join(part.get("text", "") for part in result.get("content", []))
+    return json.loads(text)
+
+
 repo = Path(__file__).resolve().parents[2]
 fixtures = repo / "sonagram" / "tests" / "fixtures" / "analyses"
-binary = os.environ.get("SONAGRAM_TEST_BIN") or shutil.which("sonagram")
+venv_binary = Path(sys.executable).with_name("sonagram")
+binary = (
+    os.environ.get("SONAGRAM_TEST_BIN")
+    or (str(venv_binary) if venv_binary.is_file() else None)
+    or shutil.which("sonagram")
+)
 assert binary, "sonagram console script is required"
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -129,17 +141,44 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     server_path = Path(server_line.split("server:", 1)[1].strip())
     assert server_path.is_absolute() and server_path.is_file()
+    writable = subprocess.run(
+        [server_path, "--graph", str(graph_path), "--writable"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert writable.returncode != 0
+    assert "read-only" in writable.stderr
+    selftest = subprocess.run(
+        [server_path, "--graph", str(graph_path), "--selftest"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Selftest PASSED" in selftest.stdout
     secret = "LASTFM_API_KEY=must-not-be-readable"
     (root / ".env").write_text(secret)
 
-    process, tools, prompts = inspect_server(graph_path, server_path)
+    process, tools, prompts = inspect_server(graph_path, server_path, env=env)
     try:
         by_name = {tool["name"]: tool for tool in tools}
-        assert "music_library_profile" in by_name
-        # KGLite 0.14.0 registers source tools after manifest overrides, so its
+        domain_tools = {
+            "music_library_profile",
+            "music_curation_policy",
+            "music_curate_playlist",
+            "music_audit_playlist",
+            "music_explain_playlist",
+            "music_playlists_list",
+            "music_playlist_show",
+            "music_playlist_update",
+            "music_playlist_delete",
+        }
+        assert domain_tools.issubset(by_name)
+        # KGLite 0.14.1 still registers source tools after manifest overrides, so its
         # documented `hidden: true` currently does not remove these routes.
         # Sonagram's security boundary is therefore the validated empty source
-        # sandbox. Accept a future KGLite that hides them; on 0.14.0 prove a
+        # sandbox. Accept a future KGLite that hides them; meanwhile prove a
         # traversal cannot reach the graph-adjacent .env sentinel.
         if "read_source" in by_name:
             blocked = rpc(
@@ -187,31 +226,146 @@ with tempfile.TemporaryDirectory() as tmp:
             "music_playlist_audit",
             "music_playlist_store",
         }.issubset(prompt_names)
-        profile = rpc(
+        profile = tool_payload(rpc(
             process,
             4,
             "tools/call",
             {"name": "music_library_profile", "arguments": {}},
-        )
-        text = "\n".join(part.get("text", "") for part in profile.get("content", []))
-        assert "tracks" in text and "music_tracks" in text, text
-        assert "energy_present" in text and "arousal_present" in text, text
+        ))
+        assert profile["ok"] is True
+        assert profile["result"]["tracks"] == 15
+        assert profile["result"]["stats"]["energy"]["present"] > 0
+
+        policy = tool_payload(rpc(
+            process,
+            5,
+            "tools/call",
+            {"name": "music_curation_policy", "arguments": {"preset": "general"}},
+        ))
+        assert policy["ok"] is True
+        assert policy["result"]["version"] == 1
+
+        brief = {"preset": "general", "target_tracks": 5}
+        curate_args = {"brief": brief}
+        curated = tool_payload(rpc(
+            process,
+            6,
+            "tools/call",
+            {"name": "music_curate_playlist", "arguments": curate_args},
+        ))
+        repeated = tool_payload(rpc(
+            process,
+            7,
+            "tools/call",
+            {"name": "music_curate_playlist", "arguments": curate_args},
+        ))
+        assert curated == repeated
+        assert curated["ok"] is True
+        result = curated["result"]["curated"]
+        assert result["exportable"] and result["audit"]["passed"]
+        track_ids = result["track_ids"]
+
+        audited = tool_payload(rpc(
+            process,
+            8,
+            "tools/call",
+            {
+                "name": "music_audit_playlist",
+                "arguments": {"track_ids": track_ids, "brief": brief},
+            },
+        ))
+        assert audited["ok"] is True
+        assert audited["result"] == result["audit"]
+
+        explained = tool_payload(rpc(
+            process,
+            9,
+            "tools/call",
+            {
+                "name": "music_explain_playlist",
+                "arguments": {"track_ids": track_ids, "brief": brief},
+            },
+        ))
+        assert explained["ok"] is True
+        assert len(explained["result"]["tracks"]) == len(track_ids)
+
+        stored = tool_payload(rpc(
+            process,
+            10,
+            "tools/call",
+            {
+                "name": "music_curate_playlist",
+                "arguments": {
+                    "brief": brief,
+                    "store": {"name": "MCP Focus", "description": "typed MCP gate"},
+                },
+            },
+        ))
+        assert stored["ok"] is True
+        stored_paths = stored["result"]["stored"]
+        assert stored_paths and Path(stored_paths["m3u8_path"]).is_file()
+        assert Path(stored_paths["meta_path"]).is_file()
+        assert Path(stored_paths["m3u8_path"]).parent == home / "playlists"
+        slug = stored_paths["slug"]
+
+        listed = tool_payload(rpc(
+            process, 11, "tools/call", {"name": "music_playlists_list", "arguments": {}}
+        ))
+        assert listed["ok"] is True and listed["result"][0]["slug"] == slug
+        shown = tool_payload(rpc(
+            process,
+            12,
+            "tools/call",
+            {"name": "music_playlist_show", "arguments": {"slug": slug}},
+        ))
+        assert shown["ok"] is True and shown["result"]["request"] == "typed MCP gate"
+        updated = tool_payload(rpc(
+            process,
+            13,
+            "tools/call",
+            {
+                "name": "music_playlist_update",
+                "arguments": {"slug": slug, "description": "updated by MCP"},
+            },
+        ))
+        assert updated["ok"] is True and updated["result"]["request"] == "updated by MCP"
+        rejected_delete = tool_payload(rpc(
+            process,
+            14,
+            "tools/call",
+            {
+                "name": "music_playlist_delete",
+                "arguments": {"slug": slug, "confirm_slug": "wrong"},
+            },
+        ))
+        assert rejected_delete["ok"] is False
+        assert Path(stored_paths["m3u8_path"]).exists()
+        deleted = tool_payload(rpc(
+            process,
+            15,
+            "tools/call",
+            {
+                "name": "music_playlist_delete",
+                "arguments": {"slug": slug, "confirm_slug": slug},
+            },
+        ))
+        assert deleted["ok"] is True and deleted["result"]["deleted"] is True
+        assert not Path(stored_paths["m3u8_path"]).exists()
     finally:
         process.kill()
         process.wait()
 
-    # The same manifest beside a non-music graph keeps every Sonagram skill
-    # gated off; the declarative profile route remains registered but carries
-    # no music methodology in its description.
+    # The same manifest beside a generic graph keeps every Sonagram capability
+    # gated off, even if it uses the conventional Track.content_hash shape.
     other_path = root / "other.kgl"
     kglite.from_records(
         {
             "nodes": [
                 {
-                    "type": "Person",
-                    "id_field": "id",
-                    "title_field": "name",
-                    "records": [{"id": 1, "name": "Alice"}],
+                    "type": "Track",
+                    "id_field": "content_hash",
+                    "title_field": "title",
+                    "records": [{"content_hash": "generic", "title": "Not Sonagram"}],
                 }
             ]
         },
@@ -219,12 +373,10 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     shutil.copyfile(root / "music_mcp.yaml", root / "other_mcp.yaml")
     shutil.copytree(root / "music_mcp.skills", root / "other_mcp.skills")
-    process, tools, prompts = inspect_server(other_path, server_path)
+    process, tools, prompts = inspect_server(other_path, server_path, env=env)
     try:
         by_name = {tool["name"]: tool for tool in tools}
-        assert "sonagram-curation-contract:v1" not in by_name[
-            "music_library_profile"
-        ].get("description", "")
+        assert not any(name.startswith("music_") for name in by_name)
         prompt_names = {prompt["name"] for prompt in prompts}
         assert not any(name.startswith("music_") for name in prompt_names)
     finally:

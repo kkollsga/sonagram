@@ -100,11 +100,12 @@ sharpen playlist curation.
    `seed_similarity`, and `relative_*` targets (`relative_*_margin` requires a
    minimum change); use eligibility include/exclude
    lists for artists, genres, styles, decades, and year bounds. Resolve the full
-   preset with `sonagram policy --preset <preset> --format json` or Python
-   `sonagram.curation_policy()`. Use `sonagram profile --format json` only
-   when an unusual brief genuinely needs calibration. Cypher is for exploring
-   the library, never for selecting or ordering a final playlist.
+   preset with the MCP `music_curation_policy` tool, CLI `sonagram policy`, or
+   Python `sonagram.curation_policy()`. Use `music_library_profile` only when an
+   unusual brief genuinely needs calibration. Cypher is for exploring the
+   library, never for selecting or ordering a final playlist.
 4. **Curate + store through the library**:
+   call MCP `music_curate_playlist` with the typed brief and `store.name`, or use
    `sonagram curate --preset <preset> --tracks <N> --name "<request-derived name>" --description "<the user's ask>" --format json`.
    Sonagram enforces music/canonical eligibility, Track/Song/artist/album
    diversity, sequencing, bounded repair, independent audit, and explanation.
@@ -116,8 +117,8 @@ sharpen playlist curation.
    a Sonagram library issue. Do not hide it with an agent-only heuristic.
 6. **Deliver**: give the user the stored `.m3u8` path with the tracklist
    (artist – title per slot) and one line on how it fulfils the brief. Mention
-   `sonagram playlists` (and `sonagram playlists show <slug>`) to retrieve it
-   later. Offer a tweak round.
+   `music_playlists_list` / `music_playlist_show` (or `sonagram playlists`) to
+   retrieve it later. Offer a tweak round.
 
 ## Rules
 - Never modify, move, or retag source audio. Copies only, via `--copy-to`.
