@@ -128,8 +128,8 @@ struct DeleteResult {
 
 /// Run KGLite's stdio server with Sonagram's domain tools registered.
 ///
-/// A static `--graph` is mandatory because stored playlist provenance must
-/// identify the exact graph served by this process.
+/// A static `--graph` is mandatory because Sonagram exposes a deliberately
+/// read-only music capability set, registered against the boot graph schema.
 pub fn run<I, T>(args: I) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>
 where
     I: IntoIterator<Item = T>,
@@ -138,20 +138,18 @@ where
     let argv: Vec<OsString> = args.into_iter().map(Into::into).collect();
     // Let KGLite/Clap own its standard informational exits without forcing an
     // otherwise-unused graph argument first.
-    let graph_path = if argv.iter().skip(1).any(|value| {
+    if !argv.iter().skip(1).any(|value| {
         matches!(value.to_str(), Some("--help" | "-h" | "--version" | "-V"))
     }) {
-        PathBuf::new()
-    } else {
-        startup_graph_path(&argv)?
-    };
-    let extensions = server_extensions(graph_path);
+        startup_graph_path(&argv)?;
+    }
+    let extensions = server_extensions();
     kglite_mcp_server::run_with_extensions(argv, extensions)?;
     Ok(())
 }
 
-fn server_extensions(graph_path: PathBuf) -> ServerExtensions {
-    ServerExtensions::new().with_domain_tools(move |registry| {
+fn server_extensions() -> ServerExtensions {
+    ServerExtensions::new().with_domain_tools(|registry| {
         // A generic KGLite graph must not acquire music methods merely because
         // it happens to sit beside Sonagram's manifest assets.
         let state = registry.graph_state();
@@ -186,15 +184,12 @@ fn server_extensions(graph_path: PathBuf) -> ServerExtensions {
         )?;
 
         let graph = registry.graph_state().clone();
-        let curate_graph_path = graph_path.clone();
         registry.register_typed_tool::<CurateArgs, _>(
             "music_curate_playlist",
             "Deterministically select, sequence, repair, audit, and explain a playlist. Optional storage writes only an exportable, audit-passing result to Sonagram's configured store.",
-            move |args| {
-                handle_graph(&graph, |active| {
-                    curate_on_graph(active, &curate_graph_path, args)
-                })
-            },
+            move |args| handle_graph_context(&graph, |active, source_path| {
+                curate_on_graph(active, source_path, args)
+            }),
         )?;
 
         let graph = registry.graph_state().clone();
@@ -248,7 +243,24 @@ where
     }
 }
 
-fn curate_on_graph(graph: &DirGraph, graph_path: &Path, args: CurateArgs) -> Result<CurateResult> {
+fn handle_graph_context<T, F>(state: &DomainGraphState, operation: F) -> String
+where
+    T: Serialize,
+    F: FnOnce(&DirGraph, Option<&Path>) -> Result<T>,
+{
+    match state.with_context(|context| {
+        operation(context.graph().dir().as_ref(), context.source_path())
+    }) {
+        Some(result) => respond(result),
+        None => failure("no_active_graph", "no active graph is loaded"),
+    }
+}
+
+fn curate_on_graph(
+    graph: &DirGraph,
+    graph_path: Option<&Path>,
+    args: CurateArgs,
+) -> Result<CurateResult> {
     let policy = resolve_policy(Some(&args.brief), None, args.policy)?;
     let curated = curation::curate_playlist(graph, &args.brief, &policy)?;
     let stored = match args.store {
@@ -257,6 +269,11 @@ fn curate_on_graph(graph: &DirGraph, graph_path: &Path, args: CurateArgs) -> Res
         // never create the playlist directory or write a partial artifact.
         Some(_) if !curated.exportable || !curated.audit.passed => None,
         Some(store) => {
+            let graph_path = graph_path.ok_or_else(|| {
+                SonagramError::Config(
+                    "active MCP graph has no persistence path for playlist provenance".into(),
+                )
+            })?;
             if store.name.trim().is_empty() {
                 return Err(SonagramError::Playlist(
                     "stored playlist name must not be empty".into(),
@@ -431,8 +448,7 @@ fn startup_graph_path(argv: &[OsString]) -> Result<PathBuf> {
             set_graph_arg(&mut graph, PathBuf::from(path))?;
         } else if value == "--writable" {
             return Err(SonagramError::Config(
-                "sonagram-mcp-server is read-only; --writable would invalidate static graph provenance"
-                    .into(),
+                "sonagram-mcp-server is intentionally read-only; --writable is unsupported".into(),
             ));
         }
         index += 1;
@@ -551,7 +567,7 @@ mod tests {
         };
         let result = curate_on_graph(
             fixture_graph().as_ref(),
-            &graph_path,
+            Some(&graph_path),
             CurateArgs {
                 brief,
                 policy: None,

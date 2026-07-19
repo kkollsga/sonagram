@@ -14,7 +14,7 @@ import kglite
 import sonagram
 
 
-def rpc(process, request_id, method, params):
+def rpc(process, request_id, method, params, allow_error=False):
     payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
     process.stdin.write(json.dumps(payload) + "\n")
     process.stdin.flush()
@@ -29,6 +29,8 @@ def rpc(process, request_id, method, params):
             stderr = process.stderr.read()
             raise AssertionError(f"MCP server exited during {method}: {stderr}")
         if response.get("id") == request_id:
+            if allow_error:
+                return response
             assert "error" not in response, response
             return response.get("result", {})
 
@@ -157,9 +159,6 @@ with tempfile.TemporaryDirectory() as tmp:
         text=True,
     )
     assert "Selftest PASSED" in selftest.stdout
-    secret = "LASTFM_API_KEY=must-not-be-readable"
-    (root / ".env").write_text(secret)
-
     process, tools, prompts = inspect_server(graph_path, server_path, env=env)
     try:
         by_name = {tool["name"]: tool for tool in tools}
@@ -175,44 +174,21 @@ with tempfile.TemporaryDirectory() as tmp:
             "music_playlist_delete",
         }
         assert domain_tools.issubset(by_name)
-        # KGLite 0.14.1 still registers source tools after manifest overrides, so its
-        # documented `hidden: true` currently does not remove these routes.
-        # Sonagram's security boundary is therefore the validated empty source
-        # sandbox. Accept a future KGLite that hides them; meanwhile prove a
-        # traversal cannot reach the graph-adjacent .env sentinel.
-        if "read_source" in by_name:
-            blocked = rpc(
+        # KGLite 0.14.2+ applies manifest hidden overrides after every route is
+        # registered. The empty source sandbox remains defense in depth, while
+        # discovery and direct-call rejection are now strict contracts.
+        for request_id, hidden_name in enumerate(
+            ("read_source", "grep", "list_source"), start=20
+        ):
+            assert hidden_name not in by_name
+            rejected = rpc(
                 process,
-                20,
+                request_id,
                 "tools/call",
-                {"name": "read_source", "arguments": {"file_path": "../.env"}},
+                {"name": hidden_name, "arguments": {}},
+                allow_error=True,
             )
-            blocked_text = "\n".join(
-                part.get("text", "") for part in blocked.get("content", [])
-            )
-            assert secret not in blocked_text, blocked_text
-        if "grep" in by_name:
-            searched = rpc(
-                process,
-                21,
-                "tools/call",
-                {"name": "grep", "arguments": {"pattern": "LASTFM_API_KEY"}},
-            )
-            searched_text = "\n".join(
-                part.get("text", "") for part in searched.get("content", [])
-            )
-            assert secret not in searched_text, searched_text
-        if "list_source" in by_name:
-            listed = rpc(
-                process,
-                22,
-                "tools/call",
-                {"name": "list_source", "arguments": {}},
-            )
-            listed_text = "\n".join(
-                part.get("text", "") for part in listed.get("content", [])
-            )
-            assert ".env" not in listed_text, listed_text
+            assert "error" in rejected, rejected
         description = by_name["music_library_profile"].get("description", "")
         assert "sonagram-curation-contract:v1" in description
         # Playlist methodology is routed through the dedicated profile tool;
@@ -306,6 +282,8 @@ with tempfile.TemporaryDirectory() as tmp:
         assert stored_paths and Path(stored_paths["m3u8_path"]).is_file()
         assert Path(stored_paths["meta_path"]).is_file()
         assert Path(stored_paths["m3u8_path"]).parent == home / "playlists"
+        stored_meta = json.loads(Path(stored_paths["meta_path"]).read_text())
+        assert Path(stored_meta["graph"]).resolve() == graph_path.resolve()
         slug = stored_paths["slug"]
 
         listed = tool_payload(rpc(

@@ -21,11 +21,11 @@ ureq = { version = "2", features = ["json"] }
 
 # Upstreams — consumed as cargo libraries, read-only here. `version` must be
 # satisfiable by the LOCAL path checkout: sonara 0.2.2 (needs the tags/mood
-# features), kglite 0.14.1 (domain-tool composition). See
+# features), kglite 0.14.3 (atomic domain context + late overrides). See
 # dev-docs/designs/upstream-contracts.md.
 sonara = { version = "0.2", path = "../sonara/sonara" }
-kglite = { version = "0.14.1", path = "../KGLite/crates/kglite", default-features = false }
-kglite-mcp-server = { version = "0.14.1", path = "../KGLite/crates/kglite-mcp-server", default-features = false }
+kglite = { version = "0.14.3", path = "../KGLite/crates/kglite", default-features = false }
+kglite-mcp-server = { version = "0.14.3", path = "../KGLite/crates/kglite-mcp-server", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;

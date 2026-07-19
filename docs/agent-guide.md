@@ -1,7 +1,7 @@
 # Agent guide
 
 sonagram is built for AI agents: the graph is served by
-`sonagram-mcp-server`, a thin KGLite 0.14.1 frontend, and an agent translates intent into a typed Sonagram
+`sonagram-mcp-server`, a thin KGLite 0.14.3 frontend, and an agent translates intent into a typed Sonagram
 curation brief. The library—not the agent—selects, orders, repairs, audits, and
 stores playlists. The repo
 ships the full agent-facing manual as **`AGENT-GUIDE.md`** at its root, plus an
