@@ -550,6 +550,10 @@ pub struct PlaylistTrackMeta {
 /// Library-owned curation provenance persisted with a curated playlist.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct CurationProvenance {
+    /// Exact analysis/model input identity of the graph used for curation.
+    /// Legacy stored playlists omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_input_fingerprint: Option<String>,
     pub brief: PlaylistBrief,
     pub policy: PlaylistPolicy,
     pub audit: PlaylistAudit,
@@ -649,6 +653,7 @@ pub fn save_curated_playlist(
         ));
     }
     let provenance = CurationProvenance {
+        build_input_fingerprint: curated.build_input_fingerprint.clone(),
         brief: curated.brief.clone(),
         policy: curated.policy.clone(),
         audit: curated.audit.clone(),

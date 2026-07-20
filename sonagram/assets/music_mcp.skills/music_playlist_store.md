@@ -18,5 +18,7 @@ its curation metadata. Retrieve with `music_playlists_list` and
 requires an exact `confirm_slug` match.
 
 Never edit `.meta.json` or reorder `.m3u8` by hand. Stored provenance is the
-evidence tying the user brief, resolved policy, audit, repair count, graph, and
-ordered IDs together.
+evidence tying the user brief, resolved policy, audit, repair count, graph,
+immutable `build_input_fingerprint`, and ordered IDs together. Use that
+fingerprint—not the graph pathname—to decide whether two stored results came
+from identical analysis/model inputs.

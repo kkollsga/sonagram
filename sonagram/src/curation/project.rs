@@ -8,6 +8,12 @@ use crate::{Result, SonagramError};
 
 pub(crate) const TRACK: &str = "Track";
 
+pub(crate) fn graph_build_input_fingerprint(graph: &DirGraph) -> Option<String> {
+    let index = graph.type_indices.get("Library")?.to_vec().into_iter().next()?;
+    let node = graph.get_node(index)?;
+    prop_string(node, "build_input_fingerprint", graph)
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct TrackCandidate {
     pub id: String,

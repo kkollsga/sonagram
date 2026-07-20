@@ -484,6 +484,10 @@ pub struct PlaylistExplanation {
 pub struct CuratedPlaylist {
     pub exportable: bool,
     pub track_ids: Vec<String>,
+    /// Immutable identity of the exact analysis/model cache inputs behind the
+    /// graph used for selection. Absent only for legacy/external graphs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_input_fingerprint: Option<String>,
     pub brief: PlaylistBrief,
     pub policy: PlaylistPolicy,
     pub audit: PlaylistAudit,

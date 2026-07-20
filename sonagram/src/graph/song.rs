@@ -386,6 +386,8 @@ mod tests {
                 hop_length: 512,
                 mode: "playlist".to_string(),
                 requested_features: None,
+                genre_model_id: None,
+                vocalness_model_id: None,
             },
             duration_sec: 1.0,
             bpm: 0.0,

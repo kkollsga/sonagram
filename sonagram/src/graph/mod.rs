@@ -76,6 +76,59 @@ pub fn embedding_model_id() -> String {
     format!("sonara-similarity-v{SIMILARITY_VERSION}")
 }
 
+/// Versioned deterministic identity of the exact cached analysis records a
+/// graph consumes. Unlike [`crate::scan::cache::scan_fingerprint`], this moves
+/// when analysis values or their provenance/model identity change even if the
+/// source files' path, size, and mtime do not.
+pub fn build_input_fingerprint(records: &[AnalysisRecord]) -> Result<String> {
+    let mut serialized = Vec::with_capacity(records.len());
+    for record in records {
+        serialized.push((
+            record.source.content_hash.as_str(),
+            record.to_json_pretty()?,
+        ));
+    }
+    serialized.sort_by(|a, b| a.0.cmp(b.0).then_with(|| a.1.cmp(&b.1)));
+
+    let mut hasher = blake3::Hasher::new();
+    hash_fingerprint_field(&mut hasher, b"sonagram-build-input-v1");
+    hash_fingerprint_field(
+        &mut hasher,
+        sonara::analyze::ANALYSIS_SCHEMA_VERSION
+            .to_string()
+            .as_bytes(),
+    );
+    hash_fingerprint_field(&mut hasher, SIMILARITY_VERSION.to_string().as_bytes());
+    hash_fingerprint_field(&mut hasher, GRAPH_SCHEMA_VERSION.to_string().as_bytes());
+    hash_fingerprint_field(&mut hasher, serialized.len().to_string().as_bytes());
+    for (content_hash, json) in serialized {
+        hash_fingerprint_field(&mut hasher, content_hash.as_bytes());
+        hash_fingerprint_field(&mut hasher, json.as_bytes());
+    }
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn hash_fingerprint_field(hasher: &mut blake3::Hasher, bytes: &[u8]) {
+    hasher.update(&(bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
+}
+
+fn combined_build_input_fingerprint(
+    source_fingerprints: &BTreeMap<String, String>,
+) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hash_fingerprint_field(&mut hasher, b"sonagram-combined-build-input-v1");
+    hash_fingerprint_field(
+        &mut hasher,
+        source_fingerprints.len().to_string().as_bytes(),
+    );
+    for (root, fingerprint) in source_fingerprints {
+        hash_fingerprint_field(&mut hasher, root.as_bytes());
+        hash_fingerprint_field(&mut hasher, fingerprint.as_bytes());
+    }
+    hasher.finalize().to_hex().to_string()
+}
+
 /// The `(node_type, property)` key under which the similarity embedding store is
 /// registered, and its distance metric.
 pub const EMBEDDING_PROPERTY: &str = "similarity";
@@ -234,13 +287,23 @@ pub fn build_graph_from_sources(
     // P19: source root → its scan-state fingerprint (if any). Parallel to
     // `source_counts`, so `add_sources` can stamp `Source.scan_fingerprint`.
     let mut source_fingerprints: BTreeMap<String, Option<String>> = BTreeMap::new();
+    // Exact cached-analysis identity, independent of source file stats. Always
+    // present, including fixture builds, so graph and playlist provenance can
+    // prove which analysis/model outputs were consumed.
+    let mut source_build_fingerprints: BTreeMap<String, String> = BTreeMap::new();
     // Every configured source gets a node even if it wins no unique track.
     for s in &srcs {
         source_counts.entry(s.root.clone()).or_insert(0);
         source_fingerprints
             .entry(s.root.clone())
             .or_insert_with(|| s.scan_fingerprint.clone());
+        let fingerprint = build_input_fingerprint(s.records)?;
+        source_build_fingerprints
+            .entry(s.root.clone())
+            .or_insert(fingerprint);
     }
+    let combined_build_fingerprint =
+        combined_build_input_fingerprint(&source_build_fingerprints);
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     let mut sorted: Vec<&AnalysisRecord> = Vec::new();
     for s in &srcs {
@@ -320,7 +383,12 @@ pub fn build_graph_from_sources(
     add_decades(&mut graph, &decades)?;
     // P17: one Source node per configured source (endpoints for FROM_SOURCE).
     // P19: also stamps each source's scan_fingerprint when available.
-    add_sources(&mut graph, &source_counts, &source_fingerprints)?;
+    add_sources(
+        &mut graph,
+        &source_counts,
+        &source_fingerprints,
+        &source_build_fingerprints,
+    )?;
 
     // P21 Stage A curve features + Stage B composite axes, computed once over the
     // sorted set (pure functions of the cached record curves/scalars — no
@@ -420,6 +488,11 @@ pub fn build_graph_from_sources(
         ("id", ColumnType::String, str1(&lib_label)),
         ("path", ColumnType::String, str1(&lib_label)),
         ("n_tracks", ColumnType::Int64, int1(sorted.len() as i64)),
+        (
+            "build_input_fingerprint",
+            ColumnType::String,
+            str1(&combined_build_fingerprint),
+        ),
         (
             "schema_version",
             ColumnType::Int64,
@@ -692,6 +765,7 @@ fn add_sources(
     graph: &mut DirGraph,
     source_counts: &BTreeMap<String, i64>,
     source_fingerprints: &BTreeMap<String, Option<String>>,
+    source_build_fingerprints: &BTreeMap<String, String>,
 ) -> Result<()> {
     if source_counts.is_empty() {
         return Ok(());
@@ -699,10 +773,19 @@ fn add_sources(
     let ids: Vec<Option<String>> = source_counts.keys().map(|k| Some(k.clone())).collect();
     let paths = ids.clone();
     let counts: Vec<Option<i64>> = source_counts.values().map(|c| Some(*c)).collect();
+    let build_fingerprints: Vec<Option<String>> = source_counts
+        .keys()
+        .map(|root| source_build_fingerprints.get(root).cloned())
+        .collect();
     let mut cols = vec![
         ("id", ColumnType::String, ColumnData::String(ids)),
         ("path", ColumnType::String, ColumnData::String(paths)),
         ("n_tracks", ColumnType::Int64, ColumnData::Int64(counts)),
+        (
+            "build_input_fingerprint",
+            ColumnType::String,
+            ColumnData::String(build_fingerprints),
+        ),
     ];
     // P19: stamp `scan_fingerprint` ONLY when at least one source carries one, so a
     // fixture build (no index) omits the column entirely and the golden digest is
@@ -784,6 +867,10 @@ fn add_tracks(
         sorted.iter().map(|r| tag_str(r, |t| t.genre.as_deref())).collect();
     let format: Vec<Option<String>> =
         sorted.iter().map(|r| Some(r.source.format.clone())).collect();
+    let genre_model_id =
+        str_opt_col(sorted, |r| r.analysis.provenance.genre_model_id.clone());
+    let vocalness_model_id =
+        str_opt_col(sorted, |r| r.analysis.provenance.vocalness_model_id.clone());
 
     // Int columns.
     let year = int_opt_col(sorted, |r| r.tags.as_ref().and_then(|t| t.year).map(|y| y as i64));
@@ -912,6 +999,12 @@ fn add_tracks(
             ColumnData::Int64(analysis_schema_version),
         ),
         ("embedding_version", ColumnType::Int64, ColumnData::Int64(embedding_version)),
+        ("genre_model_id", ColumnType::String, ColumnData::String(genre_model_id)),
+        (
+            "vocalness_model_id",
+            ColumnType::String,
+            ColumnData::String(vocalness_model_id),
+        ),
         ("duration_sec", ColumnType::Float64, ColumnData::Float64(duration_sec)),
         ("bpm", ColumnType::Float64, ColumnData::Float64(bpm)),
         ("bpm_raw", ColumnType::Float64, ColumnData::Float64(bpm_raw)),

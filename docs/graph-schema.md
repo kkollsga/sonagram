@@ -62,6 +62,8 @@ be null (opt-in analysis that wasn't run, or a tag the file lacked).
 | `zero_crossing_rate` | float | no | timbre proxy |
 | `analysis_schema_version` | int | no | provenance |
 | `embedding_version` | int | yes | provenance |
+| `genre_model_id` | str | yes | exact Sonara genre-model identity; null when no model ran |
+| `vocalness_model_id` | str | yes | exact Sonara vocalness-model identity; null for the built-in heuristic |
 
 ### Graph-derived Track properties (schema v2)
 
@@ -116,7 +118,8 @@ alternate take among recognized releases.
 | `Decade` | e.g. `"1970s"` | `name` |
 | `Style` (detected) | `"style-000"` (id prop is `unique_id`) | `name` (derived `<band>-<acoustic\|electric>-<top-genre>`), `mean_bpm`, `mean_energy`, `mean_valence`, `mean_acousticness`, `n_tracks`, `top_genres` (list), `top_artists` (list), `exemplar_titles` (list) |
 | `Song` | `artist_id\|normalized_title` | `title`, `artist`, `n_versions`, `canonical_hash`; exists for version groups with at least two members |
-| `Library` (1) | label | `path`, `n_tracks`, `schema_version` |
+| `Source` | absolute source root | `path`, `n_tracks`, optional stat-only `scan_fingerprint`, exact-cache `build_input_fingerprint` |
+| `Library` (1) | label | `path`, `n_tracks`, `schema_version`, combined `build_input_fingerprint` |
 
 ## Edges
 
@@ -129,6 +132,7 @@ alternate take among recognized releases.
 | `IN_TEMPO_BAND` | `Track`→`TempoBand` | — | always (bpm always present) |
 | `AT_ENERGY` | `Track`→`EnergyLevel` | — | only if `energy_level` present |
 | `FROM_DECADE` | `Track`→`Decade` | — | only if a year tag present; uses `original_year` when set, else file `year` (see `era_source`) |
+| `FROM_SOURCE` | `Track`→`Source` | — | always; identifies the owning configured source |
 | `SIMILAR_TO` | `Track`→`Track` | `score` 0–1 | top-10 kNN by audio embedding; **directed** (A→B ≠ B→A) |
 | `VERSION_OF` | `Track`→`Song` | — | distinct recordings in a version group |
 | `IN_STYLE` | `Track`→`Style` | `membership` | tracks in a similarity community |

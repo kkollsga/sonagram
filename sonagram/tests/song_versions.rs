@@ -287,6 +287,8 @@ fn minimal_analysis() -> AnalysisDto {
             hop_length: 512,
             mode: "playlist".to_string(),
             requested_features: None,
+            genre_model_id: None,
+            vocalness_model_id: None,
         },
         duration_sec: 180.0,
         bpm: 120.0,

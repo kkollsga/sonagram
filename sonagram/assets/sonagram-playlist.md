@@ -84,15 +84,18 @@ sharpen playlist curation.
 
 ## Workflow
 1. **Freshness**: `sonagram status --format json` (probes every configured
-   source; exit = worst-of). Exit 0 → skip to step 3. Exit 1/2 → warn the user a
-   cold scan is hours-scale on a big library / incremental is minutes, then
-   `sonagram scan` (all sources; enriches from Last.fm in parallel when a key is
-   configured — `--no-enrich` opts out). Scans stream results to disk: a killed
-   scan resumes where it stopped, and `sonagram progress [--format json]` shows
-   live per-source %, rate, and ETA from any shell while it runs.
-2. **(Re)build**: `sonagram build` (multi-source → the configured graph). If the
-   scan ran without a Last.fm key and one is configured later, run
-   `sonagram enrich` before building (see above).
+   source; exit = worst-of). Read the two axes separately: `needs_scan` means
+   source files need analysis/retry; `graph_stale` means the graph differs from
+   the currently usable cache. `sources[].graph_current_for_cache=true` may
+   legitimately coexist with retryable scan failures. Run `sonagram scan` only
+   when `needs_scan` is true (cold scans are hours-scale; incremental scans are
+   minutes). Scans stream results to disk: a killed scan resumes where it
+   stopped, and `sonagram progress [--format json]` shows live per-source %,
+   rate, and ETA.
+2. **(Re)build only when needed**: re-run status after any scan, then run
+   `sonagram build` only when `graph_stale` is true. If the scan ran without a
+   Last.fm key and one is configured later, run `sonagram enrich` before
+   building (see above).
 3. **Translate intent, do not curate privately**: choose one preset—`focus`,
    `party`, `workout`, `chill`, `discovery`, or `general`—plus requested track
    count/duration and explicit seeds. Plain seeds are pinned. For seed-relative
@@ -111,7 +114,8 @@ sharpen playlist curation.
    diversity, sequencing, bounded repair, independent audit, and explanation.
    Never replace or reorder the returned IDs. A result is ready only when
    `exportable` and `audit.passed` are both true; a named successful result
-   writes the paired `.m3u8` + `.meta.json` to the central store.
+   writes the paired `.m3u8` + `.meta.json` to the central store, including the
+   immutable analysis/model `build_input_fingerprint`.
 5. **Evaluate honestly**: read audit metrics/issues and explanations. If the
    result is poor despite passing, describe the concrete defect and treat it as
    a Sonagram library issue. Do not hide it with an agent-only heuristic.

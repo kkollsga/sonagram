@@ -488,6 +488,23 @@ fn _track_tags_fields_present(t: sonara::analyze::TrackTags) {
     } = t;
 }
 
+/// Compile-time proof that every `AnalysisProvenance` field mirrored by
+/// `ProvenanceDto` still exists. The exhaustive pattern also forces a conscious
+/// mapping decision whenever sonara adds provenance that affects persisted
+/// analysis identity.
+#[allow(dead_code)]
+fn _analysis_provenance_fields_present(p: sonara::analyze::AnalysisProvenance) {
+    let sonara::analyze::AnalysisProvenance {
+        schema_version: _,
+        sample_rate: _,
+        hop_length: _,
+        mode: _,
+        requested_features: _,
+        genre_model_id: _,
+        vocalness_model_id: _,
+    } = p;
+}
+
 #[test]
 fn contract_sonara() {
     use sonara::analyze::{AnalysisConfig, AnalysisMode, ANALYSIS_SCHEMA_VERSION};

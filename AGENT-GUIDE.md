@@ -120,6 +120,8 @@ that wasn't run, or a tag the file lacked).
 | `zero_crossing_rate` | float | no | timbre proxy |
 | `analysis_schema_version` | int | no | provenance |
 | `embedding_version` | int | yes | provenance |
+| `genre_model_id` | str | yes | exact Sonara genre model identity; null when no genre model ran |
+| `vocalness_model_id` | str | yes | exact Sonara vocalness model identity; null for the built-in heuristic |
 
 **P21 curve-derived features** (graph schema v2 — computed from the full
 analysis curves at build time):
@@ -177,7 +179,8 @@ the master rather than an alternate take.
 | `Decade` | e.g. `"1970s"` | `name` |
 | `Style` (detected) | `"style-000"` (id prop is `unique_id`) | `name` (derived `<band>-<acoustic\|electric>-<top-genre>`), `mean_bpm`, `mean_energy`, `mean_valence`, `mean_acousticness`, `n_tracks`, `top_genres` (list), `top_artists` (list), `exemplar_titles` (list) |
 | `Song` (P21, v2) | `artist_id\|normalized_title` | `title`, `artist`, `n_versions`, `canonical_hash` — exists only when ≥2 recordings share a version key; `canonical_hash` is selected by Last.fm match, then `recording_quality`, then ascending content hash |
-| `Library` (1) | label | `path`, `n_tracks`, `schema_version` |
+| `Source` | absolute source root | `path`, `n_tracks`, `scan_fingerprint`, `build_input_fingerprint` — the latter identifies exact cached analysis/model inputs, not only file stats |
+| `Library` (1) | label | `path`, `n_tracks`, `schema_version`, `build_input_fingerprint` (deterministic combination of sorted sources) |
 
 ## Edge reference
 
@@ -190,6 +193,7 @@ the master rather than an alternate take.
 | `IN_TEMPO_BAND` | `Track`→`TempoBand` | — | always (bpm always present) |
 | `AT_ENERGY` | `Track`→`EnergyLevel` | — | only if `energy_level` present |
 | `FROM_DECADE` | `Track`→`Decade` | — | only if a year tag present; uses `original_year` when set, else file `year` (see `era_source`) |
+| `FROM_SOURCE` | `Track`→`Source` | — | always; resolves the owning source in multi-library graphs |
 | `SIMILAR_TO` | `Track`→`Track` | `score` 0–1 | top-10 kNN; **directed** (A→B ≠ B→A) |
 | `VERSION_OF` | `Track`→`Song` | — | recordings of the same composition (P21); primary grouping is artist + normalized title, with the conservative junk-tag repair described below |
 | `IN_STYLE` | `Track`→`Style` | `membership` (1.0 in v1) | tracks in a similarity community |

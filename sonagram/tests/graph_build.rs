@@ -174,6 +174,39 @@ fn track_property_row_spot_check() {
 }
 
 #[test]
+fn analysis_model_ids_are_queryable_and_fingerprinted() {
+    let mut record = load_records()
+        .into_iter()
+        .find(|r| r.source.content_hash == BRUNO_HASH)
+        .expect("Bruno fixture present");
+    let before = graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap();
+    record.analysis.provenance.genre_model_id = Some("genre-test-v1".to_string());
+    record.analysis.provenance.vocalness_model_id =
+        Some("sonara-vocalness-v1".to_string());
+    assert_ne!(
+        graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap(),
+        before
+    );
+
+    let graph = graph::build_graph(
+        &[record],
+        &LibraryInfo {
+            root: "model-provenance".to_string(),
+            n_tracks: 1,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        str_prop(&graph, "Track", BRUNO_HASH, "genre_model_id"),
+        "genre-test-v1"
+    );
+    assert_eq!(
+        str_prop(&graph, "Track", BRUNO_HASH, "vocalness_model_id"),
+        "sonara-vocalness-v1"
+    );
+}
+
+#[test]
 fn non_music_track_nulls_only_composite_mood_axes() {
     let mut record = load_records()
         .into_iter()

@@ -153,22 +153,25 @@ with these keys:
 | `exit_code` | int | `0` \| `1` \| `2`, matching the exit status |
 
 **Config-driven form** (`sonagram status`, no path): probes every configured
-source and also reports **graph freshness** — the graph self-describes whether it
-still reflects the library. Each source is compared against the configured graph's
-`Source.scan_fingerprint` (a blake3 over the sorted `rel_path|size|mtime` scan
-state, recomputed cheaply from disk with a stat-only walk). The aggregate JSON
+source and also reports **graph freshness** — independently from source scan
+work. Each source's currently usable, fresh indexed records are compared against
+the graph's `Source.build_input_fingerprint`, which covers exact analysis values,
+Sonara schema/similarity versions, and analysis model IDs. The aggregate JSON
 adds:
 
 | Key | Type | Meaning |
 |---|---|---|
-| `sources[].graph_current` | bool\|null | source's fingerprint matches the graph (null if no graph) |
+| `sources[].graph_current_for_cache` | bool\|null | exact usable cache inputs match the graph (null if no graph) |
+| `sources[].graph_current` | bool\|null | compatibility alias for `graph_current_for_cache` |
 | `graph` | string\|null | the configured graph path |
 | `graph_present` | bool | the graph file exists |
 | `graph_stale` | bool | the graph must be rebuilt (missing, or a source drifted) |
 
 A stale graph is **action-worthy: exit `1`** even when every cache is fresh
-(status `needs_build`) — the fix is a `sonagram build` (~1s from cache), the
-add/delete/rebuild mechanism.
+(status `needs_build`) — the fix is a `sonagram build` (~1s from cache). The
+inverse is also explicit: retryable source failures can make `needs_scan=true`
+while `graph_current_for_cache=true`; the graph still exactly represents every
+analysis currently usable from the cache.
 
 ## `sonagram sources`
 

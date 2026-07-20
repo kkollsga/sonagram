@@ -699,6 +699,10 @@ fn curated_store_persists_provenance_and_rejects_failed_audits() {
     };
     let curated = curate_playlist(&graph, &brief, &six_track_policy()).unwrap();
     assert!(curated.exportable, "{:?}", curated.audit.issues);
+    assert!(
+        curated.build_input_fingerprint.is_some(),
+        "library-built graphs expose immutable analysis provenance"
+    );
     let entries = playlist::entries_from_graph(&graph, std::path::Path::new(""), &curated.track_ids)
         .unwrap();
     let store = std::env::temp_dir().join(format!(
@@ -721,12 +725,33 @@ fn curated_store_persists_provenance_and_rejects_failed_audits() {
     .unwrap();
     let loaded = playlist::load_playlist_meta(&store, &saved.slug).unwrap();
     let provenance = loaded.curation.expect("curation provenance");
+    assert_eq!(
+        provenance.build_input_fingerprint,
+        curated.build_input_fingerprint
+    );
     assert_eq!(provenance.brief, curated.brief);
     assert_eq!(provenance.policy, curated.policy);
     assert_eq!(provenance.audit.passed, curated.audit.passed);
     assert_eq!(provenance.audit.track_count, curated.audit.track_count);
     assert_eq!(provenance.audit.transitions.len(), curated.audit.transitions.len());
     assert_eq!(provenance.explanation.tracks.len(), curated.explanation.tracks.len());
+
+    let mut legacy: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&saved.meta_path).unwrap()).unwrap();
+    legacy["curation"]
+        .as_object_mut()
+        .unwrap()
+        .remove("build_input_fingerprint");
+    std::fs::write(&saved.meta_path, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
+    assert_eq!(
+        playlist::load_playlist_meta(&store, &saved.slug)
+            .unwrap()
+            .curation
+            .unwrap()
+            .build_input_fingerprint,
+        None,
+        "legacy curated metadata without the fingerprint remains readable"
+    );
 
     let mut failed = curated;
     failed.exportable = false;

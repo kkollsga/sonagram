@@ -1,12 +1,11 @@
 //! P19 cold-start bootstrap: end-to-end tests through the **built binary** plus
-//! graph-level assertions on the `Source.scan_fingerprint` property.
+//! graph-level assertions on source scan + analysis build fingerprints.
 //!
 //! Covered:
 //! - `sonagram skill show` prints the embedded skill (non-empty, self-named).
 //! - `sonagram skill install --dir <tmp>` writes the file.
-//! - `sonagram status` graph freshness transitions: build → fresh, rescan cache
-//!   without rebuilding → graph STALE (exit 1 even with fresh caches), rebuild →
-//!   fresh again.
+//! - `sonagram status` distinguishes source work from exact-cache graph
+//!   freshness, and detects reanalysis even when file stats do not change.
 //! - The scan_fingerprint is stamped on a `Source` node when a source carries one
 //!   and is **absent** for a fixture-style build (so the golden is unchanged).
 
@@ -157,9 +156,35 @@ fn status_reports_graph_stale_transitions() {
     assert_eq!(j["graph_present"], true);
     assert_eq!(j["graph_stale"], false, "graph is current after build: {j}");
     assert_eq!(j["sources"][0]["graph_current"], true);
+    assert_eq!(j["sources"][0]["graph_current_for_cache"], true);
     assert_eq!(code, 0, "fresh + current ⇒ exit 0");
 
-    // 2) Rescan the cache (file changed) WITHOUT rebuilding: caches stay fresh
+    // 2) Reanalysis can change graph inputs without changing path/size/mtime.
+    // Mutating a cached analysis value must make the graph stale even though
+    // the source itself needs no scan.
+    let cache = Cache::new(&lib);
+    let mut record = cache.load_record("h0").unwrap().unwrap();
+    record.analysis.vocalness = Some(0.987_654);
+    cache.save_record(&record).unwrap();
+    let (code, j) = status_json(&home);
+    assert_eq!(j["needs_scan"], false, "file stats remain fresh: {j}");
+    assert_eq!(j["sources"][0]["graph_current_for_cache"], false);
+    assert_eq!(j["graph_stale"], true);
+    assert_eq!(j["status"], "needs_build");
+    assert_eq!(code, 1);
+    run_ok(&home, &["build"]);
+
+    // 3) A changed source file has retryable scan work, but until analysis
+    // succeeds the graph is still current for every usable cached record.
+    std::fs::write(lib.join("a.mp3"), b"pending-rescan-audio-bytes-longer").unwrap();
+    let (code, j) = status_json(&home);
+    assert_eq!(j["needs_scan"], true);
+    assert_eq!(j["sources"][0]["graph_current_for_cache"], true);
+    assert_eq!(j["graph_stale"], false);
+    assert_eq!(j["status"], "needs_scan");
+    assert_eq!(code, 1);
+
+    // 4) Rescan the cache (file changed) WITHOUT rebuilding: caches stay fresh
     //    (index matches disk), but the graph's stamped fingerprint is now stale.
     build_cache(&lib, b"CHANGED-audio-bytes-longer-now");
     let (code, j) = status_json(&home);
@@ -170,7 +195,7 @@ fn status_reports_graph_stale_transitions() {
     assert_eq!(j["status"], "needs_build");
     assert_eq!(code, 1, "stale graph is action-worthy even with fresh caches");
 
-    // 3) Rebuild → current again.
+    // 5) Rebuild → current again.
     run_ok(&home, &["build"]);
     let (code, j) = status_json(&home);
     eprintln!("[stage 3: after rebuild] exit={code} graph_stale={} graph_current={}", j["graph_stale"], j["sources"][0]["graph_current"]);
@@ -189,6 +214,15 @@ fn source_fingerprint(graph: &DirGraph, id: &str) -> Option<String> {
     let node = graph.get_node(ni)?;
     match resolve_node_property(node, "scan_fingerprint", graph) {
         Value::String(s) if !s.is_empty() => Some(s),
+        _ => None,
+    }
+}
+
+fn string_property(graph: &DirGraph, node_type: &str, id: &str, property: &str) -> Option<String> {
+    let ni = graph.lookup_by_id_readonly(node_type, &Value::String(id.to_string()))?;
+    let node = graph.get_node(ni)?;
+    match resolve_node_property(node, property, graph) {
+        Value::String(value) if !value.is_empty() => Some(value),
         _ => None,
     }
 }
@@ -224,6 +258,15 @@ fn scan_fingerprint_stamped_when_present_absent_for_fixtures() {
         Some("deadbeef-fingerprint"),
         "a source's fingerprint is stamped on its Source node"
     );
+    let expected = graph::build_input_fingerprint(&records).unwrap();
+    assert_eq!(
+        string_property(&g, "Source", "src-a", "build_input_fingerprint").as_deref(),
+        Some(expected.as_str())
+    );
+    assert!(
+        string_property(&g, "Library", "src-a", "build_input_fingerprint").is_some(),
+        "combined Library fingerprint is always stamped"
+    );
 
     // A fixture-style build (no fingerprint) → the property is ABSENT, so the
     // golden digest is byte-unchanged.
@@ -232,4 +275,20 @@ fn scan_fingerprint_stamped_when_present_absent_for_fixtures() {
         source_fingerprint(&g2, "fixtures").is_none(),
         "no fingerprint ⇒ no scan_fingerprint property (golden stays unchanged)"
     );
+    assert_eq!(
+        string_property(&g2, "Source", "fixtures", "build_input_fingerprint").as_deref(),
+        Some(expected.as_str()),
+        "analysis build identity exists even without a scan index"
+    );
+}
+
+#[test]
+fn build_input_fingerprint_is_order_stable_and_analysis_sensitive() {
+    let mut records = load_records();
+    let first = graph::build_input_fingerprint(&records).unwrap();
+    records.reverse();
+    assert_eq!(graph::build_input_fingerprint(&records).unwrap(), first);
+
+    records[0].analysis.vocalness = Some(0.123_456);
+    assert_ne!(graph::build_input_fingerprint(&records).unwrap(), first);
 }

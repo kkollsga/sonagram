@@ -7,7 +7,9 @@ use super::audit::{
     audit_playlist_for_brief, eligibility_issues, explain_playlist_for_brief,
     max_seed_similarity, seed_constraint_issues, seed_directives_active, SeedBaselines,
 };
-use super::project::{embedding_similarity, project_tracks, TrackCandidate};
+use super::project::{
+    embedding_similarity, graph_build_input_fingerprint, project_tracks, TrackCandidate,
+};
 use super::sequence::{compare_track_sequences, repair_tracks, sequence_tracks};
 use super::types::{
     AuditIssue, AuditSeverity, CuratedPlaylist, FamiliarityPreference, PlaylistBrief,
@@ -274,6 +276,7 @@ pub fn curate_playlist(
     Ok(CuratedPlaylist {
         exportable: audit.passed && track_ids.len() == brief.target_tracks,
         track_ids,
+        build_input_fingerprint: graph_build_input_fingerprint(graph),
         brief: brief.clone(),
         policy: policy.clone(),
         audit,

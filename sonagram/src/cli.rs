@@ -218,10 +218,11 @@ SUBCOMMANDS:\n\
 \n\
 CONFIG-DRIVEN FORMS (no path args — fan out over configured sources):\n\
     sonagram scan                 scan every configured source\n\
-    sonagram status               probe all sources + graph freshness; JSON adds\n\
-                                  per-source `graph_current` + top-level\n\
-                                  `graph_stale` (a stale graph is exit 1 even when\n\
-                                  caches are fresh — rebuild with `sonagram build`)\n\
+    sonagram status               probe source + graph freshness separately; JSON\n\
+                                  adds `graph_current_for_cache` (`graph_current`\n\
+                                  compatibility alias) + top-level `graph_stale`.\n\
+                                  Retryable scan failures can coexist with a graph\n\
+                                  current for every usable cached analysis.\n\
     sonagram enrich               enrich all sources\n\
     sonagram build                multi-source build → the configured graph\n\
     sonagram playlist (--cypher|--ids ...) --name <name> [--description <text>]\n\
@@ -1519,9 +1520,11 @@ fn cmd_status(args: &[String]) -> i32 {
                     return 1;
                 }
             };
-            // P19: load the configured graph once (if built) so we can compare
-            // each Source's stamped scan_fingerprint against the current on-disk
-            // state — the graph self-describes its own freshness.
+            // Load the configured graph once (if built) so each Source's exact
+            // cached-analysis fingerprint can be compared to the currently
+            // usable cache. Source scan failures remain a separate status axis:
+            // a graph can be current for every analyzable record while files
+            // still need retrying.
             let graph_path = cfg.resolved_graph().ok();
             let graph = graph_path
                 .as_ref()
@@ -1543,17 +1546,18 @@ fn cmd_status(args: &[String]) -> i32 {
                     }
                 };
                 worst = worst.max(code);
-                // Per-source graph freshness: does the graph's Source node carry a
-                // scan_fingerprint equal to the current disk state? `None` when
-                // there is no graph to compare against.
+                // Per-source graph freshness for the usable analysis cache.
+                // `None` when there is no graph to compare against.
                 let graph_current: Option<bool> = graph.as_ref().map(|g| {
                     let src_abs = abs_string(src);
-                    match graph_source_fingerprint(g.as_ref(), &src_abs) {
-                        // Source present and stamped → compare to a fresh disk walk.
-                        Some(Some(stored)) => scan::compute_scan_fingerprint(src)
-                            .map(|disk| disk == stored)
+                    match graph_source_build_fingerprint(g.as_ref(), &src_abs) {
+                        // Source present and stamped → compare exact fresh cache
+                        // inputs, including analysis/model provenance.
+                        Some(Some(stored)) => scan::load_records(src)
+                            .and_then(|records| graph::build_input_fingerprint(&records))
+                            .map(|current| current == stored)
                             .unwrap_or(false),
-                        // Source present but no fingerprint (pre-P19 graph), or the
+                        // Source present but no fingerprint (legacy graph), or the
                         // source isn't in the graph at all → the graph must be rebuilt.
                         _ => false,
                     }
@@ -1567,6 +1571,7 @@ fn cmd_status(args: &[String]) -> i32 {
                         Some(b) => json!(b),
                         None => serde_json::Value::Null,
                     };
+                    obj["graph_current_for_cache"] = obj["graph_current"].clone();
                     objs.push(obj);
                 } else {
                     humans.push((src.clone(), report, has_enr, code, graph_current));
@@ -1622,11 +1627,11 @@ fn cmd_status(args: &[String]) -> i32 {
     }
 }
 
-/// The `scan_fingerprint` stamped on the graph's `Source` node for `source_root`
-/// (P19). Returns `None` when there is no such `Source` node, `Some(None)` when
-/// the node exists but carries no fingerprint (a pre-P19 graph), and
+/// The exact cached-analysis fingerprint stamped on the graph's `Source` node.
+/// Returns `None` when there is no such `Source` node, `Some(None)` when the
+/// node exists but carries no fingerprint (a legacy graph), and
 /// `Some(Some(fp))` otherwise.
-fn graph_source_fingerprint(
+fn graph_source_build_fingerprint(
     graph: &kglite::api::DirGraph,
     source_root: &str,
 ) -> Option<Option<String>> {
@@ -1634,7 +1639,7 @@ fn graph_source_fingerprint(
     use kglite::api::Value;
     let ni = graph.lookup_by_id_readonly("Source", &Value::String(source_root.to_string()))?;
     let node = graph.get_node(ni)?;
-    let fp = match resolve_node_property(node, "scan_fingerprint", graph) {
+    let fp = match resolve_node_property(node, "build_input_fingerprint", graph) {
         Value::String(s) if !s.is_empty() => Some(s),
         _ => None,
     };

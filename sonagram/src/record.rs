@@ -112,6 +112,18 @@ pub struct ProvenanceDto {
     /// The explicit `features=[...]` request (sorted by sonara), if one was
     /// given.
     pub requested_features: Option<Vec<String>>,
+    /// Identity of the genre model that produced `genre`/`genre_confidence`.
+    /// `None` means no identified genre model ran. Additive since sonara 0.2.5;
+    /// omitted for legacy/no-model records so existing fixture bytes remain
+    /// stable while older records still deserialize.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub genre_model_id: Option<String>,
+    /// Identity of the vocalness model that produced
+    /// `vocalness`/`instrumentalness`. `None` means sonara's schema-versioned
+    /// built-in heuristic produced the scores. Additive since sonara 0.2.5;
+    /// omitted for legacy/no-model records and defaulted when reading them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vocalness_model_id: Option<String>,
 }
 
 /// A time-spanned chord event, mirroring sonara's `ChordEvent`.
@@ -350,6 +362,8 @@ impl AnalysisRecord {
             hop_length: provenance.hop_length,
             mode: provenance.mode.as_str().to_string(),
             requested_features: provenance.requested_features,
+            genre_model_id: provenance.genre_model_id,
+            vocalness_model_id: provenance.vocalness_model_id,
         };
 
         let chord_events = chord_events.map(|evs| {
@@ -495,6 +509,8 @@ mod tests {
                         "embedding".to_string(),
                         "energy".to_string(),
                     ]),
+                    genre_model_id: Some("genre-model-v1".to_string()),
+                    vocalness_model_id: Some("sonara-vocalness-v1".to_string()),
                 },
                 duration_sec: 210.5,
                 bpm: 119.7,
@@ -608,6 +624,8 @@ mod tests {
                     hop_length: 512,
                     mode: "compact".to_string(),
                     requested_features: None,
+                    genre_model_id: None,
+                    vocalness_model_id: None,
                 },
                 duration_sec: 1.0,
                 bpm: 0.0,
@@ -691,6 +709,36 @@ mod tests {
         let json = rec.to_json_pretty().unwrap();
         let back = AnalysisRecord::from_json(&json).unwrap();
         assert_eq!(rec, back);
+    }
+
+    #[test]
+    fn model_ids_round_trip_losslessly() {
+        let rec = full_record();
+        let json = rec.to_json_pretty().unwrap();
+        assert!(json.contains(r#""genre_model_id": "genre-model-v1""#));
+        assert!(json.contains(r#""vocalness_model_id": "sonara-vocalness-v1""#));
+
+        let back = AnalysisRecord::from_json(&json).unwrap();
+        assert_eq!(
+            back.analysis.provenance.genre_model_id.as_deref(),
+            Some("genre-model-v1")
+        );
+        assert_eq!(
+            back.analysis.provenance.vocalness_model_id.as_deref(),
+            Some("sonara-vocalness-v1")
+        );
+    }
+
+    #[test]
+    fn legacy_provenance_without_model_ids_deserializes_and_stays_compact() {
+        let mut value = serde_json::to_value(minimal_record()).unwrap();
+        let provenance = value["analysis"]["provenance"].as_object_mut().unwrap();
+        assert!(!provenance.contains_key("genre_model_id"));
+        assert!(!provenance.contains_key("vocalness_model_id"));
+
+        let legacy: AnalysisRecord = serde_json::from_value(value).unwrap();
+        assert_eq!(legacy.analysis.provenance.genre_model_id, None);
+        assert_eq!(legacy.analysis.provenance.vocalness_model_id, None);
     }
 
     #[test]
