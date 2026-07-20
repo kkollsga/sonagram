@@ -34,7 +34,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 dependencies = [
-    "kglite>=0.14.3",
+    "kglite>=0.14.4",
 ]
 
 # Bundled Rust console script. The CLI is linked into this wheel's existing
