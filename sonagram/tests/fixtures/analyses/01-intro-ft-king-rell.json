@@ -49,7 +49,7 @@
         "valence",
         "vocalness"
       ],
-      "vocalness_model_id": "sonara-vocalness-v1"
+      "vocalness_model_id": "sonara-vocalness-v2"
     },
     "duration_sec": 37.45959,
     "bpm": 126.04802,
@@ -955,7 +955,7 @@
     "mood_aggressive": 0.3176251,
     "mood_relaxed": 0.4589077,
     "mood_sad": 0.59148693,
-    "instrumentalness": 1.0,
+    "instrumentalness": 0.00078999996,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.08126984,
@@ -1090,7 +1090,7 @@
         0.197159
       ]
     ],
-    "vocalness": 6.756532e-10,
+    "vocalness": 0.99921,
     "fingerprint": null,
     "embedding_version": 2
   }

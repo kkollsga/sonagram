@@ -121,7 +121,7 @@ that wasn't run, or a tag the file lacked).
 | `analysis_schema_version` | int | no | provenance |
 | `embedding_version` | int | yes | provenance |
 | `genre_model_id` | str | yes | exact Sonara genre model identity; null when no genre model ran |
-| `vocalness_model_id` | str | yes | exact Sonara vocalness model identity; current scans require `sonara-vocalness-v1` |
+| `vocalness_model_id` | str | yes | exact Sonara vocalness model identity; current scans require `sonara-vocalness-v2` |
 
 **P21 curve-derived features** (graph schema v2 — computed from the full
 analysis curves at build time):
@@ -295,7 +295,7 @@ for `curate_playlist`.
   floor and a strict confidence floor fight each other — relax one.
 - **`vocalness`/`instrumentalness` require model provenance, not only schema
   v3.** Current Sonagram scans use Sonara's calibrated bundled model; require
-  `t.vocalness_model_id = 'sonara-vocalness-v1'`. It scores **low =
+  `t.vocalness_model_id = 'sonara-vocalness-v2'`. It scores **low =
   instrumental, high = vocal** and is suitable for instrumental filtering: use
   `vocalness < ~0.35` to find instrumentals and `>= ~0.55` to require vocals.
   Two caveats remain: (1) a **voice-mimicking solo instrument** (nylon-guitar

@@ -510,7 +510,7 @@ mod tests {
                         "energy".to_string(),
                     ]),
                     genre_model_id: Some("genre-model-v1".to_string()),
-                    vocalness_model_id: Some("sonara-vocalness-v1".to_string()),
+                    vocalness_model_id: Some("sonara-vocalness-v2".to_string()),
                 },
                 duration_sec: 210.5,
                 bpm: 119.7,
@@ -716,7 +716,7 @@ mod tests {
         let rec = full_record();
         let json = rec.to_json_pretty().unwrap();
         assert!(json.contains(r#""genre_model_id": "genre-model-v1""#));
-        assert!(json.contains(r#""vocalness_model_id": "sonara-vocalness-v1""#));
+        assert!(json.contains(r#""vocalness_model_id": "sonara-vocalness-v2""#));
 
         let back = AnalysisRecord::from_json(&json).unwrap();
         assert_eq!(
@@ -725,7 +725,7 @@ mod tests {
         );
         assert_eq!(
             back.analysis.provenance.vocalness_model_id.as_deref(),
-            Some("sonara-vocalness-v1")
+            Some("sonara-vocalness-v2")
         );
     }
 

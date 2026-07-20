@@ -310,6 +310,27 @@ fn schema_four_cache_without_model_provenance_is_migrated() {
 }
 
 #[test]
+fn schema_four_v1_cache_migrates_to_v2_without_audio() {
+    let expected = load_a_fixture();
+    let mut v1 = expected.clone();
+    v1.analysis.provenance.vocalness_model_id =
+        Some("sonara-vocalness-v1".to_string());
+    v1.analysis.vocalness = Some(0.0);
+    v1.analysis.instrumentalness = Some(1.0);
+
+    let model = sonara::vocal_model::bundled().unwrap();
+    let features = ScanOptions::default().features;
+    assert!(migrate_cached_record(&mut v1, &features, &model));
+    assert_eq!(v1.analysis.provenance, expected.analysis.provenance);
+    assert_eq!(v1.analysis.vocalness, expected.analysis.vocalness);
+    assert_eq!(
+        v1.analysis.instrumentalness,
+        expected.analysis.instrumentalness
+    );
+    assert!(record_is_fresh(&v1));
+}
+
+#[test]
 fn cache_migration_rejects_incomplete_or_foreign_inputs() {
     let model = sonara::vocal_model::bundled().unwrap();
     let features = ScanOptions::default().features;

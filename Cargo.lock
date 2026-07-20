@@ -2500,7 +2500,7 @@ dependencies = [
 
 [[package]]
 name = "sonara"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "hound",
  "ndarray",

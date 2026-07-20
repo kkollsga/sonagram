@@ -104,7 +104,12 @@ pub const DEFAULT_FEATURES: &[&str] = &[
 /// Exact identity of the Sonara vocal-presence model Sonagram opts into.
 /// A different bundled model is an intentional analysis migration, never a
 /// silent cache reuse.
-pub const VOCALNESS_MODEL_ID: &str = "sonara-vocalness-v1";
+pub const VOCALNESS_MODEL_ID: &str = "sonara-vocalness-v2";
+
+/// Prior bundled model identities whose scores can be recomputed from the
+/// current stored similarity embedding without decoding audio. Keep this list
+/// explicit: an unknown model provenance must fall back to fresh analysis.
+const MIGRATABLE_VOCALNESS_MODEL_IDS: &[&str] = &["sonara-vocalness-v1"];
 
 /// The default features as owned `String`s.
 pub fn default_features() -> Vec<String> {
@@ -476,12 +481,12 @@ pub fn record_is_fresh(rec: &AnalysisRecord) -> bool {
 
 /// Upgrade one compatible cached analysis without decoding audio.
 ///
-/// Sonara 0.2.8's schema-4 delta is reproducible entirely from schema-3/4 data
-/// Sonagram already persisted: the stable chord summary derives from
-/// `chord_sequence`, while the bundled vocalness classifier derives from the
-/// current 48-D similarity embedding. This migration is deliberately narrow;
-/// any missing or mismatched prerequisite returns `false` and the scanner falls
-/// back to normal audio analysis.
+/// Sonara's schema-3→4 delta and the trusted bundled vocalness-model rollout are
+/// reproducible entirely from schema-3/4 data Sonagram already persisted: the
+/// stable chord summary derives from `chord_sequence`, while the classifier
+/// derives from the current 48-D similarity embedding. This migration is
+/// deliberately narrow; any missing, unknown-model, or mismatched prerequisite
+/// returns `false` and the scanner falls back to normal audio analysis.
 pub fn migrate_cached_record(
     rec: &mut AnalysisRecord,
     features: &[String],
@@ -498,10 +503,9 @@ pub fn migrate_cached_record(
         || provenance.genre_model_id.is_some()
         || rec.analysis.genre.is_some()
         || rec.analysis.genre_confidence.is_some()
-        || provenance
-            .vocalness_model_id
-            .as_deref()
-            .is_some_and(|id| id != VOCALNESS_MODEL_ID)
+        || provenance.vocalness_model_id.as_deref().is_some_and(|id| {
+            id != VOCALNESS_MODEL_ID && !MIGRATABLE_VOCALNESS_MODEL_IDS.contains(&id)
+        })
         || model.id() != VOCALNESS_MODEL_ID
         || model.embedding_version() != sonara::similarity::SIMILARITY_VERSION
         || rec.analysis.embedding_version != Some(sonara::similarity::SIMILARITY_VERSION)

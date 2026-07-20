@@ -52,7 +52,7 @@ with tempfile.TemporaryDirectory() as tmp:
     assert migrated["analysis"]["provenance"]["schema_version"] == 4
     assert (
         migrated["analysis"]["provenance"]["vocalness_model_id"]
-        == "sonara-vocalness-v1"
+        == "sonara-vocalness-v2"
     )
     assert migrated["analysis"]["predominant_chord"] == "A"
 

@@ -182,7 +182,7 @@ fn analysis_model_ids_are_queryable_and_fingerprinted() {
     let before = graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap();
     record.analysis.provenance.genre_model_id = Some("genre-test-v1".to_string());
     record.analysis.provenance.vocalness_model_id =
-        Some("sonara-vocalness-v1".to_string());
+        Some("sonara-vocalness-v2".to_string());
     assert_ne!(
         graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap(),
         before
@@ -202,7 +202,7 @@ fn analysis_model_ids_are_queryable_and_fingerprinted() {
     );
     assert_eq!(
         str_prop(&graph, "Track", BRUNO_HASH, "vocalness_model_id"),
-        "sonara-vocalness-v1"
+        "sonara-vocalness-v2"
     );
 }
 
