@@ -35,7 +35,7 @@
 pub mod cache;
 pub mod hash;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -120,6 +120,8 @@ fn analysis_config(features: &[String]) -> AnalysisConfig {
         // sonagram stays a pure mapper: genre inference belongs upstream, and
         // sonara ships no model — so we never supply one.
         genre_model: None,
+        // Enabled deliberately only after the model-aware cache gate lands.
+        vocalness_model: None,
     }
 }
 
@@ -314,29 +316,51 @@ pub fn scan_library(library_root: &Path, opts: &ScanOptions) -> Result<ScanRepor
     scan_library_with(library_root, opts, &analyzer)
 }
 
-/// Load every cached record for `library_root`, sorted by content hash.
+/// Load the fresh, index-authoritative records for `library_root`, sorted by
+/// content hash.
 ///
-/// This is the deterministic input order the graph phase (P4) consumes: records
-/// come from `analysis/*.json` regardless of walk order or wall-clock timing.
-/// Returns an empty vec if the cache does not exist.
+/// `index.json` is the authority for what belongs to the current source. Cached
+/// JSON that is no longer referenced (for example after a file is deleted) is
+/// deliberately retained on disk for content-addressed reuse, but must not
+/// re-enter a graph. Multiple indexed paths with the same content hash yield
+/// one record. A stale indexed record is omitted: it represents analysis that a
+/// failed or interrupted rescan could not refresh and is therefore not valid
+/// graph input. A missing indexed record is cache corruption and errors with
+/// the first affected path so the caller never builds a silently incomplete
+/// graph.
+///
+/// Returns an empty vec when there is no index (or the index is empty).
 pub fn load_records(library_root: &Path) -> Result<Vec<AnalysisRecord>> {
     let cache = Cache::new(library_root);
-    let dir = cache.analysis_dir();
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
-    let mut json_paths: Vec<PathBuf> = std::fs::read_dir(&dir)?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("json"))
-        .collect();
-    json_paths.sort();
+    let index = cache.load_index()?;
 
-    let mut records = Vec::with_capacity(json_paths.len());
-    for path in json_paths {
-        let text = std::fs::read_to_string(&path)?;
-        records.push(AnalysisRecord::from_json(&text)?);
+    // hash -> first indexed relative path. Index iteration is path-sorted and
+    // BTreeMap makes the record-load order hash-sorted, independent of scan or
+    // index construction order.
+    let mut indexed_hashes: BTreeMap<String, String> = BTreeMap::new();
+    for (rel_path, entry) in index {
+        indexed_hashes
+            .entry(entry.content_hash)
+            .or_insert(rel_path);
     }
-    records.sort_by(|a, b| a.source.content_hash.cmp(&b.source.content_hash));
+
+    let mut records = Vec::with_capacity(indexed_hashes.len());
+    for (content_hash, first_path) in indexed_hashes {
+        let Some(record) = cache.load_record(&content_hash)? else {
+            return Err(crate::SonagramError::Cache(format!(
+                "index entry `{first_path}` references missing analysis record `{content_hash}`; run `sonagram scan` to repair the cache"
+            )));
+        };
+        if record.source.content_hash != content_hash {
+            return Err(crate::SonagramError::Cache(format!(
+                "analysis record `{content_hash}` contains mismatched content hash `{}`; run `sonagram scan` to repair the cache",
+                record.source.content_hash
+            )));
+        }
+        if record_is_fresh(&record) {
+            records.push(record);
+        }
+    }
     Ok(records)
 }
 

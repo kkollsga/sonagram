@@ -102,9 +102,19 @@ with tempfile.TemporaryDirectory() as tmp:
     library = root / "library"
     analysis = library / ".sonagram" / "analysis"
     analysis.mkdir(parents=True)
+    index = {}
     for source in sorted(fixtures.glob("*.json")):
         data = json.loads(source.read_text())
-        shutil.copyfile(source, analysis / f"{data['source']['content_hash']}.json")
+        content_hash = data["source"]["content_hash"]
+        shutil.copyfile(source, analysis / f"{content_hash}.json")
+        index[data["source"]["path"]] = {
+            "size": data["source"]["file_size"],
+            "mtime_unix": 0,
+            "content_hash": content_hash,
+        }
+    (library / ".sonagram" / "index.json").write_text(
+        json.dumps(index, indent=2, sort_keys=True) + "\n"
+    )
 
     graph_path = root / "music.kgl"
     sonagram.build(str(library), str(graph_path))

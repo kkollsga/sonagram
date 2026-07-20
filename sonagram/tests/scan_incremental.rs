@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sonagram::record::AnalysisRecord;
+use sonagram::scan::cache::{Cache, Index, IndexEntry};
 use sonagram::scan::{
     load_records, scan_library_with, AnalyzeRequest, Analyzer, ScanOptions,
 };
@@ -250,19 +251,132 @@ fn delete_prunes_index_but_keeps_record() {
     scan_library_with(&lib, &opts(), &analyzer).unwrap();
 
     // Record count before delete.
-    let before = load_records(&lib).unwrap().len();
-    assert_eq!(before, 3);
+    let before = load_records(&lib).unwrap();
+    assert_eq!(before.len(), 3);
+    let deleted_hash = before
+        .iter()
+        .find(|record| record.source.path == "b.mp3")
+        .unwrap()
+        .source
+        .content_hash
+        .clone();
 
     std::fs::remove_file(lib.join("b.mp3")).unwrap();
     let r = scan_library_with(&lib, &opts(), &analyzer).unwrap();
     assert_eq!(r.total_files, 2, "deleted file no longer discovered");
     assert_eq!(r.analyzed, 0);
 
-    // Orphaned analysis/*.json records are content-addressed and intentionally
-    // kept — the index no longer references the deleted file, but its record
-    // remains on disk.
+    // The content-addressed JSON remains reusable on disk, but the authoritative
+    // index no longer references it, so graph inputs omit the orphan.
     let after = load_records(&lib).unwrap().len();
-    assert_eq!(after, 3, "orphaned record is kept (content-addressed)");
+    assert_eq!(after, 2, "deleted orphan must not re-enter graph inputs");
+    assert!(
+        Cache::new(&lib).has_record(&deleted_hash),
+        "orphan remains cached on disk"
+    );
+}
+
+#[test]
+fn failed_stale_reanalysis_does_not_reenter_graph_inputs() {
+    let lib = build_library("stale-failed");
+    scan_library_with(&lib, &opts(), &CountingAnalyzer::new()).unwrap();
+
+    mutate_record(&lib, "b.mp3", |record| {
+        record.analysis.provenance.schema_version = 0
+    });
+    let report = scan_library_with(&lib, &opts(), &SelectiveAnalyzer::failing("b.mp3")).unwrap();
+    assert_eq!(
+        report.failed.len(),
+        1,
+        "stale record refresh fails explicitly"
+    );
+
+    let records = load_records(&lib).unwrap();
+    assert_eq!(records.len(), 2);
+    assert!(!records.iter().any(|record| record.source.path == "b.mp3"));
+}
+
+#[test]
+fn missing_indexed_record_is_a_clear_cache_error() {
+    let lib = build_library("missing-indexed-record");
+    scan_library_with(&lib, &opts(), &CountingAnalyzer::new()).unwrap();
+    let cache = Cache::new(&lib);
+    let index = cache.load_index().unwrap();
+    let missing_hash = index["b.mp3"].content_hash.clone();
+    std::fs::remove_file(cache.record_path(&missing_hash)).unwrap();
+
+    let message = load_records(&lib).unwrap_err().to_string();
+    assert!(
+        message.contains("b.mp3"),
+        "affected indexed path is named: {message}"
+    );
+    assert!(
+        message.contains(&missing_hash),
+        "missing content hash is named: {message}"
+    );
+    assert!(
+        message.contains("sonagram scan"),
+        "repair action is named: {message}"
+    );
+}
+
+fn save_permuted_cache(lib: &Path, order: &[usize]) {
+    let cache = Cache::new(lib);
+    let hashes = ["cc", "aa", "bb"];
+    let paths = ["c.mp3", "a.mp3", "b.mp3"];
+    let template = load_a_fixture();
+    let mut index = Index::new();
+    for &i in order {
+        let mut record = template.clone();
+        record.source.content_hash = hashes[i].to_string();
+        record.source.path = paths[i].to_string();
+        cache.save_record(&record).unwrap();
+        index.insert(
+            paths[i].to_string(),
+            IndexEntry {
+                size: i as u64 + 1,
+                mtime_unix: i as i64 + 10,
+                content_hash: hashes[i].to_string(),
+            },
+        );
+    }
+    // A second path for `aa` verifies that indexed aliases still load one row.
+    index.insert(
+        "alias-a.mp3".to_string(),
+        IndexEntry {
+            size: 99,
+            mtime_unix: 99,
+            content_hash: "aa".to_string(),
+        },
+    );
+    cache.save_index(&index).unwrap();
+}
+
+fn records_digest(records: &[AnalysisRecord]) -> blake3::Hash {
+    let mut hasher = blake3::Hasher::new();
+    for record in records {
+        hasher.update(record.to_json_pretty().unwrap().as_bytes());
+        hasher.update(&[0]);
+    }
+    hasher.finalize()
+}
+
+#[test]
+fn indexed_record_order_and_digest_ignore_input_permutation() {
+    let first = tmp_library("index-order-a");
+    let second = tmp_library("index-order-b");
+    save_permuted_cache(&first, &[0, 1, 2]);
+    save_permuted_cache(&second, &[2, 0, 1]);
+
+    let a = load_records(&first).unwrap();
+    let b = load_records(&second).unwrap();
+    let hashes: Vec<&str> = a
+        .iter()
+        .map(|record| record.source.content_hash.as_str())
+        .collect();
+    assert_eq!(hashes, ["aa", "bb", "cc"]);
+    assert_eq!(a.len(), 3, "duplicate indexed hash loads once");
+    assert_eq!(records_digest(&a), records_digest(&b));
 }
 
 /// Rewrite the on-disk record whose `source.path` is `rel_path`, applying `f`

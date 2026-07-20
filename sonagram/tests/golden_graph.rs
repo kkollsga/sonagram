@@ -505,6 +505,7 @@ fn contract_sonara() {
         bpm_min: None,
         bpm_max: None,
         genre_model: None,
+        vocalness_model: None,
     };
 
     // WHY: each Track carries `analysis_schema_version`. If sonara bumps its
