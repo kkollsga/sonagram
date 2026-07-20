@@ -49,6 +49,27 @@ impl Analyzer for CountingAnalyzer {
     }
 }
 
+/// Keeps the canonical analysis in flight long enough for the decision loop to
+/// encounter a same-hash follower, exercising the pending-work fan-out path.
+struct SlowCountingAnalyzer(CountingAnalyzer);
+
+impl SlowCountingAnalyzer {
+    fn new() -> Self {
+        Self(CountingAnalyzer::new())
+    }
+
+    fn count(&self) -> usize {
+        self.0.count()
+    }
+}
+
+impl Analyzer for SlowCountingAnalyzer {
+    fn analyze_one(&self, request: &AnalyzeRequest) -> sonagram::Result<AnalysisRecord> {
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        self.0.analyze_one(request)
+    }
+}
+
 /// A mock analyzer that fails exactly one relative path and succeeds (with the
 /// fixture template) everywhere else — the seam for interrupted/partial-scan
 /// tests.
@@ -65,6 +86,10 @@ impl SelectiveAnalyzer {
             fail_path: rel_path.to_string(),
             calls: AtomicUsize::new(0),
         }
+    }
+
+    fn count(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
     }
 }
 
@@ -144,6 +169,86 @@ fn build_library(name: &str) -> PathBuf {
     write_file(&lib.join("b.mp3"), &make_mp3(b"tag-b", b"AUDIO-BBBB"));
     write_file(&lib.join("sub/c.mp3"), &make_mp3(b"tag-c", b"AUDIO-CCCC"));
     lib
+}
+
+/// Build two differently tagged files whose audio payload (and therefore
+/// content hash) is identical.
+fn build_duplicate_library(name: &str) -> PathBuf {
+    let lib = tmp_library(name);
+    write_file(&lib.join("a.mp3"), &make_mp3(b"first-tag", b"SHARED-AUDIO"));
+    write_file(&lib.join("b.mp3"), &make_mp3(b"second-longer-tag", b"SHARED-AUDIO"));
+    lib
+}
+
+#[test]
+fn duplicate_hash_is_analyzed_once_and_fanned_out_deterministically() {
+    let lib = build_duplicate_library("duplicate-hash");
+    let analyzer = CountingAnalyzer::new();
+
+    let first = scan_library_with(&lib, &opts(), &analyzer).unwrap();
+    assert_eq!(first.total_files, 2);
+    assert_eq!(first.analyzed, 1, "analysis work is counted per unique hash");
+    assert_eq!(first.reused_hash_match, 1, "the alias follows the canonical result");
+    assert_eq!(analyzer.count(), 1, "same-hash paths must never race into two analyses");
+    assert!(first.failed.is_empty());
+
+    let cache = Cache::new(&lib);
+    let index = cache.load_index().unwrap();
+    assert_eq!(index.len(), 2, "both paths are indexed");
+    assert_eq!(index["a.mp3"].content_hash, index["b.mp3"].content_hash);
+    let records = load_records(&lib).unwrap();
+    assert_eq!(records.len(), 1, "one content hash persists one record");
+    assert_eq!(records[0].source.path, "a.mp3", "first sorted path is canonical");
+
+    let progress = sonagram::scan::load_scan_progress(&lib).unwrap();
+    assert_eq!(progress.analyze_total, 1);
+    assert_eq!(progress.analyze_done, 1);
+    assert_eq!(progress.analyzed, 1);
+    assert_eq!(progress.reused_hash, 1);
+
+    let second = scan_library_with(&lib, &opts(), &analyzer).unwrap();
+    assert_eq!(second.analyzed, 0);
+    assert_eq!(second.reused_stat_match, 2);
+    assert_eq!(analyzer.count(), 1, "the follow-up scan is a true no-op");
+}
+
+#[test]
+fn in_flight_duplicate_hash_is_not_queued_to_a_second_worker() {
+    let lib = build_duplicate_library("duplicate-in-flight");
+    let analyzer = SlowCountingAnalyzer::new();
+
+    let report = scan_library_with(&lib, &opts(), &analyzer).unwrap();
+    assert_eq!(analyzer.count(), 1);
+    assert_eq!(report.analyzed, 1);
+    assert_eq!(report.reused_hash_match, 1);
+    assert_eq!(Cache::new(&lib).load_index().unwrap().len(), 2);
+}
+
+#[test]
+fn duplicate_hash_failure_fans_out_and_retries_once() {
+    let lib = build_duplicate_library("duplicate-failure");
+    let failing = SelectiveAnalyzer::failing("a.mp3");
+
+    let first = scan_library_with(&lib, &opts(), &failing).unwrap();
+    assert_eq!(failing.count(), 1, "the canonical failure is shared");
+    assert_eq!(first.analyzed, 0);
+    assert_eq!(first.failed.len(), 2);
+    let failed_paths: Vec<&str> = first
+        .failed
+        .iter()
+        .map(|(path, _)| path.file_name().unwrap().to_str().unwrap())
+        .collect();
+    assert_eq!(failed_paths, ["a.mp3", "b.mp3"], "failures stay path-sorted");
+    assert!(first.failed.iter().all(|(_, message)| message == "cache error: mock failure"));
+    assert!(Cache::new(&lib).load_index().unwrap().is_empty());
+
+    let recovering = CountingAnalyzer::new();
+    let second = scan_library_with(&lib, &opts(), &recovering).unwrap();
+    assert_eq!(recovering.count(), 1, "retry still analyzes the unique hash once");
+    assert_eq!(second.analyzed, 1);
+    assert_eq!(second.reused_hash_match, 1);
+    assert!(second.failed.is_empty());
+    assert_eq!(Cache::new(&lib).load_index().unwrap().len(), 2);
 }
 
 #[test]

@@ -14,9 +14,9 @@
 //!    [`audio_content_hash`](hash::audio_content_hash) already has a *fresh*
 //!    record ⇒ the file was retagged or moved. Reuse the analysis; refresh
 //!    `SourceInfo` (path/size) and the index. Still zero analyses.
-//! 3. **Analyze** — an unseen hash, **or a stale record** ⇒ hand it to the
-//!    [`Analyzer`]. New records are gathered and analyzed in **one batch call**
-//!    so sonara parallelizes across files, with per-file failure isolation.
+//! 3. **Analyze** — an unseen hash, **or a stale record** ⇒ hand one canonical
+//!    path per content hash to the [`Analyzer`]. The worker pool parallelizes
+//!    distinct hashes while same-hash paths share that single outcome.
 //!
 //! **Freshness / staleness.** A cached record is *stale* when it was produced by
 //! a different sonara build than the one we now link: its
@@ -130,7 +130,8 @@ fn analysis_config(features: &[String]) -> AnalysisConfig {
 /// Every stage reports per-item counts. Analysis rides sonara 0.2.3's
 /// [`analyze_batch_with`](sonara::analyze::analyze_batch_with) core progress
 /// hook, so [`ScanStage::Analyze`] fires once per file as it completes (in
-/// completion order, on rayon workers) — not just once for the whole batch.
+/// completion order, on scan workers) — once per unique content hash, not once
+/// per aliasing path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanProgress {
     /// Which stage of the scan is reporting.
@@ -187,10 +188,10 @@ pub struct ScanProgressSnapshot {
     pub total: usize,
     /// Analyses completed so far (success or failure).
     pub analyze_done: usize,
-    /// Analyses queued so far. Grows while `stage == "hash"` (discovery is
-    /// still running); final once the stage moves to `"analyze"`.
+    /// Unique content hashes queued so far. Grows while `stage == "hash"`
+    /// (discovery is still running); final once the stage moves to `"analyze"`.
     pub analyze_total: usize,
-    /// Files analyzed (new records saved) so far this scan.
+    /// Unique content hashes analyzed (new records saved) so far this scan.
     pub analyzed: usize,
     /// Files served from the stat fast-path so far.
     pub reused_stat: usize,
@@ -244,7 +245,7 @@ impl ScanOptions {
 pub struct ScanReport {
     /// Total `*.mp3` files discovered under the library root.
     pub total_files: usize,
-    /// Files that ran a fresh sonara analysis (unseen content hash).
+    /// Unique content hashes that ran a fresh sonara analysis.
     pub analyzed: usize,
     /// Files whose analysis was reused via a content-hash match (retag/move).
     pub reused_hash_match: usize,
@@ -588,7 +589,22 @@ pub fn scan_library_with(
         analyze_done: usize,
         analyze_total: usize,
         analyzed: usize,
+        /// Work claimed during this scan, keyed by content hash. Keeping the
+        /// terminal outcome prevents a fast worker from racing a later alias
+        /// into a second analysis (or from changing the canonical source path).
+        hash_work: BTreeMap<String, HashWork>,
         last_flush: Instant,
+    }
+    #[derive(Clone)]
+    struct HashFollower {
+        abs_path: PathBuf,
+        rel: String,
+        entry: IndexEntry,
+    }
+    enum HashWork {
+        Pending(Vec<HashFollower>),
+        Succeeded,
+        Failed(String),
     }
     let state = Mutex::new(ScanState {
         new_index: cache::Index::new(),
@@ -600,6 +616,7 @@ pub fn scan_library_with(
         analyze_done: 0,
         analyze_total: 0,
         analyzed: 0,
+        hash_work: BTreeMap::new(),
         last_flush: Instant::now(),
     });
     let poisoned = || crate::SonagramError::Cache("scan state poisoned".to_string());
@@ -661,6 +678,7 @@ pub fn scan_library_with(
                     Err(_) => break,
                 };
                 let Ok((req, rel, entry)) = msg else { break };
+                let content_hash = req.source.content_hash.clone();
                 // Analyze + persist first (no lock held): a record on disk is
                 // the unit of resumability. A failed save demotes the result
                 // to a per-file failure.
@@ -668,12 +686,29 @@ pub fn scan_library_with(
                     .analyze_one(&req)
                     .and_then(|rec| cache.save_record(&rec));
                 let Ok(mut s) = state.lock() else { break };
+                let followers = match s.hash_work.remove(&content_hash) {
+                    Some(HashWork::Pending(followers)) => followers,
+                    _ => Vec::new(),
+                };
                 match outcome {
                     Ok(()) => {
                         s.new_index.insert(rel, entry);
                         s.analyzed += 1;
+                        s.reused_hash += followers.len();
+                        for follower in followers {
+                            s.new_index.insert(follower.rel, follower.entry);
+                        }
+                        s.hash_work.insert(content_hash, HashWork::Succeeded);
                     }
-                    Err(e) => s.failed.push((req.abs_path, e.to_string())),
+                    Err(e) => {
+                        let message = e.to_string();
+                        s.failed.push((req.abs_path, message.clone()));
+                        for follower in followers {
+                            s.failed.push((follower.abs_path, message.clone()));
+                        }
+                        s.hash_work
+                            .insert(content_hash, HashWork::Failed(message));
+                    }
                 }
                 s.analyze_done += 1;
                 opts.report(ScanStage::Analyze, s.analyze_done, s.analyze_total);
@@ -767,6 +802,34 @@ pub fn scan_library_with(
                 content_hash: content_hash.clone(),
             };
 
+            // A same-hash path already claimed during this scan follows that
+            // canonical path's outcome. This check intentionally precedes the
+            // cache load: a very fast successful worker may already have saved
+            // the record, but the first sorted path must remain canonical.
+            let already_claimed = {
+                let s = state.lock().map_err(|_| poisoned())?;
+                s.hash_work.contains_key(&content_hash)
+            };
+            if already_claimed {
+                let follower = HashFollower {
+                    abs_path: abs_path.clone(),
+                    rel: rel.clone(),
+                    entry: entry.clone(),
+                };
+                tick(&|s| match s.hash_work.get_mut(&content_hash) {
+                    Some(HashWork::Pending(followers)) => followers.push(follower.clone()),
+                    Some(HashWork::Succeeded) => {
+                        s.new_index.insert(rel.clone(), entry.clone());
+                        s.reused_hash += 1;
+                    }
+                    Some(HashWork::Failed(message)) => {
+                        s.failed.push((abs_path.clone(), message.clone()));
+                    }
+                    None => unreachable!("claimed content hash must retain its outcome"),
+                })?;
+                continue;
+            }
+
             // Tier 2: known, FRESH hash → reuse the analysis (retag/move path).
             // A record that vanished between the stat and the load (→ None) or
             // one that is stale falls through to re-analyze, overwriting the
@@ -788,7 +851,11 @@ pub fn scan_library_with(
 
             // Tier 3: unseen hash → queue for the analysis workers (the total
             // grows before the send so a worker's report never overtakes it).
-            tick(&|s| s.analyze_total += 1)?;
+            tick(&|s| {
+                s.analyze_total += 1;
+                s.hash_work
+                    .insert(content_hash.clone(), HashWork::Pending(Vec::new()));
+            })?;
             let request = AnalyzeRequest {
                 abs_path: abs_path.clone(),
                 source,
@@ -813,7 +880,8 @@ pub fn scan_library_with(
     })?;
 
     // Workers are joined; the authoritative index prunes deleted files.
-    let s = state.into_inner().map_err(|_| poisoned())?;
+    let mut s = state.into_inner().map_err(|_| poisoned())?;
+    s.failed.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     cache.save_index(&s.new_index)?;
     opts.report(ScanStage::Done, total_files, total_files);
     progress_file.write(

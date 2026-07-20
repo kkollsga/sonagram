@@ -16,11 +16,17 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
 use crate::record::AnalysisRecord;
 use crate::{Result, SonagramError};
+
+/// Per-process sequence used to keep concurrent atomic writes from sharing a
+/// temporary path. The process ID separates writers in different processes;
+/// this counter separates threads and successive writes within one process.
+static ATOMIC_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// The index's per-file stat entry. Keyed in the index map by the file's path
 /// relative to the library root.
@@ -185,9 +191,15 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| SonagramError::Cache(format!("bad file name {}", path.display())))?;
-    // Unique temp name: pid keeps concurrent scans of the same library from
-    // clobbering each other's temp file mid-write.
-    let tmp = dir.join(format!(".{file_name}.tmp.{}", std::process::id()));
+    // The PID separates concurrent scanner processes, while the monotonically
+    // increasing sequence separates threads and successive writes inside this
+    // process. A PID alone is insufficient for concurrent cache/progress
+    // writers that target the same file.
+    let sequence = ATOMIC_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let tmp = dir.join(format!(
+        ".{file_name}.tmp.{}.{sequence}",
+        std::process::id()
+    ));
     std::fs::write(&tmp, bytes)?;
     std::fs::rename(&tmp, path)?;
     Ok(())
@@ -417,5 +429,68 @@ mod tests {
             let name = entry.unwrap().file_name();
             assert!(!name.to_string_lossy().contains(".tmp."), "temp left: {name:?}");
         }
+    }
+
+    #[test]
+    fn concurrent_atomic_writes_to_same_target_do_not_collide() {
+        const WRITERS: usize = 16;
+        const ROUNDS: usize = 32;
+        const PAYLOAD_LEN: usize = 128 * 1024;
+
+        let lib = tmp_lib("atomic-concurrent");
+        let target = lib.join("shared.json");
+        let start = std::sync::Arc::new(std::sync::Barrier::new(WRITERS));
+        let finish = std::sync::Arc::new(std::sync::Barrier::new(WRITERS));
+
+        let handles: Vec<_> = (0..WRITERS)
+            .map(|writer| {
+                let target = target.clone();
+                let start = start.clone();
+                let finish = finish.clone();
+                std::thread::spawn(move || {
+                    let mut errors = Vec::new();
+                    for round in 0..ROUNDS {
+                        let marker = b'a' + writer as u8;
+                        let mut payload = vec![marker; PAYLOAD_LEN];
+                        let header = format!("writer={writer:02};round={round:02};");
+                        payload[..header.len()].copy_from_slice(header.as_bytes());
+
+                        start.wait();
+                        if let Err(error) = atomic_write(&target, &payload) {
+                            errors.push(error.to_string());
+                        }
+                        finish.wait();
+                    }
+                    errors
+                })
+            })
+            .collect();
+
+        let errors: Vec<_> = handles
+            .into_iter()
+            .flat_map(|handle| handle.join().expect("writer thread panicked"))
+            .collect();
+        assert!(errors.is_empty(), "concurrent atomic writes failed: {errors:?}");
+
+        // Once every final-round rename has completed, the target must be one
+        // whole writer payload rather than an interleaving or partial write.
+        let final_bytes = std::fs::read(&target).unwrap();
+        assert_eq!(final_bytes.len(), PAYLOAD_LEN);
+        assert!((0..WRITERS).any(|writer| {
+            let marker = b'a' + writer as u8;
+            let mut expected = vec![marker; PAYLOAD_LEN];
+            let header = format!("writer={writer:02};round={:02};", ROUNDS - 1);
+            expected[..header.len()].copy_from_slice(header.as_bytes());
+            final_bytes == expected
+        }));
+
+        let temp_prefix = ".shared.json.tmp.";
+        let leftovers: Vec<_> = std::fs::read_dir(&lib)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name())
+            .filter(|name| name.to_string_lossy().starts_with(temp_prefix))
+            .collect();
+        assert!(leftovers.is_empty(), "temporary files left behind: {leftovers:?}");
     }
 }
