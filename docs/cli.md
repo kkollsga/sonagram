@@ -25,7 +25,8 @@ Walk `<library_root>` for MP3s, content-hash each file, and run sonara analysis
 on anything unseen, caching per-track records under `<library_root>/.sonagram/`.
 Reuses cached analysis wherever the content hash (or file stats) is unchanged, so
 a rescan only analyzes changed content. Same-hash paths share one analysis.
-Prints a scan report: total files, unique hashes analyzed (new), reused
+Prints a scan report: total files, unique hashes analyzed (new), compatible
+cached analyses migrated without decoding audio, reused
 (hash match / stat match), failed (with per-file messages), and
 elapsed time.
 

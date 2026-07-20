@@ -60,6 +60,7 @@ def main():
         assert report["analyzed"] == 5, report
         assert report["failed"] == [], report["failed"]
         assert report["reused_stat_match"] == 0, report
+        assert report["migrated_analysis"] == 0, report
         assert "elapsed_sec" in report and report["elapsed_sec"] >= 0.0, report
 
         assert events, "progress callback was never called"
@@ -90,6 +91,7 @@ def main():
         report2 = sonagram.scan(tmp_lib)
         assert report2["analyzed"] == 0, report2
         assert report2["reused_stat_match"] == 5, report2
+        assert report2["migrated_analysis"] == 0, report2
         print(f"  rescan: analyzed={report2['analyzed']} (no-op), "
               f"reused_stat_match={report2['reused_stat_match']}")
 

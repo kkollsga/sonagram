@@ -281,21 +281,23 @@ fn cmd_scan(args: &[String]) -> Result<()> {
         }
         None => {
             let sources = configured_source_paths(&Config::load()?)?;
-            let mut totals = (0usize, 0usize, 0usize, 0usize, 0usize); // files, analyzed, hash, stat, failed
+            let mut totals = (0usize, 0usize, 0usize, 0usize, 0usize, 0usize); // files, analyzed, migrated, hash, stat, failed
             for src in &sources {
                 let r = scan_one(src, with_enrich)?;
                 totals.0 += r.total_files;
                 totals.1 += r.analyzed;
-                totals.2 += r.reused_hash_match;
-                totals.3 += r.reused_stat_match;
-                totals.4 += r.failed.len();
+                totals.2 += r.migrated_analysis;
+                totals.3 += r.reused_hash_match;
+                totals.4 += r.reused_stat_match;
+                totals.5 += r.failed.len();
             }
             println!("combined scan over {} source(s):", sources.len());
             println!("  total files:        {}", totals.0);
             println!("  analyzed (new):     {}", totals.1);
-            println!("  reused (hash match):{}", totals.2);
-            println!("  reused (stat match):{}", totals.3);
-            println!("  failed:             {}", totals.4);
+            println!("  migrated (cached):  {}", totals.2);
+            println!("  reused (hash match):{}", totals.3);
+            println!("  reused (stat match):{}", totals.4);
+            println!("  failed:             {}", totals.5);
         }
     }
     Ok(())
@@ -329,6 +331,7 @@ fn scan_one(root: &Path, with_enrich: bool) -> Result<crate::scan::ScanReport> {
     println!("scan report for {}", root.display());
     println!("  total files:        {}", report.total_files);
     println!("  analyzed (new):     {}", report.analyzed);
+    println!("  migrated (cached):  {}", report.migrated_analysis);
     println!("  reused (hash match):{}", report.reused_hash_match);
     println!("  reused (stat match):{}", report.reused_stat_match);
     println!("  failed:             {}", report.failed.len());

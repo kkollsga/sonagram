@@ -46,7 +46,7 @@ Walk `library_root` for MP3s, reuse cached analysis wherever the content hash is
 unchanged, and analyze only unseen files. `progress`, if given, must be callable
 and is invoked as `progress(stage, done, total)` where `stage` is one of
 `"walk"`, `"hash"`, `"analyze"`, `"done"`. Returns a dict: `total_files`,
-`analyzed`, `reused_hash_match`, `reused_stat_match`, `failed` (a list of
+`analyzed`, `migrated_analysis`, `reused_hash_match`, `reused_stat_match`, `failed` (a list of
 `(path, message)` tuples), and `elapsed_sec`.
 
 ## `enrich`

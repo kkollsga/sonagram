@@ -18,8 +18,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use sonagram::record::AnalysisRecord;
 use sonagram::scan::cache::{Cache, Index, IndexEntry};
 use sonagram::scan::{
-    default_analysis_config, load_records, record_is_fresh, scan_library_with, AnalyzeRequest,
-    Analyzer, ScanOptions, VOCALNESS_MODEL_ID,
+    default_analysis_config, load_records, migrate_cached_record, record_is_fresh,
+    record_is_fresh_for_features, scan_library, scan_library_with, AnalyzeRequest, Analyzer,
+    ScanOptions, VOCALNESS_MODEL_ID,
 };
 
 /// A mock analyzer: counts analyses and returns a fixture-derived record stamped
@@ -208,6 +209,183 @@ fn bundled_vocalness_model_identity_drives_cache_freshness() {
         !record_is_fresh(&changed),
         "a changed model id must invalidate"
     );
+}
+
+#[test]
+fn requested_feature_identity_drives_cache_freshness() {
+    let current = load_a_fixture();
+    let mut reordered = ScanOptions::default().features;
+    reordered.reverse();
+    reordered.push("embedding".to_string());
+    assert!(
+        record_is_fresh_for_features(&current, &reordered),
+        "feature order and duplicates are not analysis semantics"
+    );
+
+    let mut subset = ScanOptions::default().features;
+    subset.retain(|feature| feature != "loudness");
+    assert!(!record_is_fresh_for_features(&current, &subset));
+
+    let mut missing = current;
+    missing.analysis.provenance.requested_features = None;
+    assert!(!record_is_fresh(&missing));
+
+    let mut foreign_genre = load_a_fixture();
+    foreign_genre.analysis.provenance.genre_model_id = Some("genre-v1".to_string());
+    foreign_genre.analysis.genre = Some("rock".to_string());
+    foreign_genre.analysis.genre_confidence = Some(0.9);
+    assert!(!record_is_fresh(&foreign_genre));
+}
+
+#[test]
+fn changed_requested_features_bypass_both_cache_reuse_tiers() {
+    let lib = build_library("feature-change");
+    let initial = CountingAnalyzer::new();
+    scan_library_with(&lib, &ScanOptions::default(), &initial).unwrap();
+
+    let mut subset_options = ScanOptions::default();
+    subset_options
+        .features
+        .retain(|feature| feature != "loudness");
+    let changed = CountingAnalyzer::new();
+    let report = scan_library_with(&lib, &subset_options, &changed).unwrap();
+    assert_eq!(report.reused_stat_match, 0);
+    assert_eq!(report.reused_hash_match, 0);
+    assert_eq!(report.analyzed, 3);
+    assert_eq!(changed.count(), 3);
+}
+
+#[test]
+fn schema_three_cache_migrates_exactly_from_stored_features() {
+    let expected = load_a_fixture();
+    let mut legacy = expected.clone();
+    legacy.analysis.provenance.schema_version = 3;
+    legacy.analysis.provenance.vocalness_model_id = None;
+    legacy.analysis.vocalness = Some(0.0);
+    legacy.analysis.instrumentalness = Some(1.0);
+    legacy.analysis.chord_change_rate = Some(-1.0);
+    legacy.analysis.predominant_chord = Some("G#m".to_string());
+
+    let model = sonara::vocal_model::bundled().unwrap();
+    let features = ScanOptions::default().features;
+    assert!(migrate_cached_record(&mut legacy, &features, &model));
+    assert_eq!(legacy.analysis.provenance, expected.analysis.provenance);
+    assert_eq!(legacy.analysis.vocalness, expected.analysis.vocalness);
+    assert_eq!(
+        legacy.analysis.instrumentalness,
+        expected.analysis.instrumentalness
+    );
+    assert_eq!(
+        legacy.analysis.chord_change_rate,
+        expected.analysis.chord_change_rate
+    );
+    assert_eq!(
+        legacy.analysis.predominant_chord,
+        expected.analysis.predominant_chord
+    );
+    assert!(record_is_fresh(&legacy));
+    assert!(
+        !migrate_cached_record(&mut legacy, &features, &model),
+        "current records are an idempotent no-op"
+    );
+}
+
+#[test]
+fn schema_four_cache_without_model_provenance_is_migrated() {
+    let expected = load_a_fixture();
+    let mut unstamped = expected.clone();
+    unstamped.analysis.provenance.vocalness_model_id = None;
+    unstamped.analysis.vocalness = Some(0.0);
+    unstamped.analysis.instrumentalness = Some(1.0);
+
+    let model = sonara::vocal_model::bundled().unwrap();
+    let features = ScanOptions::default().features;
+    assert!(migrate_cached_record(&mut unstamped, &features, &model));
+    assert_eq!(unstamped.analysis.vocalness, expected.analysis.vocalness);
+    assert_eq!(
+        unstamped.analysis.instrumentalness,
+        expected.analysis.instrumentalness
+    );
+    assert!(record_is_fresh(&unstamped));
+}
+
+#[test]
+fn cache_migration_rejects_incomplete_or_foreign_inputs() {
+    let model = sonara::vocal_model::bundled().unwrap();
+    let features = ScanOptions::default().features;
+    let mut legacy = load_a_fixture();
+    legacy.analysis.provenance.schema_version = 3;
+    legacy.analysis.provenance.vocalness_model_id = None;
+
+    let mut missing_embedding = legacy.clone();
+    missing_embedding.analysis.embedding = None;
+    assert!(!migrate_cached_record(
+        &mut missing_embedding,
+        &features,
+        &model
+    ));
+
+    let mut foreign_model = legacy.clone();
+    foreign_model.analysis.provenance.vocalness_model_id = Some("other-model".to_string());
+    assert!(!migrate_cached_record(
+        &mut foreign_model,
+        &features,
+        &model
+    ));
+
+    let mut hidden_genre = legacy;
+    hidden_genre.analysis.genre = Some("rock".to_string());
+    hidden_genre.analysis.genre_confidence = Some(0.9);
+    assert!(!migrate_cached_record(
+        &mut hidden_genre,
+        &features,
+        &model
+    ));
+}
+
+#[test]
+fn production_scan_migrates_eligible_cache_without_decoding_audio() {
+    let lib = tmp_library("cached-migration");
+    let path = lib.join("a.mp3");
+    write_file(&path, &make_mp3(b"tag", b"not-decodable-audio"));
+    let metadata = std::fs::metadata(&path).unwrap();
+    let mtime_unix = metadata
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    let mut legacy = load_a_fixture();
+    legacy.source.content_hash = "cached-hash".to_string();
+    legacy.source.path = "a.mp3".to_string();
+    legacy.source.file_size = metadata.len();
+    legacy.analysis.provenance.schema_version = 3;
+    legacy.analysis.provenance.vocalness_model_id = None;
+    legacy.analysis.vocalness = Some(0.0);
+    legacy.analysis.instrumentalness = Some(1.0);
+    legacy.analysis.predominant_chord = Some("G#m".to_string());
+
+    let cache = Cache::new(&lib);
+    cache.save_record(&legacy).unwrap();
+    let mut index = Index::new();
+    index.insert(
+        "a.mp3".to_string(),
+        IndexEntry {
+            size: metadata.len(),
+            mtime_unix,
+            content_hash: "cached-hash".to_string(),
+        },
+    );
+    cache.save_index(&index).unwrap();
+
+    let report = scan_library(&lib, &ScanOptions::default()).unwrap();
+    assert_eq!(report.migrated_analysis, 1);
+    assert_eq!(report.analyzed, 0, "synthetic audio must never be decoded");
+    assert_eq!(report.reused_stat_match, 1);
+    assert!(report.failed.is_empty());
+    let migrated = cache.load_record("cached-hash").unwrap().unwrap();
+    assert!(record_is_fresh(&migrated));
 }
 
 #[test]

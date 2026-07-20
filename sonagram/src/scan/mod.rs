@@ -37,7 +37,7 @@
 pub mod cache;
 pub mod hash;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -262,6 +262,9 @@ pub struct ScanReport {
     pub total_files: usize,
     /// Unique content hashes that ran a fresh sonara analysis.
     pub analyzed: usize,
+    /// Unique cached analyses upgraded from compatible stored features without
+    /// decoding audio.
+    pub migrated_analysis: usize,
     /// Files whose analysis was reused via a content-hash match (retag/move).
     pub reused_hash_match: usize,
     /// Files served entirely from the `(size, mtime)` stat fast-path.
@@ -329,7 +332,19 @@ impl Analyzer for SonaraAnalyzer {
 /// three-tier cost model. A no-op rescan analyzes nothing.
 pub fn scan_library(library_root: &Path, opts: &ScanOptions) -> Result<ScanReport> {
     let analyzer = SonaraAnalyzer::new(&opts.features)?;
-    scan_library_with(library_root, opts, &analyzer)
+    let migration_start = Instant::now();
+    let migrated_analysis = analyzer
+        .config
+        .vocalness_model
+        .as_deref()
+        .map_or(Ok(0), |model| {
+            migrate_indexed_records(library_root, &opts.features, model)
+        })?;
+    let migration_elapsed = migration_start.elapsed();
+    let mut report = scan_library_with(library_root, opts, &analyzer)?;
+    report.migrated_analysis = migrated_analysis;
+    report.elapsed += migration_elapsed;
+    Ok(report)
 }
 
 /// Load the fresh, index-authoritative records for `library_root`, sorted by
@@ -421,23 +436,143 @@ pub fn compute_scan_fingerprint(library_root: &Path) -> Result<String> {
     Ok(cache::scan_fingerprint(&index))
 }
 
-/// True iff a cached record was produced by the sonara build we now link.
+fn normalized_features(features: &[String]) -> Vec<String> {
+    features
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// True iff a cached record matches the current analysis identities and the
+/// exact requested feature set.
 ///
 /// A record is **fresh** when its analysis schema version matches sonara's
 /// [`ANALYSIS_SCHEMA_VERSION`](sonara::analyze::ANALYSIS_SCHEMA_VERSION) *and*,
-/// if it carries an `embedding_version`, that matches
-/// [`SIMILARITY_VERSION`](sonara::similarity::SIMILARITY_VERSION). A record with
-/// no embedding_version imposes no embedding constraint. The record must also
-/// name the exact bundled vocalness model Sonagram currently configures;
-/// absent or changed model provenance is stale even when schema versions did
-/// not move. Anything else is **stale** and must be re-analyzed, not trusted.
-pub fn record_is_fresh(rec: &AnalysisRecord) -> bool {
+/// if `embedding` was requested, its version matches
+/// [`SIMILARITY_VERSION`](sonara::similarity::SIMILARITY_VERSION). The record
+/// must name the exact bundled vocalness model and carry the same normalized
+/// feature set. Anything else is **stale** and must be migrated or re-analyzed,
+/// not trusted.
+pub fn record_is_fresh_for_features(rec: &AnalysisRecord, features: &[String]) -> bool {
+    let expected = normalized_features(features);
+    let expects_embedding = expected.iter().any(|feature| feature == "embedding");
     rec.analysis.provenance.schema_version == sonara::analyze::ANALYSIS_SCHEMA_VERSION
-        && rec
-            .analysis
-            .embedding_version
-            .is_none_or(|v| v == sonara::similarity::SIMILARITY_VERSION)
+        && rec.analysis.provenance.mode == "playlist"
+        && rec.analysis.provenance.requested_features.as_deref() == Some(expected.as_slice())
+        && rec.analysis.provenance.genre_model_id.is_none()
+        && rec.analysis.genre.is_none()
+        && rec.analysis.genre_confidence.is_none()
+        && (!expects_embedding
+            || rec.analysis.embedding_version == Some(sonara::similarity::SIMILARITY_VERSION))
         && rec.analysis.provenance.vocalness_model_id.as_deref() == Some(VOCALNESS_MODEL_ID)
+}
+
+/// Freshness against Sonagram's canonical graph-analysis feature set.
+pub fn record_is_fresh(rec: &AnalysisRecord) -> bool {
+    record_is_fresh_for_features(rec, &default_features())
+}
+
+/// Upgrade one compatible cached analysis without decoding audio.
+///
+/// Sonara 0.2.8's schema-4 delta is reproducible entirely from schema-3/4 data
+/// Sonagram already persisted: the stable chord summary derives from
+/// `chord_sequence`, while the bundled vocalness classifier derives from the
+/// current 48-D similarity embedding. This migration is deliberately narrow;
+/// any missing or mismatched prerequisite returns `false` and the scanner falls
+/// back to normal audio analysis.
+pub fn migrate_cached_record(
+    rec: &mut AnalysisRecord,
+    features: &[String],
+    model: &sonara::vocal_model::VocalnessModel,
+) -> bool {
+    if record_is_fresh_for_features(rec, features) {
+        return false;
+    }
+    let expected = normalized_features(features);
+    let provenance = &rec.analysis.provenance;
+    if !matches!(provenance.schema_version, 3 | 4)
+        || provenance.mode != "playlist"
+        || provenance.requested_features.as_deref() != Some(expected.as_slice())
+        || provenance.genre_model_id.is_some()
+        || rec.analysis.genre.is_some()
+        || rec.analysis.genre_confidence.is_some()
+        || provenance
+            .vocalness_model_id
+            .as_deref()
+            .is_some_and(|id| id != VOCALNESS_MODEL_ID)
+        || model.id() != VOCALNESS_MODEL_ID
+        || model.embedding_version() != sonara::similarity::SIMILARITY_VERSION
+        || rec.analysis.embedding_version != Some(sonara::similarity::SIMILARITY_VERSION)
+        || rec.analysis.vocalness.is_none()
+        || rec.analysis.instrumentalness.is_none()
+        || rec.analysis.chord_change_rate.is_none()
+        || rec.analysis.predominant_chord.is_none()
+        || !rec.analysis.duration_sec.is_finite()
+        || rec.analysis.duration_sec <= 0.0
+    {
+        return false;
+    }
+    for required in ["chords", "embedding", "instrumentalness", "vocalness"] {
+        if expected.binary_search_by(|feature| feature.as_str().cmp(required)).is_err() {
+            return false;
+        }
+    }
+
+    let Some(embedding) = rec.analysis.embedding.as_deref() else {
+        return false;
+    };
+    if embedding.len() != sonara::similarity::EMBEDDING_DIM
+        || !embedding.iter().all(|value| value.is_finite())
+    {
+        return false;
+    }
+    let Some(chords) = rec.analysis.chord_sequence.as_deref() else {
+        return false;
+    };
+
+    let vocalness = model.predict_vocalness(embedding);
+    let chord = sonara::tonal::chord_descriptors(chords, rec.analysis.duration_sec);
+    rec.analysis.vocalness = Some(vocalness);
+    rec.analysis.instrumentalness = Some((1.0 - vocalness).clamp(0.0, 1.0));
+    rec.analysis.chord_change_rate = Some(chord.change_rate);
+    rec.analysis.predominant_chord = Some(chord.predominant_chord);
+    rec.analysis.provenance.schema_version = sonara::analyze::ANALYSIS_SCHEMA_VERSION;
+    rec.analysis.provenance.vocalness_model_id = Some(VOCALNESS_MODEL_ID.to_string());
+    true
+}
+
+fn migrate_indexed_records(
+    library_root: &Path,
+    features: &[String],
+    model: &sonara::vocal_model::VocalnessModel,
+) -> Result<usize> {
+    let cache = Cache::new(library_root);
+    let hashes: BTreeSet<String> = cache
+        .load_index()?
+        .into_values()
+        .map(|entry| entry.content_hash)
+        .collect();
+    let mut migrated = 0;
+    for content_hash in hashes {
+        let Some(mut record) = cache.load_record(&content_hash)? else {
+            continue;
+        };
+        if record.source.content_hash != content_hash {
+            return Err(crate::SonagramError::Cache(format!(
+                "analysis record `{content_hash}` contains mismatched content hash `{}`; run `sonagram scan` to repair the cache",
+                record.source.content_hash
+            )));
+        }
+        if !record_is_fresh_for_features(&record, features)
+            && migrate_cached_record(&mut record, features, model)
+        {
+            cache.save_record(&record)?;
+            migrated += 1;
+        }
+    }
+    Ok(migrated)
 }
 
 /// Freshness of the on-disk record for `content_hash`, memoized per scan.
@@ -449,13 +584,14 @@ pub fn record_is_fresh(rec: &AnalysisRecord) -> bool {
 fn cached_record_is_fresh(
     cache: &Cache,
     content_hash: &str,
+    features: &[String],
     memo: &mut HashMap<String, bool>,
 ) -> Result<bool> {
     if let Some(&fresh) = memo.get(content_hash) {
         return Ok(fresh);
     }
     let fresh = match cache.load_record(content_hash)? {
-        Some(rec) => record_is_fresh(&rec),
+        Some(rec) => record_is_fresh_for_features(&rec, features),
         None => false,
     };
     memo.insert(content_hash.to_string(), fresh);
@@ -522,6 +658,7 @@ pub fn probe_freshness(library_root: &Path) -> Result<FreshnessReport> {
     let mut missing_from_index = 0usize;
     let mut fresh_memo: HashMap<String, bool> = HashMap::new();
     let mut present: HashSet<String> = HashSet::with_capacity(files.len());
+    let features = default_features();
 
     for abs_path in &files {
         let rel = match relative_path(library_root, abs_path) {
@@ -538,7 +675,12 @@ pub fn probe_freshness(library_root: &Path) -> Result<FreshnessReport> {
                     Err(_) => false,
                 };
                 if stats_match
-                    && cached_record_is_fresh(&cache, &entry.content_hash, &mut fresh_memo)?
+                    && cached_record_is_fresh(
+                        &cache,
+                        &entry.content_hash,
+                        &features,
+                        &mut fresh_memo,
+                    )?
                 {
                     fresh += 1;
                 } else {
@@ -785,7 +927,12 @@ pub fn scan_library_with(
             if let Some(old) = old_index.get(&rel) {
                 if old.size == size
                     && old.mtime_unix == mtime
-                    && cached_record_is_fresh(&cache, &old.content_hash, &mut fresh_memo)?
+                    && cached_record_is_fresh(
+                        &cache,
+                        &old.content_hash,
+                        &opts.features,
+                        &mut fresh_memo,
+                    )?
                 {
                     let entry = old.clone();
                     tick(&|s| {
@@ -853,7 +1000,7 @@ pub fn scan_library_with(
             // one that is stale falls through to re-analyze, overwriting the
             // stale record with current-schema output.
             if let Some(mut rec) = cache.load_record(&content_hash)? {
-                if record_is_fresh(&rec) {
+                if record_is_fresh_for_features(&rec, &opts.features) {
                     // Refresh mutable identity (path/size) and re-save if changed.
                     if rec.source != source {
                         rec.source = source;
@@ -923,6 +1070,7 @@ pub fn scan_library_with(
     Ok(ScanReport {
         total_files,
         analyzed: s.analyzed,
+        migrated_analysis: 0,
         reused_hash_match: s.reused_hash,
         reused_stat_match: s.reused_stat,
         failed: s.failed,

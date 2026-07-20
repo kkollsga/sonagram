@@ -262,6 +262,7 @@ fn report_to_dict<'py>(py: Python<'py>, report: &ScanReport) -> PyResult<Bound<'
     let d = PyDict::new(py);
     d.set_item("total_files", report.total_files)?;
     d.set_item("analyzed", report.analyzed)?;
+    d.set_item("migrated_analysis", report.migrated_analysis)?;
     d.set_item("reused_hash_match", report.reused_hash_match)?;
     d.set_item("reused_stat_match", report.reused_stat_match)?;
     let failed = PyList::empty(py);
@@ -338,8 +339,9 @@ fn validate_ordered_track_ids(track_ids: &[String]) -> std::result::Result<(), S
 /// total: int)` where `stage` is one of `"walk"`, `"hash"`, `"analyze"`,
 /// `"done"`.
 ///
-/// Returns a dict: `total_files`, `analyzed`, `reused_hash_match`,
-/// `reused_stat_match`, `failed` (list of `(path, message)`), `elapsed_sec`.
+/// Returns a dict: `total_files`, `analyzed`, `migrated_analysis`,
+/// `reused_hash_match`, `reused_stat_match`, `failed` (list of
+/// `(path, message)`), `elapsed_sec`.
 #[pyfunction]
 #[pyo3(signature = (library_root, *, progress=None))]
 fn scan(py: Python<'_>, library_root: PathBuf, progress: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
