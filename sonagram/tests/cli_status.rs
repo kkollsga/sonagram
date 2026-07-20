@@ -22,7 +22,10 @@ fn load_a_fixture() -> AnalysisRecord {
         .collect();
     paths.sort();
     let text = std::fs::read_to_string(&paths[0]).expect("read fixture");
-    AnalysisRecord::from_json(&text).expect("parse fixture")
+    let mut record = AnalysisRecord::from_json(&text).expect("parse fixture");
+    record.analysis.provenance.vocalness_model_id =
+        Some(sonagram::scan::VOCALNESS_MODEL_ID.to_string());
+    record
 }
 
 fn tmp_lib(name: &str) -> PathBuf {

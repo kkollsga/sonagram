@@ -23,11 +23,13 @@
 //! `analysis.provenance.schema_version` ≠
 //! [`ANALYSIS_SCHEMA_VERSION`](sonara::analyze::ANALYSIS_SCHEMA_VERSION), or its
 //! `embedding_version` (when present) ≠
-//! [`SIMILARITY_VERSION`](sonara::similarity::SIMILARITY_VERSION). A stale record is treated exactly
-//! like a missing one — re-analyzed — so an upstream schema/embedding bump
-//! (e.g. sonara 0.2.3's chroma fix) self-heals on the next rescan instead of
-//! silently poisoning the graph with old-semantics data. Both reuse tiers verify
-//! this; the check is memoized per content hash for the duration of a scan.
+//! [`SIMILARITY_VERSION`](sonara::similarity::SIMILARITY_VERSION), or its
+//! `vocalness_model_id` is absent/different from [`VOCALNESS_MODEL_ID`]. A stale
+//! record is treated exactly like a missing one — re-analyzed — so an upstream
+//! schema/embedding bump or an explicit model migration self-heals on the next
+//! rescan instead of silently poisoning the graph with old-semantics data. Both
+//! reuse tiers verify this; the check is memoized per content hash for the
+//! duration of a scan.
 //!
 //! Records store `source.path` **relative** to the library root, for
 //! portability, privacy and determinism.
@@ -99,6 +101,11 @@ pub const DEFAULT_FEATURES: &[&str] = &[
     "key_candidates",
 ];
 
+/// Exact identity of the Sonara vocal-presence model Sonagram opts into.
+/// A different bundled model is an intentional analysis migration, never a
+/// silent cache reuse.
+pub const VOCALNESS_MODEL_ID: &str = "sonara-vocalness-v1";
+
 /// The default features as owned `String`s.
 pub fn default_features() -> Vec<String> {
     DEFAULT_FEATURES.iter().map(|s| s.to_string()).collect()
@@ -106,13 +113,20 @@ pub fn default_features() -> Vec<String> {
 
 /// The canonical [`AnalysisConfig`] the scanner and `capture_fixtures` use:
 /// playlist mode with [`DEFAULT_FEATURES`] requested explicitly.
-pub fn default_analysis_config() -> AnalysisConfig {
+pub fn default_analysis_config() -> Result<AnalysisConfig> {
     analysis_config(&default_features())
 }
 
 /// Build a playlist-mode [`AnalysisConfig`] requesting exactly `features`.
-fn analysis_config(features: &[String]) -> AnalysisConfig {
-    AnalysisConfig {
+fn analysis_config(features: &[String]) -> Result<AnalysisConfig> {
+    let vocalness_model = sonara::vocal_model::bundled()?;
+    if vocalness_model.id() != VOCALNESS_MODEL_ID {
+        return Err(crate::SonagramError::Cache(format!(
+            "bundled vocalness model id changed: expected `{VOCALNESS_MODEL_ID}`, got `{}`; review the analysis migration before scanning",
+            vocalness_model.id()
+        )));
+    }
+    Ok(AnalysisConfig {
         mode: AnalysisMode::Playlist,
         features: Some(features.iter().cloned().collect()),
         bpm_min: None,
@@ -120,9 +134,10 @@ fn analysis_config(features: &[String]) -> AnalysisConfig {
         // sonagram stays a pure mapper: genre inference belongs upstream, and
         // sonara ships no model — so we never supply one.
         genre_model: None,
-        // Enabled deliberately only after the model-aware cache gate lands.
-        vocalness_model: None,
-    }
+        // Sonara owns the classifier and embeds its validated artifact. The
+        // exact id above is part of Sonagram's cache-freshness contract.
+        vocalness_model: Some(std::sync::Arc::new(vocalness_model)),
+    })
 }
 
 /// Coarse-grained scan progress, reported through [`ScanOptions::progress`].
@@ -290,10 +305,10 @@ pub struct SonaraAnalyzer {
 
 impl SonaraAnalyzer {
     /// Build an analyzer requesting `features` in playlist mode.
-    pub fn new(features: &[String]) -> Self {
-        SonaraAnalyzer {
-            config: analysis_config(features),
-        }
+    pub fn new(features: &[String]) -> Result<Self> {
+        Ok(SonaraAnalyzer {
+            config: analysis_config(features)?,
+        })
     }
 }
 
@@ -313,7 +328,7 @@ impl Analyzer for SonaraAnalyzer {
 /// unchanged, and analyzes only unseen hashes. See the module docs for the
 /// three-tier cost model. A no-op rescan analyzes nothing.
 pub fn scan_library(library_root: &Path, opts: &ScanOptions) -> Result<ScanReport> {
-    let analyzer = SonaraAnalyzer::new(&opts.features);
+    let analyzer = SonaraAnalyzer::new(&opts.features)?;
     scan_library_with(library_root, opts, &analyzer)
 }
 
@@ -412,22 +427,25 @@ pub fn compute_scan_fingerprint(library_root: &Path) -> Result<String> {
 /// [`ANALYSIS_SCHEMA_VERSION`](sonara::analyze::ANALYSIS_SCHEMA_VERSION) *and*,
 /// if it carries an `embedding_version`, that matches
 /// [`SIMILARITY_VERSION`](sonara::similarity::SIMILARITY_VERSION). A record with
-/// no embedding_version imposes no embedding constraint. Anything else is
-/// **stale** and must be re-analyzed, not trusted.
+/// no embedding_version imposes no embedding constraint. The record must also
+/// name the exact bundled vocalness model Sonagram currently configures;
+/// absent or changed model provenance is stale even when schema versions did
+/// not move. Anything else is **stale** and must be re-analyzed, not trusted.
 pub fn record_is_fresh(rec: &AnalysisRecord) -> bool {
     rec.analysis.provenance.schema_version == sonara::analyze::ANALYSIS_SCHEMA_VERSION
         && rec
             .analysis
             .embedding_version
             .is_none_or(|v| v == sonara::similarity::SIMILARITY_VERSION)
+        && rec.analysis.provenance.vocalness_model_id.as_deref() == Some(VOCALNESS_MODEL_ID)
 }
 
 /// Freshness of the on-disk record for `content_hash`, memoized per scan.
 ///
 /// Returns `false` for a **missing** record (so the stat fast-path self-heals a
 /// deleted record) and for a **stale** one (so an upstream schema/embedding bump
-/// forces re-analysis). Loading is cheap and cached by hash, so a hash shared by
-/// several index entries is read at most once.
+/// or model-identity change forces re-analysis). Loading is cheap and cached by
+/// hash, so a hash shared by several index entries is read at most once.
 fn cached_record_is_fresh(
     cache: &Cache,
     content_hash: &str,
@@ -448,8 +466,8 @@ fn cached_record_is_fresh(
 ///
 /// Every count is derived without hashing a single file or running any analysis:
 /// it compares the on-disk `*.mp3` set and their `(size, mtime)` stats against
-/// the cached `index.json`, and checks each referenced record's schema/embedding
-/// freshness against the sonara build we now link. The four disjoint file counts
+/// the cached `index.json`, and checks each referenced record's schema,
+/// embedding, and model freshness against the sonara build we now link. The four disjoint file counts
 /// (`fresh` + `stale` + `missing_from_index`) sum to `total_files`;
 /// `deleted_in_index` counts index entries with no file on disk (not part of
 /// `total_files`).
@@ -458,11 +476,11 @@ pub struct FreshnessReport {
     /// Total `*.mp3` files discovered on disk under the library root.
     pub total_files: usize,
     /// Files present in the index whose `(size, mtime)` still match **and** whose
-    /// cached record exists and is fresh (current sonara schema/embedding). These
+    /// cached record exists and is fresh (current sonara schema/embedding/model). These
     /// would be served from the scan's stat fast-path — zero work on a rescan.
     pub fresh: usize,
     /// Files in the index whose stats changed, or whose cached record is missing
-    /// or stale (older sonara schema/embedding). A rescan would re-hash and, if
+    /// or stale (older sonara schema/embedding/model). A rescan would re-hash and, if
     /// needed, re-analyze these.
     pub stale: usize,
     /// Files on disk with no index entry at all (never scanned).
@@ -488,8 +506,8 @@ pub struct FreshnessReport {
 ///
 /// Index entries with no file on disk are counted as `deleted_in_index`.
 ///
-/// Record freshness is checked through the same `(schema_version,
-/// embedding_version)` comparison the scanner uses, memoized per content hash so
+/// Record freshness is checked through the same schema, embedding, and model
+/// identity comparison the scanner uses, memoized per content hash so
 /// each unique cached record is read at most once (no sampling needed — a full,
 /// exact check that stays cheap because records are content-addressed and
 /// deduplicated).
@@ -761,9 +779,9 @@ pub fn scan_library_with(
 
             // Tier 1: stat fast-path. Requires the record to still exist AND be
             // fresh: a deleted record self-heals instead of leaving a hole in the
-            // graph, and a stale record (older sonara schema/embedding) is
+            // graph, and a stale record (older sonara schema/embedding/model) is
             // re-analyzed instead of silently trusted. The freshness check loads
-            // the record's two version ints once per hash (memoized).
+            // the record's analysis identities once per hash (memoized).
             if let Some(old) = old_index.get(&rel) {
                 if old.size == size
                     && old.mtime_unix == mtime

@@ -64,11 +64,11 @@ fn capture_one(out_dir: &Path, audio: &Path) -> Result<String, String> {
 
     // Shared with the live scanner so fixtures and scans request identical
     // features (see `sonagram::scan::DEFAULT_FEATURES`).
-    let config = default_analysis_config();
+    let config = default_analysis_config().map_err(|e| format!("analysis config: {e}"))?;
 
     // sr = 0 → analyze at the file's native rate.
-    let analysis = analyze_file(audio, 0, &config)
-        .map_err(|e| format!("analyze {}: {e}", audio.display()))?;
+    let analysis =
+        analyze_file(audio, 0, &config).map_err(|e| format!("analyze {}: {e}", audio.display()))?;
 
     let source = SourceInfo {
         content_hash,

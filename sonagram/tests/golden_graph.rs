@@ -512,10 +512,9 @@ fn contract_sonara() {
 
     // AnalysisConfig / AnalysisMode construction: the scanner builds these to
     // request features. WHY: a field/variant rename breaks `scan::analysis_config`.
-    // `genre_model: None` is the sonara-0.2.3 config field — sonara ships no
-    // model, and sonagram stays a pure mapper, so it is always None here. WHY:
-    // omitting it (or a rename) breaks `scan::analysis_config`, and a non-None
-    // value would pull genre inference into sonagram (analysis belongs upstream).
+    // Keep an exhaustive literal so upstream field changes fail at compile
+    // time. Sonagram supplies no genre model; it does opt into Sonara's own
+    // validated bundled vocalness model in `scan::default_analysis_config`.
     let _cfg = AnalysisConfig {
         mode: AnalysisMode::Playlist,
         features: None,
@@ -524,6 +523,13 @@ fn contract_sonara() {
         genre_model: None,
         vocalness_model: None,
     };
+    let configured = sonagram::scan::default_analysis_config()
+        .expect("Sonara's embedded vocalness model must validate");
+    let vocalness_model = configured
+        .vocalness_model
+        .expect("Sonagram deliberately enables the bundled vocalness model");
+    assert_eq!(vocalness_model.id(), sonagram::scan::VOCALNESS_MODEL_ID);
+    assert_eq!(vocalness_model.embedding_version(), SIMILARITY_VERSION);
 
     // WHY: each Track carries `analysis_schema_version`. If sonara bumps its
     // schema, previously captured fixtures no longer describe the same analysis
@@ -532,7 +538,7 @@ fn contract_sonara() {
     // recalibration + new bpm_confidence); a future bump must recapture the 15
     // fixtures + regen the golden in the same commit.
     assert_eq!(
-        ANALYSIS_SCHEMA_VERSION, 3,
+        ANALYSIS_SCHEMA_VERSION, 4,
         "sonara ANALYSIS_SCHEMA_VERSION changed — recapture fixtures + goldens"
     );
 

@@ -18,7 +18,7 @@
   },
   "analysis": {
     "provenance": {
-      "schema_version": 3,
+      "schema_version": 4,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -48,7 +48,8 @@
         "time_signature",
         "valence",
         "vocalness"
-      ]
+      ],
+      "vocalness_model_id": "sonara-vocalness-v1"
     },
     "duration_sec": 37.45959,
     "bpm": 126.04802,
@@ -891,7 +892,7 @@
       }
     ],
     "chord_change_rate": 1.8953757,
-    "predominant_chord": "G#m",
+    "predominant_chord": "A",
     "dissonance": 0.009263583,
     "energy": 0.3418339,
     "danceability": 0.86897403,
@@ -1089,7 +1090,7 @@
         0.197159
       ]
     ],
-    "vocalness": 0.0,
+    "vocalness": 6.756532e-10,
     "fingerprint": null,
     "embedding_version": 2
   }

@@ -121,7 +121,7 @@ that wasn't run, or a tag the file lacked).
 | `analysis_schema_version` | int | no | provenance |
 | `embedding_version` | int | yes | provenance |
 | `genre_model_id` | str | yes | exact Sonara genre model identity; null when no genre model ran |
-| `vocalness_model_id` | str | yes | exact Sonara vocalness model identity; null for the built-in heuristic |
+| `vocalness_model_id` | str | yes | exact Sonara vocalness model identity; current scans require `sonara-vocalness-v1` |
 
 **P21 curve-derived features** (graph schema v2 — computed from the full
 analysis curves at build time):
@@ -293,10 +293,10 @@ for `curate_playlist`.
   low — library mean ≈ 0.17; **≥ 0.3 is solid, ≥ 0.45 is strong**. Note that
   high-energy dense mixes tend to score lower confidence, so a strict energy
   floor and a strict confidence floor fight each other — relax one.
-- **`vocalness`/`instrumentalness` are FIXED as of analysis schema v3** (sonara
-  0.2.4; check `t.analysis_schema_version >= 3`). The v2 heuristic now scores
-  **low = instrumental, high = vocal (harsh/screamed highest, clean singing mid,
-  solo instruments low)** — trustworthy for instrumental filtering: use
+- **`vocalness`/`instrumentalness` require model provenance, not only schema
+  v3.** Current Sonagram scans use Sonara's calibrated bundled model; require
+  `t.vocalness_model_id = 'sonara-vocalness-v1'`. It scores **low =
+  instrumental, high = vocal** and is suitable for instrumental filtering: use
   `vocalness < ~0.35` to find instrumentals and `>= ~0.55` to require vocals.
   Two caveats remain: (1) a **voice-mimicking solo instrument** (nylon-guitar
   flamenco, solo violin, cathedral organ) can still read mid-high — the
@@ -304,9 +304,9 @@ for `curate_playlist`.
   asks. (2) `vocalness` measures *presence*, not *singability* — a high score
   says "a voice is prominent", not "great singalong". `instrumentalness` is
   exactly `1 − vocalness` (collinear — no added signal; prefer `vocalness`).
-  **On a pre-v3 graph the OLD values INVERT** (screamed metal lowest, solo sax
-  highest) — if you see `analysis_schema_version < 3`, do not trust vocalness for
-  instrumental filtering; lead with genre/compilation tags instead.
+  Records with a null/different model id are stale even when
+  `analysis_schema_version = 3`; do not mix their heuristic scores with current
+  model-derived values.
 - **Gate `bpm` on `bpm_confidence` before trusting it.** New in schema v3:
   `bpm_confidence` (0–1) flags when the tempo estimate is solid. Steady dance/pop
   reads 0.7–0.9; ambient/rubato/sparse-onset material (classical, drone,
@@ -330,8 +330,8 @@ for `curate_playlist`.
   mean features — **read `top_genres`, `mean_*`, and `exemplar_titles`** to know
   what it actually contains, rather than trusting the name.
 - **`mood_*` are heuristic v1** — directional, not calibrated ground truth. Good
-  for coarse ranking, not hard thresholds. (`vocalness`/`instrumentalness` are v2
-  and now trustworthy — see the vocalness pitfall above.)
+  for coarse ranking, not hard thresholds. Vocalness is separately model-derived
+  when its required model id is present; see the pitfall above.
 - **Mood axes are music-only and nullable.** Non-music is excluded from their
   library calibration and carries null `arousal_index`, `valence_index`, and
   `tension_index`. Start mood queries with `t.is_music AND t.is_canonical` and

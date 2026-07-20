@@ -18,7 +18,7 @@
   },
   "analysis": {
     "provenance": {
-      "schema_version": 3,
+      "schema_version": 4,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -48,7 +48,8 @@
         "time_signature",
         "valence",
         "vocalness"
-      ]
+      ],
+      "vocalness_model_id": "sonara-vocalness-v1"
     },
     "duration_sec": 234.05714,
     "bpm": 111.3676,
@@ -4542,7 +4543,7 @@
     "mood_aggressive": 0.55780536,
     "mood_relaxed": 0.40471816,
     "mood_sad": 0.60445035,
-    "instrumentalness": 0.26290452,
+    "instrumentalness": 0.000004887581,
     "genre": null,
     "genre_confidence": null,
     "grid_offset_sec": 0.54566896,
@@ -5155,7 +5156,7 @@
         0.4054207
       ]
     ],
-    "vocalness": 0.7370955,
+    "vocalness": 0.9999951,
     "fingerprint": null,
     "embedding_version": 2
   }

@@ -18,7 +18,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use sonagram::record::AnalysisRecord;
 use sonagram::scan::cache::{Cache, Index, IndexEntry};
 use sonagram::scan::{
-    load_records, scan_library_with, AnalyzeRequest, Analyzer, ScanOptions,
+    default_analysis_config, load_records, record_is_fresh, scan_library_with, AnalyzeRequest,
+    Analyzer, ScanOptions, VOCALNESS_MODEL_ID,
 };
 
 /// A mock analyzer: counts analyses and returns a fixture-derived record stamped
@@ -115,7 +116,10 @@ fn load_a_fixture() -> AnalysisRecord {
         .collect();
     paths.sort();
     let text = std::fs::read_to_string(&paths[0]).expect("read fixture");
-    AnalysisRecord::from_json(&text).expect("parse fixture")
+    let mut record = AnalysisRecord::from_json(&text).expect("parse fixture");
+    record.analysis.provenance.vocalness_model_id =
+        Some(sonagram::scan::VOCALNESS_MODEL_ID.to_string());
+    record
 }
 
 // ---- synthetic library helpers ----
@@ -178,6 +182,32 @@ fn build_duplicate_library(name: &str) -> PathBuf {
     write_file(&lib.join("a.mp3"), &make_mp3(b"first-tag", b"SHARED-AUDIO"));
     write_file(&lib.join("b.mp3"), &make_mp3(b"second-longer-tag", b"SHARED-AUDIO"));
     lib
+}
+
+#[test]
+fn bundled_vocalness_model_identity_drives_cache_freshness() {
+    let config = default_analysis_config().expect("bundled model must validate");
+    assert_eq!(
+        config.vocalness_model.as_ref().map(|model| model.id()),
+        Some(VOCALNESS_MODEL_ID)
+    );
+
+    let current = load_a_fixture();
+    assert!(record_is_fresh(&current));
+
+    let mut absent = current.clone();
+    absent.analysis.provenance.vocalness_model_id = None;
+    assert!(
+        !record_is_fresh(&absent),
+        "pre-model records must invalidate"
+    );
+
+    let mut changed = current;
+    changed.analysis.provenance.vocalness_model_id = Some("future-model".to_string());
+    assert!(
+        !record_is_fresh(&changed),
+        "a changed model id must invalidate"
+    );
 }
 
 #[test]

@@ -63,7 +63,7 @@ be null (opt-in analysis that wasn't run, or a tag the file lacked).
 | `analysis_schema_version` | int | no | provenance |
 | `embedding_version` | int | yes | provenance |
 | `genre_model_id` | str | yes | exact Sonara genre-model identity; null when no model ran |
-| `vocalness_model_id` | str | yes | exact Sonara vocalness-model identity; null for the built-in heuristic |
+| `vocalness_model_id` | str | yes | exact Sonara vocalness-model identity; current scans require `sonara-vocalness-v1` |
 
 ### Graph-derived Track properties (schema v2)
 

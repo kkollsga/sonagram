@@ -106,7 +106,8 @@ with tempfile.TemporaryDirectory() as tmp:
     for source in sorted(fixtures.glob("*.json")):
         data = json.loads(source.read_text())
         content_hash = data["source"]["content_hash"]
-        shutil.copyfile(source, analysis / f"{content_hash}.json")
+        data["analysis"]["provenance"]["vocalness_model_id"] = "sonara-vocalness-v1"
+        (analysis / f"{content_hash}.json").write_text(json.dumps(data, indent=2) + "\n")
         index[data["source"]["path"]] = {
             "size": data["source"]["file_size"],
             "mtime_unix": 0,
