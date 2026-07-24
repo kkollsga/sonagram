@@ -669,9 +669,9 @@ checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
 name = "ferricml"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c070093d81aae4351547d6abf36a6162a1004241d1c51655a81d73ff08f3e910"
+checksum = "a7ed9e0a5c2c9c1f2e66071c13bd54b6ee57d7fd72b352ce35244b5cd887005b"
 dependencies = [
  "nalgebra",
  "sha2 0.10.9",
@@ -2729,7 +2729,7 @@ dependencies = [
 
 [[package]]
 name = "sonara"
-version = "0.3.1"
+version = "0.3.3"
 dependencies = [
  "ferricml",
  "hound",

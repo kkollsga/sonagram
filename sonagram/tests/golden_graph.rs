@@ -545,16 +545,17 @@ fn contract_sonara() {
         sonagram::scan::AGGRESSION_MODEL_ID,
         sonara::aggression::AGGRESSION_MODEL_ID
     );
-    assert_eq!(sonara::aggression::AGGRESSION_MODEL_VERSION, 2);
+    assert_eq!(sonara::aggression::AGGRESSION_MODEL_VERSION, 3);
+    assert_eq!(sonara::aggression::AGGRESSION_SAMPLE_RATE, 22_050);
     assert_eq!(sonara::aggression::AGGRESSION_FEATURE_COUNT, 39);
 
     // WHY: each Track carries `analysis_schema_version`. If sonara bumps its
     // schema, previously captured fixtures no longer describe the same analysis
     // semantics — the goldens must be recaptured, not silently trusted. Pinned to
-    // 5 as of sonara 0.3.1 (fused aggression rank + evidence support); a future
+    // 6 as of sonara 0.3.3 (sample-rate-stable aggression rank v3); a future
     // bump must recapture the 15 fixtures + regen the golden in the same commit.
     assert_eq!(
-        ANALYSIS_SCHEMA_VERSION, 5,
+        ANALYSIS_SCHEMA_VERSION, 6,
         "sonara ANALYSIS_SCHEMA_VERSION changed — recapture fixtures + goldens"
     );
 

@@ -18,7 +18,7 @@
   },
   "analysis": {
     "provenance": {
-      "schema_version": 5,
+      "schema_version": 6,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
@@ -51,7 +51,7 @@
         "vocalness"
       ],
       "vocalness_model_id": "sonara-vocalness-v2",
-      "aggression_model_id": "aggression-rank-v2"
+      "aggression_model_id": "aggression-rank-v3-sr22050"
     },
     "duration_sec": 507.89877,
     "bpm": 119.92527,
@@ -7265,12 +7265,12 @@
       0.30077434,
       0.5356161
     ],
-    "aggression_score": 0.5465037,
-    "aggression_confidence": 0.71681917,
-    "aggression_forcefulness": 0.56244344,
-    "aggression_harshness": 0.14267221,
-    "aggression_tension": 0.05658734,
-    "aggression_rhythm": 0.55944306,
+    "aggression_score": 0.5784355,
+    "aggression_confidence": 0.64167786,
+    "aggression_forcefulness": 0.42998943,
+    "aggression_harshness": 0.19918807,
+    "aggression_tension": 0.08955876,
+    "aggression_rhythm": 0.43431106,
     "mood_happy": 0.6522883,
     "mood_aggressive": 0.15694964,
     "mood_relaxed": 0.5430228,

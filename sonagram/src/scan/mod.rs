@@ -521,8 +521,9 @@ pub fn record_is_fresh(rec: &AnalysisRecord) -> bool {
 
 /// Upgrade one compatible cached analysis without decoding audio.
 ///
-/// Sonara's schema-3→4 delta and the trusted bundled vocalness-model rollout are
-/// reproducible entirely from schema-3/4 data Sonagram already persisted: the
+/// Sonara's schema-3→4 delta, schema-5→6 aggression-only delta, and the trusted
+/// bundled vocalness-model rollout are reproducible entirely from compatible
+/// no-aggression data Sonagram already persisted: the
 /// stable chord summary derives from `chord_sequence`, while the classifier
 /// derives from the current 48-D similarity embedding. This migration is
 /// deliberately narrow; any missing, unknown-model, or mismatched prerequisite
@@ -548,7 +549,7 @@ pub fn migrate_cached_record(
     if !aggression_is_fresh(rec, false) {
         return false;
     }
-    if !matches!(provenance.schema_version, 3 | 4)
+    if !matches!(provenance.schema_version, 3..=5)
         || provenance.mode != "playlist"
         || provenance.requested_features.as_deref() != Some(expected.as_slice())
         || provenance.genre_model_id.is_some()

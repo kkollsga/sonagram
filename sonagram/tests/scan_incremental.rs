@@ -243,13 +243,15 @@ fn bundled_vocalness_model_identity_drives_cache_freshness() {
 }
 
 #[test]
-fn fused_aggression_contract_drives_cache_freshness() {
+fn fused_aggression_identity_drives_cache_freshness() {
     let config = default_analysis_config().expect("bundled models must validate");
     assert!(config
         .features
         .as_ref()
         .is_some_and(|features| features.contains("aggression")));
-    assert_eq!(AGGRESSION_MODEL_ID, "aggression-rank-v2");
+    assert_eq!(AGGRESSION_MODEL_ID, "aggression-rank-v3-sr22050");
+    assert_eq!(sonara::aggression::AGGRESSION_SAMPLE_RATE, 22_050);
+    assert_eq!(sonara::analyze::ANALYSIS_SCHEMA_VERSION, 6);
 
     let current = load_a_fixture();
     assert!(record_is_fresh(&current));
@@ -422,6 +424,39 @@ fn schema_four_v1_cache_migrates_to_v2_without_audio() {
 }
 
 #[test]
+fn schema_five_cache_without_aggression_migrates_to_six_without_audio() {
+    let mut expected = load_a_fixture();
+    let features = without_aggression(&mut expected);
+    let mut schema_five = expected.clone();
+    schema_five.analysis.provenance.schema_version = 5;
+
+    let model = sonara::vocal_model::bundled().unwrap();
+    assert!(migrate_cached_record(&mut schema_five, &features, &model));
+    assert_eq!(
+        schema_five.analysis.provenance.schema_version,
+        sonara::analyze::ANALYSIS_SCHEMA_VERSION
+    );
+    assert_eq!(schema_five.analysis.provenance, expected.analysis.provenance);
+    assert!(record_is_fresh_for_features(&schema_five, &features));
+}
+
+#[test]
+fn schema_five_v2_aggression_cache_requires_audio_reanalysis() {
+    let mut schema_five = load_a_fixture();
+    schema_five.analysis.provenance.schema_version = 5;
+    schema_five.analysis.provenance.aggression_model_id =
+        Some("aggression-rank-v2".to_string());
+
+    assert!(!record_is_fresh(&schema_five));
+    let model = sonara::vocal_model::bundled().unwrap();
+    let features = ScanOptions::default().features;
+    assert!(
+        !migrate_cached_record(&mut schema_five, &features, &model),
+        "schema-5/v2 aggression evidence cannot be promoted without decoding audio"
+    );
+}
+
+#[test]
 fn cache_migration_rejects_incomplete_or_foreign_inputs() {
     let model = sonara::vocal_model::bundled().unwrap();
     let mut legacy = load_a_fixture();
@@ -471,7 +506,7 @@ fn cache_migration_rejects_incomplete_or_foreign_inputs() {
 }
 
 #[test]
-fn production_scan_reanalyzes_pre_aggression_cache_from_audio() {
+fn production_scan_reanalyzes_schema_five_v2_aggression_cache_from_audio() {
     let lib = tmp_library("cached-migration");
     let path = lib.join("a.mp3");
     write_file(&path, &make_mp3(b"tag", b"not-decodable-audio"));
@@ -487,18 +522,9 @@ fn production_scan_reanalyzes_pre_aggression_cache_from_audio() {
     legacy.source.content_hash = "cached-hash".to_string();
     legacy.source.path = "a.mp3".to_string();
     legacy.source.file_size = metadata.len();
-    legacy.analysis.provenance.schema_version = 3;
-    legacy.analysis.provenance.vocalness_model_id = None;
-    legacy.analysis.provenance.aggression_model_id = None;
-    legacy.analysis.aggression_score = None;
-    legacy.analysis.aggression_confidence = None;
-    legacy.analysis.aggression_forcefulness = None;
-    legacy.analysis.aggression_harshness = None;
-    legacy.analysis.aggression_tension = None;
-    legacy.analysis.aggression_rhythm = None;
-    legacy.analysis.vocalness = Some(0.0);
-    legacy.analysis.instrumentalness = Some(1.0);
-    legacy.analysis.predominant_chord = Some("G#m".to_string());
+    legacy.analysis.provenance.schema_version = 5;
+    legacy.analysis.provenance.aggression_model_id =
+        Some("aggression-rank-v2".to_string());
 
     let cache = Cache::new(&lib);
     cache.save_record(&legacy).unwrap();
@@ -520,7 +546,7 @@ fn production_scan_reanalyzes_pre_aggression_cache_from_audio() {
     assert_eq!(
         report.failed.len(),
         1,
-        "old canonical caches must decode audio instead of synthesizing aggression from embeddings"
+        "schema-5/v2 aggression caches must decode audio instead of being promoted"
     );
     let unchanged = cache.load_record("cached-hash").unwrap().unwrap();
     assert!(!record_is_fresh(&unchanged));
