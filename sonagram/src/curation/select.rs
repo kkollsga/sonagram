@@ -4,8 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use kglite::api::DirGraph;
 
 use super::audit::{
-    audit_playlist_for_brief, eligibility_issues, explain_playlist_for_brief,
-    max_seed_similarity, seed_constraint_issues, seed_directives_active, SeedBaselines,
+    aggression_unknown_message, audit_playlist_for_brief, eligibility_issues,
+    explain_playlist_for_brief, max_seed_similarity, seed_constraint_issues,
+    seed_directives_active, SeedBaselines,
 };
 use super::project::{
     embedding_similarity, graph_build_input_fingerprint, project_tracks, TrackCandidate,
@@ -90,6 +91,12 @@ pub fn curate_playlist(
         }
         let eligibility = eligibility_issues(track, policy);
         if !eligibility.is_empty() {
+            if eligibility.iter().any(|(code, _)| *code == "aggression_unknown") {
+                selection_issues.push(error(
+                    "aggression_unknown",
+                    format!("seed {id}: {}", aggression_unknown_message(track)),
+                ));
+            }
             selection_issues.push(error(
                 "ineligible_seed",
                 format!("seed {id} violates policy: {}", eligibility[0].1),
@@ -118,13 +125,20 @@ pub fn curate_playlist(
     let seed_count = selected.len();
     let seed_baselines = SeedBaselines::from_tracks(&reference_seeds);
 
+    let mut eligibility_rejections: BTreeMap<&'static str, (String, usize)> = BTreeMap::new();
     let mut seed_rejections: BTreeMap<&'static str, (String, usize)> = BTreeMap::new();
     let mut eligible = Vec::new();
-    for track in tracks
-        .iter()
-        .filter(|track| eligibility_issues(track, policy).is_empty())
-        .filter(|track| !seen_seed_ids.contains(track.id.as_str()))
-    {
+    for track in tracks.iter().filter(|track| !seen_seed_ids.contains(track.id.as_str())) {
+        let eligibility = eligibility_issues(track, policy);
+        if !eligibility.is_empty() {
+            for (code, message) in eligibility {
+                if code == "aggression_unknown" {
+                    let entry = eligibility_rejections.entry(code).or_insert((message, 0));
+                    entry.1 += 1;
+                }
+            }
+            continue;
+        }
         let relative_issues = if reference_seeds.is_empty() {
             Vec::new()
         } else {
@@ -233,6 +247,14 @@ pub fn curate_playlist(
                 "policy can supply only {} of {} requested tracks without relaxing hard constraints",
                 track_ids.len(), brief.target_tracks
             ),
+        ));
+        selection_issues.extend(eligibility_rejections.into_iter().map(
+            |(code, (message, count))| {
+                error(
+                    code,
+                    format!("{count} candidate(s) rejected: {message}"),
+                )
+            },
         ));
         selection_issues.extend(seed_rejections.into_iter().map(
             |(code, (message, count))| {
@@ -358,6 +380,7 @@ fn selection_score(
         fit(track.arousal, policy.targets.arousal),
         fit(track.tension, policy.targets.tension),
         fit(track.vocalness, policy.targets.vocalness),
+        fit(track.aggression_score(), policy.targets.aggression),
     ];
     let (fit_sum, fit_count) = fits
         .into_iter()
@@ -478,6 +501,12 @@ fn seed_relevance(
             baselines.vocalness,
             policy.targets.relative_vocalness,
             policy.targets.relative_vocalness_margin,
+        ),
+        (
+            track.aggression_score(),
+            baselines.aggression,
+            policy.targets.relative_aggression,
+            policy.targets.relative_aggression_margin,
         ),
     ] {
         if direction != RelativeDirection::Any {

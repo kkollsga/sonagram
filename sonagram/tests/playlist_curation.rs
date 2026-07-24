@@ -5,10 +5,14 @@
 //! case-variant artists/albums and are arranged with weak pairwise continuity.
 //! It is built from a frozen TrackAnalysis record; no audio is committed.
 
+use std::collections::BTreeMap;
+
+use kglite::api::cypher::resolve_node_property;
+use kglite::api::Value;
 use sonagram::curation::{
     audit_playlist, audit_playlist_for_brief, curate_playlist, explain_playlist,
-    profile_library, PlaylistArc, PlaylistBrief, PlaylistPolicy, PlaylistPreset,
-    RelativeDirection, SeedRole, SeedSimilarityPreference,
+    profile_library, AggressionStatus, PlaylistArc, PlaylistBrief, PlaylistPolicy,
+    PlaylistPreset, RelativeDirection, SeedRole, SeedSimilarityPreference,
 };
 use sonagram::enrich::{ArtistEnrich, EnrichmentData};
 use sonagram::graph::{self, LibraryInfo};
@@ -70,6 +74,94 @@ fn graph_from(records: Vec<AnalysisRecord>) -> std::sync::Arc<kglite::api::DirGr
         },
     )
     .unwrap()
+}
+
+#[derive(Clone)]
+struct AggressionFixture {
+    model_id: Option<&'static str>,
+    score: Option<f64>,
+    diagnostics: [Option<f64>; 5],
+}
+
+impl AggressionFixture {
+    fn valid(score: f64) -> Self {
+        Self {
+            model_id: Some(sonara::aggression::AGGRESSION_MODEL_ID),
+            score: Some(score),
+            diagnostics: [Some(0.8), Some(0.7), Some(0.6), Some(0.5), Some(0.4)],
+        }
+    }
+
+    fn abstained() -> Self {
+        Self {
+            score: None,
+            ..Self::valid(0.5)
+        }
+    }
+}
+
+fn graph_with_aggression(
+    records: Vec<AnalysisRecord>,
+    evidence: BTreeMap<String, AggressionFixture>,
+) -> std::sync::Arc<kglite::api::DirGraph> {
+    let graph = graph_from(records);
+    let mut graph = match std::sync::Arc::try_unwrap(graph) {
+        Ok(graph) => graph,
+        Err(_) => panic!("new graph has one owner"),
+    };
+    let indices = graph.type_indices.get("Track").unwrap().to_vec();
+    let by_id: BTreeMap<String, _> = indices
+        .into_iter()
+        .map(|index| {
+            let node = graph.get_node(index).unwrap();
+            let Value::String(id) = resolve_node_property(node, "content_hash", &graph) else {
+                panic!("Track content_hash must be a string")
+            };
+            (id, index)
+        })
+        .collect();
+    let mut interner = graph.interner.clone();
+    for index in by_id.values() {
+        let node = graph.get_node_mut(*index).unwrap();
+        for name in [
+            "aggression_model_id",
+            "aggression",
+            "aggression_confidence",
+            "aggression_forcefulness",
+            "aggression_harshness",
+            "aggression_tension",
+            "aggression_rhythm",
+        ] {
+            node.remove_property(name);
+        }
+    }
+    for (id, evidence) in evidence {
+        let index = by_id[&id];
+        let node = graph.get_node_mut(index).unwrap();
+        if let Some(model_id) = evidence.model_id {
+            node.set_property(
+                "aggression_model_id",
+                Value::String(model_id.into()),
+                &mut interner,
+            );
+        }
+        if let Some(score) = evidence.score {
+            node.set_property("aggression", Value::Float64(score), &mut interner);
+        }
+        for (name, value) in [
+            ("aggression_confidence", evidence.diagnostics[0]),
+            ("aggression_forcefulness", evidence.diagnostics[1]),
+            ("aggression_harshness", evidence.diagnostics[2]),
+            ("aggression_tension", evidence.diagnostics[3]),
+            ("aggression_rhythm", evidence.diagnostics[4]),
+        ] {
+            if let Some(value) = value {
+                node.set_property(name, Value::Float64(value), &mut interner);
+            }
+        }
+    }
+    graph.interner = interner;
+    std::sync::Arc::new(graph)
 }
 
 fn alias_graph(records: Vec<AnalysisRecord>) -> std::sync::Arc<kglite::api::DirGraph> {
@@ -612,6 +704,8 @@ fn old_policy_and_brief_json_default_new_intent_fields() {
     let mut policy = serde_json::to_value(PlaylistPolicy::default()).unwrap();
     let eligibility = policy["eligibility"].as_object_mut().unwrap();
     for field in [
+        "min_aggression",
+        "max_aggression",
         "include_artists",
         "exclude_artists",
         "include_genres",
@@ -627,6 +721,7 @@ fn old_policy_and_brief_json_default_new_intent_fields() {
     }
     let targets = policy["targets"].as_object_mut().unwrap();
     for field in [
+        "aggression",
         "seed_similarity",
         "min_seed_similarity",
         "relative_energy",
@@ -637,12 +732,221 @@ fn old_policy_and_brief_json_default_new_intent_fields() {
         "relative_tension_margin",
         "relative_vocalness",
         "relative_vocalness_margin",
+        "relative_aggression",
+        "relative_aggression_margin",
     ] {
         targets.remove(field);
     }
     let policy: PlaylistPolicy = serde_json::from_value(policy).unwrap();
     assert_eq!(policy.targets.seed_similarity, SeedSimilarityPreference::Neutral);
+    assert_eq!(policy.targets.aggression, None);
+    assert_eq!(policy.targets.relative_aggression, RelativeDirection::Any);
+    assert_eq!(policy.eligibility.min_aggression, None);
     assert!(policy.eligibility.include_genres.is_empty());
+}
+
+#[test]
+fn every_preset_keeps_aggression_neutral() {
+    for preset in [
+        PlaylistPreset::General,
+        PlaylistPreset::Focus,
+        PlaylistPreset::Party,
+        PlaylistPreset::Workout,
+        PlaylistPreset::Chill,
+        PlaylistPreset::Discovery,
+    ] {
+        let policy = PlaylistPolicy::for_preset(preset);
+        assert_eq!(policy.version, 1);
+        assert_eq!(policy.eligibility.min_aggression, None);
+        assert_eq!(policy.eligibility.max_aggression, None);
+        assert_eq!(policy.targets.aggression, None);
+        assert_eq!(policy.targets.relative_aggression, RelativeDirection::Any);
+        assert_eq!(policy.targets.relative_aggression_margin, 0.0);
+    }
+}
+
+fn relaxed_aggression_policy() -> PlaylistPolicy {
+    let mut policy = PlaylistPolicy::default();
+    policy.eligibility.allow_low_quality = true;
+    policy.transition.arc = PlaylistArc::None;
+    policy.audit.min_unique_artist_ratio = 0.0;
+    policy.audit.max_artist_share = 1.0;
+    policy.audit.max_album_share = 1.0;
+    policy.audit.min_mean_transition_score = 0.0;
+    policy.audit.min_worst_transition_score = 0.0;
+    policy.audit.max_mean_arc_error = 1.0;
+    policy
+}
+
+fn aggression_map(values: &[f64]) -> BTreeMap<String, AggressionFixture> {
+    values
+        .iter()
+        .enumerate()
+        .map(|(index, value)| (format!("{index:064x}"), AggressionFixture::valid(*value)))
+        .collect()
+}
+
+#[test]
+fn direct_aggression_uses_v2_rank_not_mood_and_profiles_complete_evidence() {
+    let mut source = records()[..3].to_vec();
+    for (index, record) in source.iter_mut().enumerate() {
+        record.analysis.energy = Some(0.5);
+        record.analysis.mood_aggressive = Some([0.9, 0.5, 0.1][index]);
+        let tags = record.tags.as_mut().unwrap();
+        tags.artist = Some(format!("Aggression Artist {index}"));
+        tags.album = Some(format!("Aggression Album {index}"));
+    }
+    let graph = graph_with_aggression(source, aggression_map(&[0.1, 0.5, 0.9]));
+    let profile = profile_library(&graph).unwrap();
+    assert_eq!(profile.stats["aggression"].present, 3);
+    assert_eq!(profile.stats["aggression_confidence"].present, 3);
+    assert_eq!(profile.stats["aggression_forcefulness"].present, 3);
+    assert_eq!(profile.aggression_models[sonara::aggression::AGGRESSION_MODEL_ID], 3);
+
+    let brief = PlaylistBrief {
+        target_tracks: 1,
+        ..PlaylistBrief::default()
+    };
+    let mut policy = relaxed_aggression_policy();
+    policy.targets.aggression = Some(0.9);
+    let result = curate_playlist(&graph, &brief, &policy).unwrap();
+    assert!(result.exportable, "{:?}", result.audit.issues);
+    assert_eq!(result.track_ids, [format!("{:064x}", 2)]);
+    let evidence = result.explanation.tracks[0].aggression.as_ref().unwrap();
+    assert_eq!(evidence.status, AggressionStatus::Available);
+    assert_eq!(evidence.score, Some(0.9));
+    assert!(result.explanation.tracks[0]
+        .contributions
+        .iter()
+        .any(|item| item.component == "aggression_fit" && item.value > 0.99));
+
+    policy.eligibility.min_aggression = Some(0.8);
+    let audit = audit_playlist(&graph, &[format!("{:064x}", 0)], &policy).unwrap();
+    assert!(audit.issues.iter().any(|issue| issue.code == "aggression_too_low"));
+}
+
+#[test]
+fn neutral_policy_selection_and_transitions_ignore_aggression() {
+    let source = records()[..6].to_vec();
+    let low_to_high = graph_with_aggression(source.clone(), aggression_map(&[0.0, 0.2, 0.4, 0.6, 0.8, 1.0]));
+    let high_to_low = graph_with_aggression(source, aggression_map(&[1.0, 0.8, 0.6, 0.4, 0.2, 0.0]));
+    let brief = PlaylistBrief {
+        target_tracks: 3,
+        ..PlaylistBrief::default()
+    };
+    let mut policy = relaxed_aggression_policy();
+    policy.diversity.max_per_artist = 6;
+    policy.diversity.max_per_album = 6;
+    policy.diversity.min_artist_gap = 0;
+    let first = curate_playlist(&low_to_high, &brief, &policy).unwrap();
+    let second = curate_playlist(&high_to_low, &brief, &policy).unwrap();
+    assert_eq!(first.track_ids, second.track_ids);
+    assert_eq!(first.audit.transitions, second.audit.transitions);
+    assert!(first.explanation.tracks.iter().all(|track| track.aggression.is_none()));
+}
+
+#[test]
+fn explicit_aggression_fails_closed_for_every_unusable_state() {
+    let source = records()[..4].to_vec();
+    let mut evidence = BTreeMap::new();
+    evidence.insert(format!("{:064x}", 1), AggressionFixture::abstained());
+    evidence.insert(
+        format!("{:064x}", 2),
+        AggressionFixture {
+            model_id: Some(sonara::aggression::LEGACY_AGGRESSION_MODEL_ID),
+            ..AggressionFixture::valid(0.9)
+        },
+    );
+    evidence.insert(
+        format!("{:064x}", 3),
+        AggressionFixture {
+            diagnostics: [Some(0.8), Some(0.7), Some(0.6), Some(0.5), None],
+            ..AggressionFixture::valid(0.9)
+        },
+    );
+    let graph = graph_with_aggression(source, evidence);
+    let mut policy = relaxed_aggression_policy();
+    policy.targets.aggression = Some(0.8);
+    for (index, status) in [
+        AggressionStatus::Missing,
+        AggressionStatus::Abstained,
+        AggressionStatus::IncompatibleModel,
+        AggressionStatus::InvalidDiagnostics,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let ids = vec![format!("{index:064x}")];
+        let audit = audit_playlist(&graph, &ids, &policy).unwrap();
+        assert!(audit.issues.iter().any(|issue| issue.code == "aggression_unknown"));
+        let explanation = explain_playlist(&graph, &ids, &policy).unwrap();
+        assert_eq!(explanation.tracks[0].aggression.as_ref().unwrap().status, status);
+    }
+    let result = curate_playlist(
+        &graph,
+        &PlaylistBrief {
+            target_tracks: 1,
+            ..PlaylistBrief::default()
+        },
+        &policy,
+    )
+    .unwrap();
+    assert!(!result.exportable);
+    assert!(result.audit.issues.iter().any(|issue| issue.code == "aggression_unknown"));
+}
+
+#[test]
+fn relative_aggression_is_seed_owned_and_unknown_is_structured() {
+    let mut source = records()[..3].to_vec();
+    for (index, record) in source.iter_mut().enumerate() {
+        let tags = record.tags.as_mut().unwrap();
+        tags.artist = Some(format!("Relative Artist {index}"));
+        tags.album = Some(format!("Relative Album {index}"));
+    }
+    let graph = graph_with_aggression(source.clone(), aggression_map(&[0.8, 0.2, 0.9]));
+    let brief = PlaylistBrief {
+        target_tracks: 1,
+        seed_ids: vec![format!("{:064x}", 0)],
+        seed_role: SeedRole::Reference,
+        ..PlaylistBrief::default()
+    };
+    let mut policy = relaxed_aggression_policy();
+    policy.targets.relative_aggression = RelativeDirection::Lower;
+    policy.targets.relative_aggression_margin = 0.1;
+    let result = curate_playlist(&graph, &brief, &policy).unwrap();
+    assert!(result.exportable, "{:?}", result.audit.issues);
+    assert_eq!(result.track_ids, [format!("{:064x}", 1)]);
+
+    let mut evidence = aggression_map(&[0.8, 0.2, 0.9]);
+    evidence.insert(format!("{:064x}", 0), AggressionFixture::abstained());
+    let unknown_graph = graph_with_aggression(source, evidence);
+    let unknown = curate_playlist(&unknown_graph, &brief, &policy).unwrap();
+    assert!(!unknown.exportable);
+    assert!(unknown.audit.issues.iter().any(|issue| issue.code == "aggression_unknown"));
+
+    let mut candidate_evidence = aggression_map(&[0.8, 0.2, 0.9]);
+    candidate_evidence.insert(format!("{:064x}", 1), AggressionFixture::abstained());
+    let candidate_unknown_graph = graph_with_aggression(records()[..3].to_vec(), candidate_evidence);
+    let candidate_unknown = curate_playlist(&candidate_unknown_graph, &brief, &policy).unwrap();
+    assert!(!candidate_unknown.exportable);
+    assert!(candidate_unknown
+        .audit
+        .issues
+        .iter()
+        .any(|issue| issue.code == "aggression_unknown"));
+}
+
+#[test]
+fn invalid_aggression_policy_is_non_exportable() {
+    let graph = graph_with_aggression(records()[..1].to_vec(), aggression_map(&[0.5]));
+    let mut policy = relaxed_aggression_policy();
+    policy.eligibility.min_aggression = Some(0.9);
+    policy.eligibility.max_aggression = Some(0.1);
+    let audit = audit_playlist(&graph, &[format!("{:064x}", 0)], &policy).unwrap();
+    assert!(audit
+        .issues
+        .iter()
+        .any(|issue| issue.code == "invalid_aggression_policy"));
 }
 
 #[test]

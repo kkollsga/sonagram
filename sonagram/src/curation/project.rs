@@ -4,6 +4,7 @@ use kglite::api::cypher::resolve_node_property;
 use kglite::api::{DirGraph, NodeData, Value};
 use sonara::similarity::{SIMILARITY_SCALE, WEIGHTS};
 
+use super::types::{AggressionEvidence, AggressionStatus};
 use crate::{Result, SonagramError};
 
 pub(crate) const TRACK: &str = "Track";
@@ -38,6 +39,7 @@ pub(crate) struct TrackCandidate {
     pub tension: Option<f64>,
     pub valence: Option<f64>,
     pub vocalness: Option<f64>,
+    pub aggression: AggressionEvidence,
     pub flow_smoothness: Option<f64>,
     pub bpm: Option<f64>,
     pub bpm_confidence: Option<f64>,
@@ -130,6 +132,7 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
         let album = prop_string(node, "album_name", graph);
         let relations = relations.remove(&idx.index()).unwrap_or_default();
         let year = prop_i64(node, "original_year", graph).or_else(|| prop_i64(node, "year", graph));
+        let aggression = aggression_evidence(node, graph);
         out.push(TrackCandidate {
             id,
             title: prop_string(node, "title", graph),
@@ -153,6 +156,7 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
             tension: prop_f64(node, "tension_index", graph),
             valence: prop_f64(node, "valence_index", graph),
             vocalness: prop_f64(node, "vocalness", graph),
+            aggression,
             flow_smoothness: prop_f64(node, "flow_smoothness", graph),
             bpm: prop_f64(node, "bpm", graph),
             bpm_confidence: prop_f64(node, "bpm_confidence", graph),
@@ -164,6 +168,60 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(out)
+}
+
+impl TrackCandidate {
+    pub(crate) fn aggression_score(&self) -> Option<f64> {
+        (self.aggression.status == AggressionStatus::Available)
+            .then_some(self.aggression.score)
+            .flatten()
+    }
+}
+
+fn aggression_evidence(node: &NodeData, graph: &DirGraph) -> AggressionEvidence {
+    let evidence = AggressionEvidence {
+        status: AggressionStatus::Missing,
+        model_id: prop_string(node, "aggression_model_id", graph),
+        score: prop_f64(node, "aggression", graph),
+        confidence: prop_f64(node, "aggression_confidence", graph),
+        forcefulness: prop_f64(node, "aggression_forcefulness", graph),
+        harshness: prop_f64(node, "aggression_harshness", graph),
+        tension: prop_f64(node, "aggression_tension", graph),
+        rhythm: prop_f64(node, "aggression_rhythm", graph),
+    };
+    let any_numeric = evidence.score.is_some()
+        || evidence.confidence.is_some()
+        || evidence.forcefulness.is_some()
+        || evidence.harshness.is_some()
+        || evidence.tension.is_some()
+        || evidence.rhythm.is_some();
+    let status = if evidence.model_id.is_none() && !any_numeric {
+        AggressionStatus::Missing
+    } else if evidence.model_id.as_deref() != Some(sonara::aggression::AGGRESSION_MODEL_ID) {
+        AggressionStatus::IncompatibleModel
+    } else {
+        let diagnostics = [
+            evidence.confidence,
+            evidence.forcefulness,
+            evidence.harshness,
+            evidence.tension,
+            evidence.rhythm,
+        ];
+        if diagnostics.into_iter().all(is_bounded) {
+            match evidence.score {
+                Some(score) if is_bounded(Some(score)) => AggressionStatus::Available,
+                None => AggressionStatus::Abstained,
+                Some(_) => AggressionStatus::InvalidDiagnostics,
+            }
+        } else {
+            AggressionStatus::InvalidDiagnostics
+        }
+    };
+    AggressionEvidence { status, ..evidence }
+}
+
+fn is_bounded(value: Option<f64>) -> bool {
+    value.is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value))
 }
 
 #[derive(Default)]

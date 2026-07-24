@@ -124,6 +124,10 @@ pub struct EligibilityPolicy {
     pub min_duration_sec: Option<f64>,
     pub max_duration_sec: Option<f64>,
     pub max_vocalness: Option<f64>,
+    #[serde(default)]
+    pub min_aggression: Option<f64>,
+    #[serde(default)]
+    pub max_aggression: Option<f64>,
     pub min_energy: Option<f64>,
     pub max_energy: Option<f64>,
     pub min_arousal: Option<f64>,
@@ -161,6 +165,8 @@ impl Default for EligibilityPolicy {
             min_duration_sec: Some(60.0),
             max_duration_sec: Some(600.0),
             max_vocalness: None,
+            min_aggression: None,
+            max_aggression: None,
             min_energy: None,
             max_energy: None,
             min_arousal: None,
@@ -208,6 +214,8 @@ pub struct FeatureTargets {
     pub arousal: Option<f64>,
     pub tension: Option<f64>,
     pub vocalness: Option<f64>,
+    #[serde(default)]
+    pub aggression: Option<f64>,
     pub familiarity: FamiliarityPreference,
     #[serde(default)]
     pub seed_similarity: SeedSimilarityPreference,
@@ -229,6 +237,10 @@ pub struct FeatureTargets {
     pub relative_vocalness: RelativeDirection,
     #[serde(default)]
     pub relative_vocalness_margin: f64,
+    #[serde(default)]
+    pub relative_aggression: RelativeDirection,
+    #[serde(default)]
+    pub relative_aggression_margin: f64,
 }
 
 impl Default for FeatureTargets {
@@ -238,6 +250,7 @@ impl Default for FeatureTargets {
             arousal: None,
             tension: None,
             vocalness: None,
+            aggression: None,
             familiarity: FamiliarityPreference::Neutral,
             seed_similarity: SeedSimilarityPreference::Neutral,
             min_seed_similarity: None,
@@ -249,6 +262,8 @@ impl Default for FeatureTargets {
             relative_tension_margin: 0.0,
             relative_vocalness: RelativeDirection::Any,
             relative_vocalness_margin: 0.0,
+            relative_aggression: RelativeDirection::Any,
+            relative_aggression_margin: 0.0,
         }
     }
 }
@@ -405,6 +420,10 @@ pub struct LibraryProfile {
     pub unique_songs: usize,
     pub unique_styles: usize,
     pub quality_tiers: BTreeMap<String, usize>,
+    /// Counts by exact aggression model id, including incompatible models.
+    /// This lets callers establish comparability before choosing thresholds.
+    #[serde(default)]
+    pub aggression_models: BTreeMap<String, usize>,
     pub stats: BTreeMap<String, StatSummary>,
 }
 
@@ -463,6 +482,32 @@ pub struct ScoreContribution {
     pub value: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AggressionStatus {
+    Available,
+    Abstained,
+    Missing,
+    IncompatibleModel,
+    InvalidDiagnostics,
+}
+
+/// Complete fused-aggression evidence for a track.
+///
+/// `confidence` is content/evidence support, not score certainty. The optional
+/// score is comparable only when `status == available`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AggressionEvidence {
+    pub status: AggressionStatus,
+    pub model_id: Option<String>,
+    pub score: Option<f64>,
+    pub confidence: Option<f64>,
+    pub forcefulness: Option<f64>,
+    pub harshness: Option<f64>,
+    pub tension: Option<f64>,
+    pub rhythm: Option<f64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrackExplanation {
     pub position: usize,
@@ -471,6 +516,10 @@ pub struct TrackExplanation {
     pub album: Option<String>,
     pub title: Option<String>,
     pub contributions: Vec<ScoreContribution>,
+    /// Present only when the policy explicitly uses aggression, preserving
+    /// byte-compatible neutral-policy explanations and old stored metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aggression: Option<AggressionEvidence>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

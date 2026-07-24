@@ -50,11 +50,26 @@ with tempfile.TemporaryDirectory() as tmp:
     profile = sonagram.profile_library(str(graph_path))
     assert profile["tracks"] >= 12
     assert profile["stats"]["energy"]["present"] > 0
+    for name in (
+        "aggression",
+        "aggression_confidence",
+        "aggression_forcefulness",
+        "aggression_harshness",
+        "aggression_tension",
+        "aggression_rhythm",
+    ):
+        assert profile["stats"][name]["total"] == profile["tracks"]
+    assert "aggression_models" in profile
 
     focus_policy = sonagram.curation_policy("focus")
     assert focus_policy["preset"] == "focus"
     assert focus_policy["version"] == 1
     assert focus_policy["targets"]["seed_similarity"] == "neutral"
+    assert focus_policy["targets"]["aggression"] is None
+    assert focus_policy["targets"]["relative_aggression"] == "any"
+    assert focus_policy["targets"]["relative_aggression_margin"] == 0.0
+    assert focus_policy["eligibility"]["min_aggression"] is None
+    assert focus_policy["eligibility"]["max_aggression"] is None
     assert focus_policy["eligibility"]["include_genres"] == []
     try:
         sonagram.curation_policy("not-a-preset")
@@ -87,6 +102,24 @@ with tempfile.TemporaryDirectory() as tmp:
     assert curated == repeated
     assert curated["exportable"] is True, curated["audit"]["issues"]
     assert len(curated["track_ids"]) == 3
+
+    aggression_policy = json.loads(json.dumps(policy))
+    aggression_policy["targets"]["aggression"] = 0.63
+    aggression_curated = sonagram.curate_playlist(
+        str(graph_path), brief, aggression_policy
+    )
+    if profile["stats"]["aggression"]["present"]:
+        assert aggression_curated["exportable"] is True
+        assert all(
+            track["aggression"]["status"] == "available"
+            for track in aggression_curated["explanation"]["tracks"]
+        )
+    else:
+        assert aggression_curated["exportable"] is False
+        assert any(
+            issue["code"] == "aggression_unknown"
+            for issue in aggression_curated["audit"]["issues"]
+        )
 
     audit = sonagram.audit_playlist(
         str(graph_path), curated["track_ids"], policy, brief=brief

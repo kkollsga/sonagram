@@ -199,6 +199,18 @@ with tempfile.TemporaryDirectory() as tmp:
             "music_playlist_delete",
         }
         assert domain_tools.issubset(by_name)
+        policy_schema = json.dumps(
+            by_name["music_curate_playlist"].get("inputSchema", {}),
+            sort_keys=True,
+        )
+        for field in (
+            "min_aggression",
+            "max_aggression",
+            "aggression",
+            "relative_aggression",
+            "relative_aggression_margin",
+        ):
+            assert field in policy_schema, field
         # KGLite 0.14.2+ applies manifest hidden overrides after every route is
         # registered. The empty source sandbox remains defense in depth, while
         # discovery and direct-call rejection are now strict contracts.
@@ -236,6 +248,9 @@ with tempfile.TemporaryDirectory() as tmp:
         assert profile["ok"] is True
         assert profile["result"]["tracks"] == 15
         assert profile["result"]["stats"]["energy"]["present"] > 0
+        assert "aggression" in profile["result"]["stats"]
+        assert "aggression_confidence" in profile["result"]["stats"]
+        assert "aggression_models" in profile["result"]
 
         policy = tool_payload(rpc(
             process,
@@ -245,6 +260,9 @@ with tempfile.TemporaryDirectory() as tmp:
         ))
         assert policy["ok"] is True
         assert policy["result"]["version"] == 1
+        assert policy["result"]["targets"]["aggression"] is None
+        assert policy["result"]["targets"]["relative_aggression"] == "any"
+        assert policy["result"]["eligibility"]["min_aggression"] is None
 
         brief = {"preset": "general", "target_tracks": 5}
         curate_args = {"brief": brief}

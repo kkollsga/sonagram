@@ -4,9 +4,9 @@ use kglite::api::DirGraph;
 
 use super::project::{candidate_map, embedding_similarity, group_key, TrackCandidate};
 use super::types::{
-    AuditIssue, AuditSeverity, PlaylistArc, PlaylistAudit, PlaylistBrief, PlaylistExplanation,
-    PlaylistPolicy, RelativeDirection, ScoreContribution, SeedRole, SeedSimilarityPreference,
-    TrackExplanation, TransitionScore,
+    AggressionStatus, AuditIssue, AuditSeverity, PlaylistArc, PlaylistAudit, PlaylistBrief,
+    PlaylistExplanation, PlaylistPolicy, RelativeDirection, ScoreContribution, SeedRole,
+    SeedSimilarityPreference, TrackExplanation, TransitionScore,
 };
 use crate::Result;
 
@@ -16,7 +16,10 @@ pub fn audit_playlist(
     policy: &PlaylistPolicy,
 ) -> Result<PlaylistAudit> {
     let candidates = candidate_map(graph)?;
-    let mut issues = Vec::new();
+    let mut issues: Vec<AuditIssue> = aggression_policy_issues(policy)
+        .into_iter()
+        .map(|(code, message)| issue(AuditSeverity::Error, code, message, Vec::new()))
+        .collect();
     let mut selected = Vec::new();
     let mut seen = BTreeSet::new();
     let mut duplicate_ids = 0;
@@ -391,6 +394,7 @@ pub fn audit_playlist_for_brief(
         ("arousal", policy.targets.relative_arousal_margin),
         ("tension", policy.targets.relative_tension_margin),
         ("vocalness", policy.targets.relative_vocalness_margin),
+        ("aggression", policy.targets.relative_aggression_margin),
     ] {
         if !(0.0..=1.0).contains(&margin) {
             audit.issues.push(issue(
@@ -449,6 +453,7 @@ pub fn explain_playlist(
             album: track.album.clone(),
             title: track.title.clone(),
             contributions: track_contributions(track, position, track_ids.len(), policy),
+            aggression: aggression_directive_active(policy).then(|| track.aggression.clone()),
         })
         .collect();
     let mut summary = vec![format!(
@@ -526,6 +531,13 @@ pub fn explain_playlist_for_brief(
                     policy.targets.relative_vocalness,
                     policy.targets.relative_vocalness_margin,
                 ),
+                (
+                    "aggression",
+                    candidate.aggression_score(),
+                    baselines.aggression,
+                    policy.targets.relative_aggression,
+                    policy.targets.relative_aggression_margin,
+                ),
             ] {
                 if direction != RelativeDirection::Any {
                     if let Some(seed) = baseline {
@@ -579,6 +591,27 @@ pub(crate) fn eligibility_issues(
     check_min(&mut issues, "duration_too_short", "duration", track.duration_sec, e.min_duration_sec);
     check_max(&mut issues, "duration_too_long", "duration", track.duration_sec, e.max_duration_sec);
     check_max(&mut issues, "too_vocal", "vocalness", track.vocalness, e.max_vocalness);
+    if absolute_aggression_directive_active(policy) {
+        match track.aggression_score() {
+            Some(score) => {
+                check_min(
+                    &mut issues,
+                    "aggression_too_low",
+                    "aggression",
+                    Some(score),
+                    e.min_aggression,
+                );
+                check_max(
+                    &mut issues,
+                    "aggression_too_high",
+                    "aggression",
+                    Some(score),
+                    e.max_aggression,
+                );
+            }
+            None => issues.push(("aggression_unknown", aggression_unknown_message(track))),
+        }
+    }
     check_min(&mut issues, "energy_too_low", "energy", track.energy, e.min_energy);
     check_max(&mut issues, "energy_too_high", "energy", track.energy, e.max_energy);
     check_min(&mut issues, "arousal_too_low", "arousal", track.arousal, e.min_arousal);
@@ -642,21 +675,89 @@ pub(crate) fn eligibility_issues(
     issues
 }
 
+pub(crate) fn absolute_aggression_directive_active(policy: &PlaylistPolicy) -> bool {
+    policy.eligibility.min_aggression.is_some()
+        || policy.eligibility.max_aggression.is_some()
+        || policy.targets.aggression.is_some()
+}
+
+pub(crate) fn aggression_directive_active(policy: &PlaylistPolicy) -> bool {
+    absolute_aggression_directive_active(policy)
+        || policy.targets.relative_aggression != RelativeDirection::Any
+}
+
+pub(crate) fn aggression_unknown_message(track: &TrackCandidate) -> String {
+    match track.aggression.status {
+        AggressionStatus::Available => "aggression evidence is available".into(),
+        AggressionStatus::Abstained => format!(
+            "{} abstained because the track lacks sufficient supported musical evidence",
+            sonara::aggression::AGGRESSION_MODEL_ID
+        ),
+        AggressionStatus::Missing => {
+            "track has no fused aggression analysis; rebuild from a current scan".into()
+        }
+        AggressionStatus::IncompatibleModel => format!(
+            "track aggression model {:?} is not comparable with {}",
+            track.aggression.model_id,
+            sonara::aggression::AGGRESSION_MODEL_ID
+        ),
+        AggressionStatus::InvalidDiagnostics => format!(
+            "{} diagnostics are incomplete or outside [0,1]",
+            sonara::aggression::AGGRESSION_MODEL_ID
+        ),
+    }
+}
+
+fn aggression_policy_issues(policy: &PlaylistPolicy) -> Vec<(&'static str, String)> {
+    let mut issues = Vec::new();
+    for (name, value) in [
+        ("min_aggression", policy.eligibility.min_aggression),
+        ("max_aggression", policy.eligibility.max_aggression),
+        ("aggression target", policy.targets.aggression),
+    ] {
+        if value.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
+            issues.push((
+                "invalid_aggression_policy",
+                format!("{name} must be finite and between 0 and 1"),
+            ));
+        }
+    }
+    if policy
+        .eligibility
+        .min_aggression
+        .zip(policy.eligibility.max_aggression)
+        .is_some_and(|(minimum, maximum)| minimum > maximum)
+    {
+        issues.push((
+            "invalid_aggression_policy",
+            "min_aggression must not exceed max_aggression".into(),
+        ));
+    }
+    issues
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct SeedBaselines {
     pub energy: Option<f64>,
     pub arousal: Option<f64>,
     pub tension: Option<f64>,
     pub vocalness: Option<f64>,
+    pub aggression: Option<f64>,
 }
 
 impl SeedBaselines {
     pub(crate) fn from_tracks(tracks: &[&TrackCandidate]) -> Self {
+        let aggression: Vec<f64> = tracks
+            .iter()
+            .filter_map(|track| track.aggression_score())
+            .collect();
         Self {
             energy: optional_mean(tracks.iter().filter_map(|track| track.energy)),
             arousal: optional_mean(tracks.iter().filter_map(|track| track.arousal)),
             tension: optional_mean(tracks.iter().filter_map(|track| track.tension)),
             vocalness: optional_mean(tracks.iter().filter_map(|track| track.vocalness)),
+            aggression: (aggression.len() == tracks.len() && !aggression.is_empty())
+                .then(|| aggression.iter().sum::<f64>() / aggression.len() as f64),
         }
     }
 }
@@ -668,6 +769,7 @@ pub(crate) fn seed_directives_active(policy: &PlaylistPolicy) -> bool {
         || policy.targets.relative_arousal != RelativeDirection::Any
         || policy.targets.relative_tension != RelativeDirection::Any
         || policy.targets.relative_vocalness != RelativeDirection::Any
+        || policy.targets.relative_aggression != RelativeDirection::Any
 }
 
 pub(crate) fn seed_constraint_issues(
@@ -732,6 +834,25 @@ pub(crate) fn seed_constraint_issues(
         policy.targets.relative_vocalness,
         policy.targets.relative_vocalness_margin,
     );
+    if policy.targets.relative_aggression != RelativeDirection::Any {
+        match (track.aggression_score(), baselines.aggression) {
+            (Some(actual), Some(baseline)) => check_relative(
+                &mut issues,
+                "aggression",
+                Some(actual),
+                Some(baseline),
+                policy.targets.relative_aggression,
+                policy.targets.relative_aggression_margin,
+            ),
+            _ => issues.push((
+                "aggression_unknown",
+                format!(
+                    "relative aggression requires comparable {} evidence on the track and every reference baseline",
+                    sonara::aggression::AGGRESSION_MODEL_ID
+                ),
+            )),
+        }
+    }
     issues
 }
 
@@ -908,6 +1029,7 @@ fn track_contributions(
         ("arousal_fit", track.arousal, policy.targets.arousal),
         ("tension_fit", track.tension, policy.targets.tension),
         ("vocalness_fit", track.vocalness, policy.targets.vocalness),
+        ("aggression_fit", track.aggression_score(), policy.targets.aggression),
     ] {
         if let (Some(actual), Some(target)) = (actual, target) {
             out.push(ScoreContribution {

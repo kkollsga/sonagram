@@ -91,12 +91,20 @@ fn profile_curate_audit_explain_and_failed_save_contracts() {
     assert!(profile.status.success(), "{}", String::from_utf8_lossy(&profile.stderr));
     let profile_json = json_output(&profile);
     assert!(profile_json["tracks"].as_u64().unwrap() > 3);
+    assert!(profile_json["stats"].get("aggression").is_some());
+    assert!(profile_json["stats"].get("aggression_confidence").is_some());
+    assert!(profile_json.get("aggression_models").is_some());
 
     let resolved = run(&home, &["policy", "--preset", "focus", "--format", "json"]);
     assert!(resolved.status.success());
     let resolved = json_output(&resolved);
     assert_eq!(resolved["preset"], "focus");
     assert_eq!(resolved["targets"]["seed_similarity"], "neutral");
+    assert_eq!(resolved["targets"]["aggression"], serde_json::Value::Null);
+    assert_eq!(resolved["targets"]["relative_aggression"], "any");
+    assert_eq!(resolved["targets"]["relative_aggression_margin"], 0.0);
+    assert_eq!(resolved["eligibility"]["min_aggression"], serde_json::Value::Null);
+    assert_eq!(resolved["eligibility"]["max_aggression"], serde_json::Value::Null);
 
     let curated = run(
         &home,

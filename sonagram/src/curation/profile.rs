@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use kglite::api::DirGraph;
 
 use super::project::{project_tracks, TrackCandidate};
-use super::types::{LibraryProfile, PlaylistPolicy, StatSummary};
+use super::types::{AggressionStatus, LibraryProfile, PlaylistPolicy, StatSummary};
 use crate::Result;
 
 pub fn profile_library(graph: &DirGraph) -> Result<LibraryProfile> {
@@ -25,10 +25,14 @@ pub fn profile_library(graph: &DirGraph) -> Result<LibraryProfile> {
         .collect();
     let styles: BTreeSet<&str> = tracks.iter().flat_map(|t| t.style_keys.iter().map(String::as_str)).collect();
     let mut quality_tiers = BTreeMap::new();
+    let mut aggression_models = BTreeMap::new();
     for track in &tracks {
         *quality_tiers
             .entry(track.quality_tier.clone().unwrap_or_else(|| "unknown".into()))
             .or_insert(0) += 1;
+        if let Some(model_id) = &track.aggression.model_id {
+            *aggression_models.entry(model_id.clone()).or_insert(0) += 1;
+        }
     }
     let mut stats = BTreeMap::new();
     for (name, values) in [
@@ -38,6 +42,27 @@ pub fn profile_library(graph: &DirGraph) -> Result<LibraryProfile> {
         ("tension_index", values(&tracks, |t| t.tension)),
         ("valence_index", values(&tracks, |t| t.valence)),
         ("vocalness", values(&tracks, |t| t.vocalness)),
+        ("aggression", values(&tracks, TrackCandidate::aggression_score)),
+        (
+            "aggression_confidence",
+            aggression_values(&tracks, |t| t.aggression.confidence),
+        ),
+        (
+            "aggression_forcefulness",
+            aggression_values(&tracks, |t| t.aggression.forcefulness),
+        ),
+        (
+            "aggression_harshness",
+            aggression_values(&tracks, |t| t.aggression.harshness),
+        ),
+        (
+            "aggression_tension",
+            aggression_values(&tracks, |t| t.aggression.tension),
+        ),
+        (
+            "aggression_rhythm",
+            aggression_values(&tracks, |t| t.aggression.rhythm),
+        ),
         ("flow_smoothness", values(&tracks, |t| t.flow_smoothness)),
         ("recording_quality", values(&tracks, |t| t.recording_quality)),
         ("popularity", values(&tracks, |t| t.popularity)),
@@ -57,8 +82,25 @@ pub fn profile_library(graph: &DirGraph) -> Result<LibraryProfile> {
         unique_songs: songs.len(),
         unique_styles: styles.len(),
         quality_tiers,
+        aggression_models,
         stats,
     })
+}
+
+fn aggression_values(
+    tracks: &[TrackCandidate],
+    get: impl Fn(&TrackCandidate) -> Option<f64>,
+) -> Vec<f64> {
+    tracks
+        .iter()
+        .filter(|track| {
+            matches!(
+                track.aggression.status,
+                AggressionStatus::Available | AggressionStatus::Abstained
+            )
+        })
+        .filter_map(get)
+        .collect()
 }
 
 fn values(tracks: &[TrackCandidate], get: impl Fn(&TrackCandidate) -> Option<f64>) -> Vec<f64> {
