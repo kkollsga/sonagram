@@ -184,13 +184,30 @@ fn validate_public_source_dir(path: &Path) -> Result<()> {
     Ok(())
 }
 
+const SERVER_BINARY_ENV: &str = "SONAGRAM_MCP_SERVER";
+
 fn resolve_server_binary() -> Option<PathBuf> {
     let executable = format!("sonagram-mcp-server{}", std::env::consts::EXE_SUFFIX);
-    let sibling = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(|parent| parent.join(executable)));
-    sibling
-        .filter(|path| is_executable_file(path))
+    let explicit = std::env::var_os(SERVER_BINARY_ENV).map(PathBuf::from);
+    let sibling = std::env::current_exe().ok().and_then(|path| {
+        path.parent()
+            .map(|parent| parent.join(executable.as_str()))
+    });
+    let on_path = std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .map(|directory| directory.join(executable.as_str()))
+            .find(|candidate| is_executable_file(candidate))
+    });
+    resolve_server_binary_from([explicit, sibling, on_path])
+}
+
+fn resolve_server_binary_from(
+    candidates: impl IntoIterator<Item = Option<PathBuf>>,
+) -> Option<PathBuf> {
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|path| is_executable_file(path))
         .and_then(|path| std::fs::canonicalize(path).ok())
 }
 
@@ -436,5 +453,27 @@ mod tests {
         assert!(!is_executable_file(&fake));
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(is_executable_file(&fake));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn server_resolution_prefers_explicit_console_hint() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let graph = temp_graph("server-resolution");
+        let explicit = graph.parent().unwrap().join("venv-sonagram-mcp-server");
+        let fallback = graph.parent().unwrap().join("fallback-sonagram-mcp-server");
+        for path in [&explicit, &fallback] {
+            std::fs::write(path, b"#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        assert_eq!(
+            resolve_server_binary_from([
+                Some(explicit.clone()),
+                Some(fallback),
+                None,
+            ]),
+            Some(std::fs::canonicalize(explicit).unwrap())
+        );
     }
 }

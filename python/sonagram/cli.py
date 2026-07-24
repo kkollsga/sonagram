@@ -10,7 +10,12 @@ two frontends cannot drift.
 
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
+
+
+_MCP_SERVER_ENV = "SONAGRAM_MCP_SERVER"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -22,10 +27,26 @@ def main(argv: list[str] | None = None) -> int:
     from sonagram._sonagram import _run_cli
 
     args = list(sys.argv[1:] if argv is None else argv)
+    # Rust's current_exe() resolves a venv's Python symlink to the base
+    # interpreter on some platforms. Pass the console-script sibling explicitly
+    # so `sonagram mcp install` can report a launchable MCP server even when the
+    # venv is not represented by current_exe() (notably GitHub-hosted runners).
+    server = Path(sys.executable).with_name(
+        f"sonagram-mcp-server{'.exe' if os.name == 'nt' else ''}"
+    )
+    prior_server = os.environ.get(_MCP_SERVER_ENV)
+    if server.is_file():
+        os.environ[_MCP_SERVER_ENV] = str(server)
     try:
         return _run_cli(args)
     except KeyboardInterrupt:
         return 130
+    finally:
+        if server.is_file():
+            if prior_server is None:
+                os.environ.pop(_MCP_SERVER_ENV, None)
+            else:
+                os.environ[_MCP_SERVER_ENV] = prior_server
 
 
 if __name__ == "__main__":
