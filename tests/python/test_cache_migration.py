@@ -25,6 +25,16 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     record["analysis"]["provenance"]["schema_version"] = 3
     record["analysis"]["provenance"].pop("vocalness_model_id", None)
+    record["analysis"]["provenance"].pop("aggression_model_id", None)
+    for field in (
+        "aggression_score",
+        "aggression_confidence",
+        "aggression_forcefulness",
+        "aggression_harshness",
+        "aggression_tension",
+        "aggression_rhythm",
+    ):
+        record["analysis"].pop(field, None)
     record["analysis"]["vocalness"] = 0.0
     record["analysis"]["instrumentalness"] = 1.0
     record["analysis"]["predominant_chord"] = "G#m"

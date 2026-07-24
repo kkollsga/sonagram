@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use kglite::api::cypher::resolve_node_property;
 use kglite::api::{DirGraph, Value};
-use sonagram::graph::{self, LibraryInfo};
+use sonagram::graph::{self, LibraryInfo, GRAPH_SCHEMA_VERSION};
 use sonagram::record::AnalysisRecord;
 
 fn fixtures_dir() -> PathBuf {
@@ -174,6 +174,95 @@ fn track_property_row_spot_check() {
 }
 
 #[test]
+fn fused_aggression_is_queryable_and_distinct_from_legacy_mood() {
+    assert_eq!(GRAPH_SCHEMA_VERSION, 3);
+    let mut record = load_records()
+        .into_iter()
+        .find(|r| r.source.content_hash == BRUNO_HASH)
+        .expect("Bruno fixture present");
+    let legacy_mood = record.analysis.mood_aggressive.expect("legacy mood score");
+    record.analysis.provenance.aggression_model_id = Some("aggression-rank-v2".to_string());
+    record.analysis.aggression_score = Some(0.83);
+    record.analysis.aggression_confidence = Some(0.42);
+    record.analysis.aggression_forcefulness = Some(0.71);
+    record.analysis.aggression_harshness = Some(0.64);
+    record.analysis.aggression_tension = Some(0.57);
+    record.analysis.aggression_rhythm = Some(0.76);
+
+    let graph = graph::build_graph(
+        &[record],
+        &LibraryInfo {
+            root: "fused-aggression".to_string(),
+            n_tracks: 1,
+        },
+    )
+    .unwrap();
+
+    for (name, expected) in [
+        ("aggression", 0.83),
+        ("aggression_confidence", 0.42),
+        ("aggression_forcefulness", 0.71),
+        ("aggression_harshness", 0.64),
+        ("aggression_tension", 0.57),
+        ("aggression_rhythm", 0.76),
+    ] {
+        let actual = f64_prop(&graph, "Track", BRUNO_HASH, name);
+        assert!((actual - expected).abs() < 1e-6, "{name}: {actual}");
+    }
+    assert_eq!(
+        str_prop(&graph, "Track", BRUNO_HASH, "aggression_model_id"),
+        "aggression-rank-v2"
+    );
+    assert!(
+        (f64_prop(&graph, "Track", BRUNO_HASH, "mood_aggressive")
+            - f64::from(legacy_mood))
+        .abs()
+            < f64::EPSILON,
+        "fused aggression must not overwrite the separate legacy mood value"
+    );
+}
+
+#[test]
+fn fused_aggression_abstention_keeps_support_and_diagnostics() {
+    let mut record = load_records()
+        .into_iter()
+        .find(|r| r.source.content_hash == BRUNO_HASH)
+        .expect("Bruno fixture present");
+    record.analysis.provenance.aggression_model_id = Some("aggression-rank-v2".to_string());
+    record.analysis.aggression_score = None;
+    record.analysis.aggression_confidence = Some(0.08);
+    record.analysis.aggression_forcefulness = Some(0.31);
+    record.analysis.aggression_harshness = Some(0.22);
+    record.analysis.aggression_tension = Some(0.17);
+    record.analysis.aggression_rhythm = Some(0.29);
+
+    let graph = graph::build_graph(
+        &[record],
+        &LibraryInfo {
+            root: "aggression-abstention".to_string(),
+            n_tracks: 1,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(prop(&graph, "Track", BRUNO_HASH, "aggression"), Value::Null);
+    assert_eq!(
+        str_prop(&graph, "Track", BRUNO_HASH, "aggression_model_id"),
+        "aggression-rank-v2"
+    );
+    for (name, expected) in [
+        ("aggression_confidence", 0.08),
+        ("aggression_forcefulness", 0.31),
+        ("aggression_harshness", 0.22),
+        ("aggression_tension", 0.17),
+        ("aggression_rhythm", 0.29),
+    ] {
+        let actual = f64_prop(&graph, "Track", BRUNO_HASH, name);
+        assert!((actual - expected).abs() < 1e-6, "{name}: {actual}");
+    }
+}
+
+#[test]
 fn analysis_model_ids_are_queryable_and_fingerprinted() {
     let mut record = load_records()
         .into_iter()
@@ -183,9 +272,32 @@ fn analysis_model_ids_are_queryable_and_fingerprinted() {
     record.analysis.provenance.genre_model_id = Some("genre-test-v1".to_string());
     record.analysis.provenance.vocalness_model_id =
         Some("sonara-vocalness-v2".to_string());
+    let before_aggression_model =
+        graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap();
+    record.analysis.provenance.aggression_model_id =
+        Some("aggression-rank-v2-test-mutation".to_string());
+    assert_ne!(
+        graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap(),
+        before_aggression_model,
+        "aggression model identity alone must affect graph identity"
+    );
+    record.analysis.provenance.aggression_model_id = Some("aggression-rank-v2".to_string());
+    let before_aggression =
+        graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap();
+    record.analysis.aggression_score = Some(0.73);
+    record.analysis.aggression_confidence = Some(0.81);
+    record.analysis.aggression_forcefulness = Some(0.67);
+    record.analysis.aggression_harshness = Some(0.52);
+    record.analysis.aggression_tension = Some(0.43);
+    record.analysis.aggression_rhythm = Some(0.77);
     assert_ne!(
         graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap(),
         before
+    );
+    assert_ne!(
+        graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap(),
+        before_aggression,
+        "aggression values and exact model provenance must affect graph identity"
     );
 
     let graph = graph::build_graph(
@@ -203,6 +315,10 @@ fn analysis_model_ids_are_queryable_and_fingerprinted() {
     assert_eq!(
         str_prop(&graph, "Track", BRUNO_HASH, "vocalness_model_id"),
         "sonara-vocalness-v2"
+    );
+    assert_eq!(
+        str_prop(&graph, "Track", BRUNO_HASH, "aggression_model_id"),
+        "aggression-rank-v2"
     );
 }
 

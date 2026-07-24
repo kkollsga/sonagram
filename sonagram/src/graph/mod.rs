@@ -64,7 +64,14 @@ use normalize::{
 /// always-present `lastfm_listeners`, `lastfm_playcount`, `has_lastfm_match`, and
 /// listener-percentile `popularity` Track columns; Last.fm recognition precedes
 /// audio quality when choosing the canonical recording.
-pub const GRAPH_SCHEMA_VERSION: u32 = 2;
+///
+/// v3 (Sonara 0.3.1): `Track` gains the distinct fused-aggression properties
+/// `aggression`, `aggression_confidence`, `aggression_forcefulness`,
+/// `aggression_harshness`, `aggression_tension`, `aggression_rhythm`, and
+/// `aggression_model_id`. These preserve Sonara's nullable rank, evidence
+/// support, component diagnostics and exact model identity without replacing
+/// the separate legacy `mood_aggressive` heuristic.
+pub const GRAPH_SCHEMA_VERSION: u32 = 3;
 
 /// The embedding-store model identity, **derived** from sonara's
 /// [`SIMILARITY_VERSION`] (format `"sonara-similarity-v{N}"`) rather than
@@ -871,6 +878,8 @@ fn add_tracks(
         str_opt_col(sorted, |r| r.analysis.provenance.genre_model_id.clone());
     let vocalness_model_id =
         str_opt_col(sorted, |r| r.analysis.provenance.vocalness_model_id.clone());
+    let aggression_model_id =
+        str_opt_col(sorted, |r| r.analysis.provenance.aggression_model_id.clone());
 
     // Int columns.
     let year = int_opt_col(sorted, |r| r.tags.as_ref().and_then(|t| t.year).map(|y| y as i64));
@@ -929,6 +938,16 @@ fn add_tracks(
     let leading_silence_sec = fo_col(sorted, |r| r.analysis.leading_silence_sec);
     let trailing_silence_sec = fo_col(sorted, |r| r.analysis.trailing_silence_sec);
     let spectral_flatness = fo_col(sorted, |r| r.analysis.spectral_flatness_mean);
+    // Sonara 0.3.1 fused aggression. Project every value independently: a null
+    // rank with present support/components is a valid low-content abstention,
+    // not missing analysis. `mood_aggressive` above remains a distinct legacy
+    // mood heuristic and is never overwritten or used as fallback.
+    let aggression = fo_col(sorted, |r| r.analysis.aggression_score);
+    let aggression_confidence = fo_col(sorted, |r| r.analysis.aggression_confidence);
+    let aggression_forcefulness = fo_col(sorted, |r| r.analysis.aggression_forcefulness);
+    let aggression_harshness = fo_col(sorted, |r| r.analysis.aggression_harshness);
+    let aggression_tension = fo_col(sorted, |r| r.analysis.aggression_tension);
+    let aggression_rhythm = fo_col(sorted, |r| r.analysis.aggression_rhythm);
 
     // P21 Stage A curve features + Stage B composite axes are computed once by the
     // caller (see `build_graph_from_sources`) so the Stage-C song grouping and
@@ -1005,6 +1024,11 @@ fn add_tracks(
             ColumnType::String,
             ColumnData::String(vocalness_model_id),
         ),
+        (
+            "aggression_model_id",
+            ColumnType::String,
+            ColumnData::String(aggression_model_id),
+        ),
         ("duration_sec", ColumnType::Float64, ColumnData::Float64(duration_sec)),
         ("bpm", ColumnType::Float64, ColumnData::Float64(bpm)),
         ("bpm_raw", ColumnType::Float64, ColumnData::Float64(bpm_raw)),
@@ -1038,6 +1062,33 @@ fn add_tracks(
         ("leading_silence_sec", ColumnType::Float64, ColumnData::Float64(leading_silence_sec)),
         ("trailing_silence_sec", ColumnType::Float64, ColumnData::Float64(trailing_silence_sec)),
         ("spectral_flatness", ColumnType::Float64, ColumnData::Float64(spectral_flatness)),
+        // Sonara fused aggression rank + evidence diagnostics (graph schema v3).
+        ("aggression", ColumnType::Float64, ColumnData::Float64(aggression)),
+        (
+            "aggression_confidence",
+            ColumnType::Float64,
+            ColumnData::Float64(aggression_confidence),
+        ),
+        (
+            "aggression_forcefulness",
+            ColumnType::Float64,
+            ColumnData::Float64(aggression_forcefulness),
+        ),
+        (
+            "aggression_harshness",
+            ColumnType::Float64,
+            ColumnData::Float64(aggression_harshness),
+        ),
+        (
+            "aggression_tension",
+            ColumnType::Float64,
+            ColumnData::Float64(aggression_tension),
+        ),
+        (
+            "aggression_rhythm",
+            ColumnType::Float64,
+            ColumnData::Float64(aggression_rhythm),
+        ),
         // P21 Stage A: curve-derived flat features.
         ("macro_dynamics", ColumnType::Float64, ColumnData::Float64(macro_dynamics)),
         ("energy_arc_range", ColumnType::Float64, ColumnData::Float64(energy_arc_range)),

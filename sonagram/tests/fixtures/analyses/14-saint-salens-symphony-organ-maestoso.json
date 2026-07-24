@@ -18,12 +18,13 @@
   },
   "analysis": {
     "provenance": {
-      "schema_version": 4,
+      "schema_version": 5,
       "sample_rate": 44100,
       "hop_length": 512,
       "mode": "playlist",
       "requested_features": [
         "acousticness",
+        "aggression",
         "bandwidth",
         "beatgrid",
         "chords",
@@ -49,7 +50,8 @@
         "valence",
         "vocalness"
       ],
-      "vocalness_model_id": "sonara-vocalness-v2"
+      "vocalness_model_id": "sonara-vocalness-v2",
+      "aggression_model_id": "aggression-rank-v2"
     },
     "duration_sec": 507.89877,
     "bpm": 119.92527,
@@ -7263,6 +7265,12 @@
       0.30077434,
       0.5356161
     ],
+    "aggression_score": 0.5465037,
+    "aggression_confidence": 0.71681917,
+    "aggression_forcefulness": 0.56244344,
+    "aggression_harshness": 0.14267221,
+    "aggression_tension": 0.05658734,
+    "aggression_rhythm": 0.55944306,
     "mood_happy": 0.6522883,
     "mood_aggressive": 0.15694964,
     "mood_relaxed": 0.5430228,

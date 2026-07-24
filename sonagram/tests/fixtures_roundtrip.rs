@@ -2,8 +2,9 @@
 //!
 //! Every captured fixture must parse into an [`AnalysisRecord`], round-trip
 //! (serialize → parse) to an identical value, and carry the invariants the
-//! graph builder relies on: a 48-dim similarity embedding and a schema version
-//! of at least 1. This keeps the fixtures honest as the DTO evolves.
+//! graph builder relies on: a 48-dim similarity embedding, the current Sonara
+//! schema and the complete fused-aggression contract. This keeps the fixtures
+//! honest as the DTO evolves.
 
 use std::path::PathBuf;
 
@@ -67,11 +68,42 @@ fn every_fixture_round_trips_and_holds_invariants() {
             embedding.len()
         );
 
-        // Analysis schema version must be at least 1.
-        assert!(
-            rec.analysis.provenance.schema_version >= 1,
-            "{name}: schema_version {} < 1",
-            rec.analysis.provenance.schema_version
+        assert_eq!(
+            rec.analysis.provenance.schema_version,
+            sonara::analyze::ANALYSIS_SCHEMA_VERSION,
+            "{name}: fixture must use the current Sonara analysis schema"
         );
+        assert!(
+            rec.analysis
+                .provenance
+                .requested_features
+                .as_ref()
+                .is_some_and(|features| features.iter().any(|f| f == "aggression")),
+            "{name}: aggression feature was not requested"
+        );
+        assert_eq!(
+            rec.analysis.provenance.aggression_model_id.as_deref(),
+            Some(sonara::aggression::AGGRESSION_MODEL_ID),
+            "{name}: wrong aggression model provenance"
+        );
+
+        let bounded = |field: &str, value: Option<f32>| {
+            let value = value.unwrap_or_else(|| panic!("{name}: {field} is missing"));
+            assert!(
+                value.is_finite() && (0.0..=1.0).contains(&value),
+                "{name}: {field} out of range: {value}"
+            );
+        };
+        if let Some(score) = rec.analysis.aggression_score {
+            assert!(
+                score.is_finite() && (0.0..=1.0).contains(&score),
+                "{name}: aggression_score out of range: {score}"
+            );
+        }
+        bounded("aggression_confidence", rec.analysis.aggression_confidence);
+        bounded("aggression_forcefulness", rec.analysis.aggression_forcefulness);
+        bounded("aggression_harshness", rec.analysis.aggression_harshness);
+        bounded("aggression_tension", rec.analysis.aggression_tension);
+        bounded("aggression_rhythm", rec.analysis.aggression_rhythm);
     }
 }
