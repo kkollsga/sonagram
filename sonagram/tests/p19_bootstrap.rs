@@ -45,8 +45,21 @@ fn load_a_fixture() -> AnalysisRecord {
     paths.sort();
     let text = std::fs::read_to_string(&paths[0]).expect("read fixture");
     let mut record = AnalysisRecord::from_json(&text).expect("parse fixture");
+    record.analysis.provenance.schema_version = sonara::analyze::ANALYSIS_SCHEMA_VERSION;
+    let mut requested_features = sonagram::scan::default_features();
+    requested_features.sort();
+    requested_features.dedup();
+    record.analysis.provenance.requested_features = Some(requested_features);
     record.analysis.provenance.vocalness_model_id =
         Some(sonagram::scan::VOCALNESS_MODEL_ID.to_string());
+    record.analysis.provenance.aggression_model_id =
+        Some(sonagram::scan::AGGRESSION_MODEL_ID.to_string());
+    record.analysis.aggression_score = Some(0.63);
+    record.analysis.aggression_confidence = Some(0.91);
+    record.analysis.aggression_forcefulness = Some(0.74);
+    record.analysis.aggression_harshness = Some(0.52);
+    record.analysis.aggression_tension = Some(0.67);
+    record.analysis.aggression_rhythm = Some(0.58);
     record
 }
 

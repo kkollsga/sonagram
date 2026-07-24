@@ -1,4 +1,4 @@
-"""Python API gate for decode-free cached-analysis migration."""
+"""Python API gate: pre-aggression caches require audio reanalysis."""
 
 import json
 import tempfile
@@ -43,17 +43,14 @@ with tempfile.TemporaryDirectory() as tmp:
     (cache / "index.json").write_text(json.dumps(index, indent=2) + "\n")
 
     report = sonagram.scan(str(library))
-    assert report["migrated_analysis"] == 1, report
+    assert report["migrated_analysis"] == 0, report
     assert report["analyzed"] == 0, report
-    assert report["reused_stat_match"] == 1, report
-    assert report["failed"] == [], report
+    assert report["reused_stat_match"] == 0, report
+    assert len(report["failed"]) == 1, report
 
-    migrated = json.loads((analysis / "cached-hash.json").read_text())
-    assert migrated["analysis"]["provenance"]["schema_version"] == 4
-    assert (
-        migrated["analysis"]["provenance"]["vocalness_model_id"]
-        == "sonara-vocalness-v2"
-    )
-    assert migrated["analysis"]["predominant_chord"] == "A"
+    unchanged = json.loads((analysis / "cached-hash.json").read_text())
+    assert unchanged["analysis"]["provenance"]["schema_version"] == 3
+    assert "aggression_model_id" not in unchanged["analysis"]["provenance"]
+    assert "aggression_score" not in unchanged["analysis"]
 
-print("cache migration API tests passed")
+print("cache reanalysis API tests passed")

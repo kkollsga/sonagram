@@ -97,6 +97,7 @@ pub const DEFAULT_FEATURES: &[&str] = &[
     "beatgrid",
     "silence",
     "embedding",
+    "aggression",
     "vocalness",
     "key_candidates",
 ];
@@ -105,6 +106,12 @@ pub const DEFAULT_FEATURES: &[&str] = &[
 /// A different bundled model is an intentional analysis migration, never a
 /// silent cache reuse.
 pub const VOCALNESS_MODEL_ID: &str = "sonara-vocalness-v2";
+
+/// Exact identity of Sonara's fused physical/perceptual aggression ranker.
+/// Cache reuse is permitted only for this model; a different identity requires
+/// audio reanalysis because the fused evidence cannot be reconstructed from a
+/// stored similarity embedding.
+pub const AGGRESSION_MODEL_ID: &str = sonara::aggression::AGGRESSION_MODEL_ID;
 
 /// Prior bundled model identities whose scores can be recomputed from the
 /// current stored similarity embedding without decoding audio. Keep this list
@@ -463,6 +470,7 @@ fn normalized_features(features: &[String]) -> Vec<String> {
 pub fn record_is_fresh_for_features(rec: &AnalysisRecord, features: &[String]) -> bool {
     let expected = normalized_features(features);
     let expects_embedding = expected.iter().any(|feature| feature == "embedding");
+    let expects_aggression = expected.iter().any(|feature| feature == "aggression");
     rec.analysis.provenance.schema_version == sonara::analyze::ANALYSIS_SCHEMA_VERSION
         && rec.analysis.provenance.mode == "playlist"
         && rec.analysis.provenance.requested_features.as_deref() == Some(expected.as_slice())
@@ -472,6 +480,38 @@ pub fn record_is_fresh_for_features(rec: &AnalysisRecord, features: &[String]) -
         && (!expects_embedding
             || rec.analysis.embedding_version == Some(sonara::similarity::SIMILARITY_VERSION))
         && rec.analysis.provenance.vocalness_model_id.as_deref() == Some(VOCALNESS_MODEL_ID)
+        && aggression_is_fresh(rec, expects_aggression)
+}
+
+/// Validate Sonara's aggression output as one indivisible contract. A requested
+/// analysis may responsibly abstain (`score == None`), but only while retaining
+/// the model identity and complete finite, bounded support/component evidence.
+/// This deliberately never reconstructs a current rank from the legacy 48-D
+/// embedding scorer: old or incomplete caches require decoding the audio.
+fn aggression_is_fresh(rec: &AnalysisRecord, expected: bool) -> bool {
+    if !expected {
+        return rec.analysis.provenance.aggression_model_id.is_none()
+            && rec.analysis.aggression_score.is_none()
+            && rec.analysis.aggression_confidence.is_none()
+            && rec.analysis.aggression_forcefulness.is_none()
+            && rec.analysis.aggression_harshness.is_none()
+            && rec.analysis.aggression_tension.is_none()
+            && rec.analysis.aggression_rhythm.is_none();
+    }
+
+    let bounded = |value: Option<f32>| {
+        value.is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value))
+    };
+    rec.analysis.provenance.aggression_model_id.as_deref() == Some(AGGRESSION_MODEL_ID)
+        && rec
+            .analysis
+            .aggression_score
+            .is_none_or(|value| value.is_finite() && (0.0..=1.0).contains(&value))
+        && bounded(rec.analysis.aggression_confidence)
+        && bounded(rec.analysis.aggression_forcefulness)
+        && bounded(rec.analysis.aggression_harshness)
+        && bounded(rec.analysis.aggression_tension)
+        && bounded(rec.analysis.aggression_rhythm)
 }
 
 /// Freshness against Sonagram's canonical graph-analysis feature set.
@@ -497,6 +537,17 @@ pub fn migrate_cached_record(
     }
     let expected = normalized_features(features);
     let provenance = &rec.analysis.provenance;
+    // Sonara's current aggression rank consumes fused audio evidence. It must
+    // never be synthesized through the retained legacy embedding scorer.
+    if expected.iter().any(|feature| feature == "aggression") {
+        return false;
+    }
+    // A no-aggression record must not retain hidden output from any aggression
+    // model. Saving such a payload after migration would stamp the new schema
+    // while leaving a record that our exact feature contract still rejects.
+    if !aggression_is_fresh(rec, false) {
+        return false;
+    }
     if !matches!(provenance.schema_version, 3 | 4)
         || provenance.mode != "playlist"
         || provenance.requested_features.as_deref() != Some(expected.as_slice())

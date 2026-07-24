@@ -106,7 +106,21 @@ with tempfile.TemporaryDirectory() as tmp:
     for source in sorted(fixtures.glob("*.json")):
         data = json.loads(source.read_text())
         content_hash = data["source"]["content_hash"]
-        data["analysis"]["provenance"]["vocalness_model_id"] = "sonara-vocalness-v2"
+        provenance = data["analysis"]["provenance"]
+        provenance["schema_version"] = 5
+        provenance["requested_features"] = sorted(
+            set(provenance["requested_features"] + ["aggression"])
+        )
+        provenance["vocalness_model_id"] = "sonara-vocalness-v2"
+        provenance["aggression_model_id"] = "aggression-rank-v2"
+        data["analysis"].update(
+            aggression_score=0.63,
+            aggression_confidence=0.91,
+            aggression_forcefulness=0.74,
+            aggression_harshness=0.52,
+            aggression_tension=0.67,
+            aggression_rhythm=0.58,
+        )
         (analysis / f"{content_hash}.json").write_text(json.dumps(data, indent=2) + "\n")
         index[data["source"]["path"]] = {
             "size": data["source"]["file_size"],

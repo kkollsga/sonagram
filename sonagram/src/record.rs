@@ -124,6 +124,12 @@ pub struct ProvenanceDto {
     /// omitted for legacy/no-model records and defaulted when reading them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vocalness_model_id: Option<String>,
+    /// Identity of the fused aggression model that produced the aggression
+    /// rank and diagnostics. Present exactly when `aggression` was requested.
+    /// Additive since sonara 0.3.1; absent legacy records deserialize so the
+    /// scanner can classify them stale and re-analyze their audio.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aggression_model_id: Option<String>,
 }
 
 /// A time-spanned chord event, mirroring sonara's `ChordEvent`.
@@ -221,6 +227,23 @@ pub struct AnalysisDto {
 
     // -- Embedding --
     pub embedding: Option<Vec<f32>>,
+
+    // -- Fused aggression rank (opt-in "aggression") --
+    /// Perceptual aggression rank in `[0, 1]`, not a probability. `None` with
+    /// complete diagnostics means Sonara abstained for insufficient evidence.
+    #[serde(default)]
+    pub aggression_score: Option<f32>,
+    /// Independent musical-evidence support in `[0, 1]`, not rank certainty.
+    #[serde(default)]
+    pub aggression_confidence: Option<f32>,
+    #[serde(default)]
+    pub aggression_forcefulness: Option<f32>,
+    #[serde(default)]
+    pub aggression_harshness: Option<f32>,
+    #[serde(default)]
+    pub aggression_tension: Option<f32>,
+    #[serde(default)]
+    pub aggression_rhythm: Option<f32>,
 
     // -- Mood + instrumentalness (heuristic v1, opt-in) --
     pub mood_happy: Option<f32>,
@@ -321,6 +344,12 @@ impl AnalysisRecord {
             valence,
             acousticness,
             embedding,
+            aggression_score,
+            aggression_confidence,
+            aggression_forcefulness,
+            aggression_harshness,
+            aggression_tension,
+            aggression_rhythm,
             mood_happy,
             mood_aggressive,
             mood_relaxed,
@@ -364,6 +393,7 @@ impl AnalysisRecord {
             requested_features: provenance.requested_features,
             genre_model_id: provenance.genre_model_id,
             vocalness_model_id: provenance.vocalness_model_id,
+            aggression_model_id: provenance.aggression_model_id,
         };
 
         let chord_events = chord_events.map(|evs| {
@@ -430,6 +460,12 @@ impl AnalysisRecord {
             valence,
             acousticness,
             embedding,
+            aggression_score,
+            aggression_confidence,
+            aggression_forcefulness,
+            aggression_harshness,
+            aggression_tension,
+            aggression_rhythm,
             mood_happy,
             mood_aggressive,
             mood_relaxed,
@@ -511,6 +547,7 @@ mod tests {
                     ]),
                     genre_model_id: Some("genre-model-v1".to_string()),
                     vocalness_model_id: Some("sonara-vocalness-v2".to_string()),
+                    aggression_model_id: Some("aggression-rank-v2".to_string()),
                 },
                 duration_sec: 210.5,
                 bpm: 119.7,
@@ -565,6 +602,12 @@ mod tests {
                 valence: Some(0.42),
                 acousticness: Some(0.71),
                 embedding: Some(vec![0.1; 48]),
+                aggression_score: Some(0.63),
+                aggression_confidence: Some(0.91),
+                aggression_forcefulness: Some(0.74),
+                aggression_harshness: Some(0.52),
+                aggression_tension: Some(0.67),
+                aggression_rhythm: Some(0.58),
                 mood_happy: Some(0.3),
                 mood_aggressive: Some(0.1),
                 mood_relaxed: Some(0.7),
@@ -626,6 +669,7 @@ mod tests {
                     requested_features: None,
                     genre_model_id: None,
                     vocalness_model_id: None,
+                    aggression_model_id: None,
                 },
                 duration_sec: 1.0,
                 bpm: 0.0,
@@ -669,6 +713,12 @@ mod tests {
                 valence: None,
                 acousticness: None,
                 embedding: None,
+                aggression_score: None,
+                aggression_confidence: None,
+                aggression_forcefulness: None,
+                aggression_harshness: None,
+                aggression_tension: None,
+                aggression_rhythm: None,
                 mood_happy: None,
                 mood_aggressive: None,
                 mood_relaxed: None,
@@ -717,6 +767,7 @@ mod tests {
         let json = rec.to_json_pretty().unwrap();
         assert!(json.contains(r#""genre_model_id": "genre-model-v1""#));
         assert!(json.contains(r#""vocalness_model_id": "sonara-vocalness-v2""#));
+        assert!(json.contains(r#""aggression_model_id": "aggression-rank-v2""#));
 
         let back = AnalysisRecord::from_json(&json).unwrap();
         assert_eq!(
@@ -727,6 +778,10 @@ mod tests {
             back.analysis.provenance.vocalness_model_id.as_deref(),
             Some("sonara-vocalness-v2")
         );
+        assert_eq!(
+            back.analysis.provenance.aggression_model_id.as_deref(),
+            Some("aggression-rank-v2")
+        );
     }
 
     #[test]
@@ -735,10 +790,12 @@ mod tests {
         let provenance = value["analysis"]["provenance"].as_object_mut().unwrap();
         assert!(!provenance.contains_key("genre_model_id"));
         assert!(!provenance.contains_key("vocalness_model_id"));
+        assert!(!provenance.contains_key("aggression_model_id"));
 
         let legacy: AnalysisRecord = serde_json::from_value(value).unwrap();
         assert_eq!(legacy.analysis.provenance.genre_model_id, None);
         assert_eq!(legacy.analysis.provenance.vocalness_model_id, None);
+        assert_eq!(legacy.analysis.provenance.aggression_model_id, None);
     }
 
     #[test]

@@ -20,12 +20,13 @@ rayon = "1.11"
 ureq = { version = "2", features = ["json"] }
 
 # Upstreams — consumed as cargo libraries, read-only here. `version` must be
-# satisfiable by the LOCAL path checkout: sonara 0.2.9 (validated v2 vocalness
-# model, fail-closed public analysis/model contracts, complete recoverable MP3
-# probing, deterministic chord summaries), kglite 0.14.4 (deterministic
-# embedding persistence). See
+# satisfiable by the LOCAL path checkout: sonara 0.3.1 (validated v2 vocalness
+# model, fused aggression-rank-v2 analysis with evidence support, fail-closed
+# public analysis/model contracts, complete recoverable MP3 probing,
+# deterministic chord summaries), kglite 0.14.5 (deterministic embedding
+# persistence). See
 # dev-docs/designs/upstream-contracts.md.
-sonara = { version = ">=0.2.9, <0.3", path = "../sonara/sonara" }
+sonara = { version = "0.3.1", path = "../sonara/sonara", features = ["aggression"] }
 kglite = { version = "0.14.4", path = "../KGLite/crates/kglite", default-features = false }
 kglite-mcp-server = { version = "0.14.4", path = "../KGLite/crates/kglite-mcp-server", default-features = false }
 

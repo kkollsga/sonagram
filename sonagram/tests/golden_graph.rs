@@ -442,6 +442,12 @@ fn _track_analysis_fields_present(a: sonara::analyze::TrackAnalysis) {
         valence: _,
         acousticness: _,
         embedding: _,
+        aggression_score: _,
+        aggression_confidence: _,
+        aggression_forcefulness: _,
+        aggression_harshness: _,
+        aggression_tension: _,
+        aggression_rhythm: _,
         mood_happy: _,
         mood_aggressive: _,
         mood_relaxed: _,
@@ -502,6 +508,7 @@ fn _analysis_provenance_fields_present(p: sonara::analyze::AnalysisProvenance) {
         requested_features: _,
         genre_model_id: _,
         vocalness_model_id: _,
+        aggression_model_id: _,
     } = p;
 }
 
@@ -530,15 +537,24 @@ fn contract_sonara() {
         .expect("Sonagram deliberately enables the bundled vocalness model");
     assert_eq!(vocalness_model.id(), sonagram::scan::VOCALNESS_MODEL_ID);
     assert_eq!(vocalness_model.embedding_version(), SIMILARITY_VERSION);
+    assert!(configured
+        .features
+        .as_ref()
+        .is_some_and(|features| features.contains("aggression")));
+    assert_eq!(
+        sonagram::scan::AGGRESSION_MODEL_ID,
+        sonara::aggression::AGGRESSION_MODEL_ID
+    );
+    assert_eq!(sonara::aggression::AGGRESSION_MODEL_VERSION, 2);
+    assert_eq!(sonara::aggression::AGGRESSION_FEATURE_COUNT, 39);
 
     // WHY: each Track carries `analysis_schema_version`. If sonara bumps its
     // schema, previously captured fixtures no longer describe the same analysis
     // semantics — the goldens must be recaptured, not silently trusted. Pinned to
-    // 3 as of sonara 0.2.4 (vocalness v2 inversion fix + acousticness/danceability
-    // recalibration + new bpm_confidence); a future bump must recapture the 15
-    // fixtures + regen the golden in the same commit.
+    // 5 as of sonara 0.3.1 (fused aggression rank + evidence support); a future
+    // bump must recapture the 15 fixtures + regen the golden in the same commit.
     assert_eq!(
-        ANALYSIS_SCHEMA_VERSION, 4,
+        ANALYSIS_SCHEMA_VERSION, 5,
         "sonara ANALYSIS_SCHEMA_VERSION changed — recapture fixtures + goldens"
     );
 

@@ -20,7 +20,7 @@ use sonagram::scan::cache::{Cache, Index, IndexEntry};
 use sonagram::scan::{
     default_analysis_config, load_records, migrate_cached_record, record_is_fresh,
     record_is_fresh_for_features, scan_library, scan_library_with, AnalyzeRequest, Analyzer,
-    ScanOptions, VOCALNESS_MODEL_ID,
+    ScanOptions, AGGRESSION_MODEL_ID, VOCALNESS_MODEL_ID,
 };
 
 /// A mock analyzer: counts analyses and returns a fixture-derived record stamped
@@ -118,9 +118,40 @@ fn load_a_fixture() -> AnalysisRecord {
     paths.sort();
     let text = std::fs::read_to_string(&paths[0]).expect("read fixture");
     let mut record = AnalysisRecord::from_json(&text).expect("parse fixture");
+    record.analysis.provenance.schema_version = sonara::analyze::ANALYSIS_SCHEMA_VERSION;
+    let mut requested_features = sonagram::scan::default_features();
+    requested_features.sort();
+    requested_features.dedup();
+    record.analysis.provenance.requested_features = Some(requested_features);
     record.analysis.provenance.vocalness_model_id =
         Some(sonagram::scan::VOCALNESS_MODEL_ID.to_string());
+    record.analysis.provenance.aggression_model_id = Some(AGGRESSION_MODEL_ID.to_string());
+    record.analysis.aggression_score = Some(0.63);
+    record.analysis.aggression_confidence = Some(0.91);
+    record.analysis.aggression_forcefulness = Some(0.74);
+    record.analysis.aggression_harshness = Some(0.52);
+    record.analysis.aggression_tension = Some(0.67);
+    record.analysis.aggression_rhythm = Some(0.58);
     record
+}
+
+/// Turn the current canonical mock into a current no-aggression result for
+/// exercising custom feature lists and the older chord/vocalness migration.
+fn without_aggression(record: &mut AnalysisRecord) -> Vec<String> {
+    let mut features = ScanOptions::default().features;
+    features.retain(|feature| feature != "aggression");
+    let mut requested_features = features.clone();
+    requested_features.sort();
+    requested_features.dedup();
+    record.analysis.provenance.requested_features = Some(requested_features);
+    record.analysis.provenance.aggression_model_id = None;
+    record.analysis.aggression_score = None;
+    record.analysis.aggression_confidence = None;
+    record.analysis.aggression_forcefulness = None;
+    record.analysis.aggression_harshness = None;
+    record.analysis.aggression_tension = None;
+    record.analysis.aggression_rhythm = None;
+    features
 }
 
 // ---- synthetic library helpers ----
@@ -212,6 +243,64 @@ fn bundled_vocalness_model_identity_drives_cache_freshness() {
 }
 
 #[test]
+fn fused_aggression_contract_drives_cache_freshness() {
+    let config = default_analysis_config().expect("bundled models must validate");
+    assert!(config
+        .features
+        .as_ref()
+        .is_some_and(|features| features.contains("aggression")));
+    assert_eq!(AGGRESSION_MODEL_ID, "aggression-rank-v2");
+
+    let current = load_a_fixture();
+    assert!(record_is_fresh(&current));
+
+    let mut abstained = current.clone();
+    abstained.analysis.aggression_score = None;
+    assert!(
+        record_is_fresh(&abstained),
+        "a null rank with complete evidence is a valid Sonara abstention"
+    );
+
+    let mut missing_evidence = abstained.clone();
+    missing_evidence.analysis.aggression_harshness = None;
+    assert!(!record_is_fresh(&missing_evidence));
+
+    let mut non_finite = abstained.clone();
+    non_finite.analysis.aggression_confidence = Some(f32::NAN);
+    assert!(!record_is_fresh(&non_finite));
+
+    let mut out_of_range = current.clone();
+    out_of_range.analysis.aggression_score = Some(1.01);
+    assert!(!record_is_fresh(&out_of_range));
+
+    let mut foreign_model = current.clone();
+    foreign_model.analysis.provenance.aggression_model_id =
+        Some("aggression-logistic-v1".to_string());
+    assert!(
+        !record_is_fresh(&foreign_model),
+        "legacy embedding-score provenance must force audio reanalysis"
+    );
+
+    let mut older_schema = current.clone();
+    older_schema.analysis.provenance.schema_version = 4;
+    older_schema.analysis.provenance.aggression_model_id = None;
+    older_schema.analysis.aggression_score = None;
+    older_schema.analysis.aggression_confidence = None;
+    older_schema.analysis.aggression_forcefulness = None;
+    older_schema.analysis.aggression_harshness = None;
+    older_schema.analysis.aggression_tension = None;
+    older_schema.analysis.aggression_rhythm = None;
+    assert!(
+        !record_is_fresh(&older_schema),
+        "pre-fused schema caches must force audio reanalysis"
+    );
+
+    let mut not_requested = current;
+    let features = without_aggression(&mut not_requested);
+    assert!(record_is_fresh_for_features(&not_requested, &features));
+}
+
+#[test]
 fn requested_feature_identity_drives_cache_freshness() {
     let current = load_a_fixture();
     let mut reordered = ScanOptions::default().features;
@@ -257,7 +346,8 @@ fn changed_requested_features_bypass_both_cache_reuse_tiers() {
 
 #[test]
 fn schema_three_cache_migrates_exactly_from_stored_features() {
-    let expected = load_a_fixture();
+    let mut expected = load_a_fixture();
+    let features = without_aggression(&mut expected);
     let mut legacy = expected.clone();
     legacy.analysis.provenance.schema_version = 3;
     legacy.analysis.provenance.vocalness_model_id = None;
@@ -267,7 +357,6 @@ fn schema_three_cache_migrates_exactly_from_stored_features() {
     legacy.analysis.predominant_chord = Some("G#m".to_string());
 
     let model = sonara::vocal_model::bundled().unwrap();
-    let features = ScanOptions::default().features;
     assert!(migrate_cached_record(&mut legacy, &features, &model));
     assert_eq!(legacy.analysis.provenance, expected.analysis.provenance);
     assert_eq!(legacy.analysis.vocalness, expected.analysis.vocalness);
@@ -283,7 +372,7 @@ fn schema_three_cache_migrates_exactly_from_stored_features() {
         legacy.analysis.predominant_chord,
         expected.analysis.predominant_chord
     );
-    assert!(record_is_fresh(&legacy));
+    assert!(record_is_fresh_for_features(&legacy, &features));
     assert!(
         !migrate_cached_record(&mut legacy, &features, &model),
         "current records are an idempotent no-op"
@@ -292,34 +381,36 @@ fn schema_three_cache_migrates_exactly_from_stored_features() {
 
 #[test]
 fn schema_four_cache_without_model_provenance_is_migrated() {
-    let expected = load_a_fixture();
+    let mut expected = load_a_fixture();
+    let features = without_aggression(&mut expected);
     let mut unstamped = expected.clone();
+    unstamped.analysis.provenance.schema_version = 4;
     unstamped.analysis.provenance.vocalness_model_id = None;
     unstamped.analysis.vocalness = Some(0.0);
     unstamped.analysis.instrumentalness = Some(1.0);
 
     let model = sonara::vocal_model::bundled().unwrap();
-    let features = ScanOptions::default().features;
     assert!(migrate_cached_record(&mut unstamped, &features, &model));
     assert_eq!(unstamped.analysis.vocalness, expected.analysis.vocalness);
     assert_eq!(
         unstamped.analysis.instrumentalness,
         expected.analysis.instrumentalness
     );
-    assert!(record_is_fresh(&unstamped));
+    assert!(record_is_fresh_for_features(&unstamped, &features));
 }
 
 #[test]
 fn schema_four_v1_cache_migrates_to_v2_without_audio() {
-    let expected = load_a_fixture();
+    let mut expected = load_a_fixture();
+    let features = without_aggression(&mut expected);
     let mut v1 = expected.clone();
+    v1.analysis.provenance.schema_version = 4;
     v1.analysis.provenance.vocalness_model_id =
         Some("sonara-vocalness-v1".to_string());
     v1.analysis.vocalness = Some(0.0);
     v1.analysis.instrumentalness = Some(1.0);
 
     let model = sonara::vocal_model::bundled().unwrap();
-    let features = ScanOptions::default().features;
     assert!(migrate_cached_record(&mut v1, &features, &model));
     assert_eq!(v1.analysis.provenance, expected.analysis.provenance);
     assert_eq!(v1.analysis.vocalness, expected.analysis.vocalness);
@@ -327,14 +418,14 @@ fn schema_four_v1_cache_migrates_to_v2_without_audio() {
         v1.analysis.instrumentalness,
         expected.analysis.instrumentalness
     );
-    assert!(record_is_fresh(&v1));
+    assert!(record_is_fresh_for_features(&v1, &features));
 }
 
 #[test]
 fn cache_migration_rejects_incomplete_or_foreign_inputs() {
     let model = sonara::vocal_model::bundled().unwrap();
-    let features = ScanOptions::default().features;
     let mut legacy = load_a_fixture();
+    let features = without_aggression(&mut legacy);
     legacy.analysis.provenance.schema_version = 3;
     legacy.analysis.provenance.vocalness_model_id = None;
 
@@ -354,6 +445,21 @@ fn cache_migration_rejects_incomplete_or_foreign_inputs() {
         &model
     ));
 
+    let mut stray_aggression_model = legacy.clone();
+    stray_aggression_model.analysis.provenance.aggression_model_id =
+        Some(AGGRESSION_MODEL_ID.to_string());
+    assert!(
+        !migrate_cached_record(&mut stray_aggression_model, &features, &model),
+        "a no-aggression migration must reject hidden model provenance"
+    );
+
+    let mut stray_aggression_value = legacy.clone();
+    stray_aggression_value.analysis.aggression_score = Some(0.5);
+    assert!(
+        !migrate_cached_record(&mut stray_aggression_value, &features, &model),
+        "a no-aggression migration must reject hidden model output"
+    );
+
     let mut hidden_genre = legacy;
     hidden_genre.analysis.genre = Some("rock".to_string());
     hidden_genre.analysis.genre_confidence = Some(0.9);
@@ -365,7 +471,7 @@ fn cache_migration_rejects_incomplete_or_foreign_inputs() {
 }
 
 #[test]
-fn production_scan_migrates_eligible_cache_without_decoding_audio() {
+fn production_scan_reanalyzes_pre_aggression_cache_from_audio() {
     let lib = tmp_library("cached-migration");
     let path = lib.join("a.mp3");
     write_file(&path, &make_mp3(b"tag", b"not-decodable-audio"));
@@ -383,6 +489,13 @@ fn production_scan_migrates_eligible_cache_without_decoding_audio() {
     legacy.source.file_size = metadata.len();
     legacy.analysis.provenance.schema_version = 3;
     legacy.analysis.provenance.vocalness_model_id = None;
+    legacy.analysis.provenance.aggression_model_id = None;
+    legacy.analysis.aggression_score = None;
+    legacy.analysis.aggression_confidence = None;
+    legacy.analysis.aggression_forcefulness = None;
+    legacy.analysis.aggression_harshness = None;
+    legacy.analysis.aggression_tension = None;
+    legacy.analysis.aggression_rhythm = None;
     legacy.analysis.vocalness = Some(0.0);
     legacy.analysis.instrumentalness = Some(1.0);
     legacy.analysis.predominant_chord = Some("G#m".to_string());
@@ -401,12 +514,16 @@ fn production_scan_migrates_eligible_cache_without_decoding_audio() {
     cache.save_index(&index).unwrap();
 
     let report = scan_library(&lib, &ScanOptions::default()).unwrap();
-    assert_eq!(report.migrated_analysis, 1);
-    assert_eq!(report.analyzed, 0, "synthetic audio must never be decoded");
-    assert_eq!(report.reused_stat_match, 1);
-    assert!(report.failed.is_empty());
-    let migrated = cache.load_record("cached-hash").unwrap().unwrap();
-    assert!(record_is_fresh(&migrated));
+    assert_eq!(report.migrated_analysis, 0);
+    assert_eq!(report.analyzed, 0);
+    assert_eq!(report.reused_stat_match, 0);
+    assert_eq!(
+        report.failed.len(),
+        1,
+        "old canonical caches must decode audio instead of synthesizing aggression from embeddings"
+    );
+    let unchanged = cache.load_record("cached-hash").unwrap().unwrap();
+    assert!(!record_is_fresh(&unchanged));
 }
 
 #[test]
