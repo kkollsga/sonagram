@@ -110,7 +110,7 @@ that wasn't run, or a tag the file lacked).
 | `aggression_harshness` | float | yes | diagnostic component `[0,1]` |
 | `aggression_tension` | float | yes | diagnostic component `[0,1]`; distinct from library-relative `tension_index` |
 | `aggression_rhythm` | float | yes | diagnostic component `[0,1]` |
-| `aggression_model_id` | str | yes | exact model identity; current comparable ranks use `aggression-rank-v2` |
+| `aggression_model_id` | str | yes | exact model identity; current comparable ranks use `aggression-rank-v3-sr22050` |
 | `energy_level` | int | yes | coarse energy bucket 1–10 |
 | `key` | str | yes | e.g. `"A minor"` |
 | `camelot` | str | yes | Camelot code, e.g. `"8A"` |
@@ -136,11 +136,13 @@ that wasn't run, or a tag the file lacked).
 
 The seven aggression fields are the graph-schema-v3 addition. Compare ranks
 only when `aggression_model_id` matches exactly. A null score with complete
-bounded support/components is a valid abstention, not zero. Pre-Sonara-0.3.1
-caches need an audio rescan because the fused evidence cannot be reconstructed
-from the similarity embedding. `mood_aggressive` is a separate legacy
-heuristic, while `tension_index` is library-relative harmonic/musical tension;
-neither is a fallback for unavailable aggression.
+bounded support/components is a valid abstention, not zero. Sonara 0.3.3
+normalizes the aggression branch to a canonical 22.05 kHz lane, so rank-v3 is
+comparable across source sample rates while other analysis stays in its native
+rate domain. Schema-5/rank-v2 caches need an audio rescan because rank-v3 cannot
+be reconstructed from the similarity embedding. `mood_aggressive` is a
+separate legacy heuristic, while `tension_index` is library-relative
+harmonic/musical tension; neither is a fallback for unavailable aggression.
 
 **P21 curve-derived features** (graph schema v2 — computed from the full
 analysis curves at build time):

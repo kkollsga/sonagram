@@ -1,4 +1,4 @@
-"""Python API gate: aggression model migrations reanalyze, current caches reuse."""
+"""Python API gate: rank-v2 reanalyzes while schema-6/rank-v3 caches reuse."""
 
 import json
 import tempfile

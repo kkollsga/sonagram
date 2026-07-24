@@ -787,7 +787,7 @@ fn aggression_map(values: &[f64]) -> BTreeMap<String, AggressionFixture> {
 }
 
 #[test]
-fn direct_aggression_uses_v2_rank_not_mood_and_profiles_complete_evidence() {
+fn direct_aggression_uses_current_rank_not_mood_and_profiles_complete_evidence() {
     let mut source = records()[..3].to_vec();
     for (index, record) in source.iter_mut().enumerate() {
         record.analysis.energy = Some(0.5);
@@ -853,7 +853,7 @@ fn explicit_aggression_fails_closed_for_every_unusable_state() {
     evidence.insert(
         format!("{:064x}", 2),
         AggressionFixture {
-            model_id: Some(sonara::aggression::LEGACY_AGGRESSION_MODEL_ID),
+            model_id: Some("aggression-rank-v2"),
             ..AggressionFixture::valid(0.9)
         },
     );

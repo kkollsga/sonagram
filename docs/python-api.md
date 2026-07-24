@@ -49,10 +49,12 @@ and is invoked as `progress(stage, done, total)` where `stage` is one of
 `analyzed`, `migrated_analysis`, `reused_hash_match`, `reused_stat_match`, `failed` (a list of
 `(path, message)` tuples), and `elapsed_sec`.
 
-The default Sonara 0.3.1 feature set includes fused aggression analysis.
-Pre-0.3.1 canonical caches require an audio rescan because this rank cannot be
-reconstructed from a stored embedding. A null rank with complete diagnostics is
-a valid abstention, not a scan failure.
+The default Sonara 0.3.3 feature set includes fused aggression analysis. Sonara
+normalizes the aggression branch to a canonical 22.05 kHz lane so rank-v3 is
+comparable across source sample rates; the rest of the analysis and provenance
+remain in the source-rate domain. Schema-5/rank-v2 caches require an audio
+rescan because rank-v3 cannot be reconstructed from a stored embedding. A null
+rank with complete diagnostics is a valid abstention, not a scan failure.
 
 ## `enrich`
 

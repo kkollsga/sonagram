@@ -181,7 +181,7 @@ fn fused_aggression_is_queryable_and_distinct_from_legacy_mood() {
         .find(|r| r.source.content_hash == BRUNO_HASH)
         .expect("Bruno fixture present");
     let legacy_mood = record.analysis.mood_aggressive.expect("legacy mood score");
-    record.analysis.provenance.aggression_model_id = Some("aggression-rank-v2".to_string());
+    record.analysis.provenance.aggression_model_id = Some("aggression-rank-v3-sr22050".to_string());
     record.analysis.aggression_score = Some(0.83);
     record.analysis.aggression_confidence = Some(0.42);
     record.analysis.aggression_forcefulness = Some(0.71);
@@ -211,7 +211,7 @@ fn fused_aggression_is_queryable_and_distinct_from_legacy_mood() {
     }
     assert_eq!(
         str_prop(&graph, "Track", BRUNO_HASH, "aggression_model_id"),
-        "aggression-rank-v2"
+        "aggression-rank-v3-sr22050"
     );
     assert!(
         (f64_prop(&graph, "Track", BRUNO_HASH, "mood_aggressive")
@@ -228,7 +228,7 @@ fn fused_aggression_abstention_keeps_support_and_diagnostics() {
         .into_iter()
         .find(|r| r.source.content_hash == BRUNO_HASH)
         .expect("Bruno fixture present");
-    record.analysis.provenance.aggression_model_id = Some("aggression-rank-v2".to_string());
+    record.analysis.provenance.aggression_model_id = Some("aggression-rank-v3-sr22050".to_string());
     record.analysis.aggression_score = None;
     record.analysis.aggression_confidence = Some(0.08);
     record.analysis.aggression_forcefulness = Some(0.31);
@@ -248,7 +248,7 @@ fn fused_aggression_abstention_keeps_support_and_diagnostics() {
     assert_eq!(prop(&graph, "Track", BRUNO_HASH, "aggression"), Value::Null);
     assert_eq!(
         str_prop(&graph, "Track", BRUNO_HASH, "aggression_model_id"),
-        "aggression-rank-v2"
+        "aggression-rank-v3-sr22050"
     );
     for (name, expected) in [
         ("aggression_confidence", 0.08),
@@ -275,13 +275,13 @@ fn analysis_model_ids_are_queryable_and_fingerprinted() {
     let before_aggression_model =
         graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap();
     record.analysis.provenance.aggression_model_id =
-        Some("aggression-rank-v2-test-mutation".to_string());
+        Some("aggression-rank-v3-test-mutation".to_string());
     assert_ne!(
         graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap(),
         before_aggression_model,
         "aggression model identity alone must affect graph identity"
     );
-    record.analysis.provenance.aggression_model_id = Some("aggression-rank-v2".to_string());
+    record.analysis.provenance.aggression_model_id = Some("aggression-rank-v3-sr22050".to_string());
     let before_aggression =
         graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap();
     record.analysis.aggression_score = Some(0.73);
@@ -318,7 +318,7 @@ fn analysis_model_ids_are_queryable_and_fingerprinted() {
     );
     assert_eq!(
         str_prop(&graph, "Track", BRUNO_HASH, "aggression_model_id"),
-        "aggression-rank-v2"
+        "aggression-rank-v3-sr22050"
     );
 }
 

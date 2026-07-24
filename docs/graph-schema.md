@@ -48,7 +48,7 @@ be null (opt-in analysis that wasn't run, or a tag the file lacked).
 | `aggression_harshness` | float | yes | diagnostic component `[0,1]` |
 | `aggression_tension` | float | yes | diagnostic aggression component `[0,1]`; distinct from library-relative `tension_index` |
 | `aggression_rhythm` | float | yes | diagnostic component `[0,1]` |
-| `aggression_model_id` | str | yes | exact model provenance; current comparable records use `aggression-rank-v2` |
+| `aggression_model_id` | str | yes | exact model provenance; current comparable records use `aggression-rank-v3-sr22050` |
 | `energy_level` | int | yes | coarse energy bucket 1–10 |
 | `key` | str | yes | e.g. `"A minor"` |
 | `camelot` | str | yes | Camelot code, e.g. `"8A"` |
@@ -77,9 +77,11 @@ ranks only under the exact same non-null `aggression_model_id`. A null score
 with a model id and complete bounded confidence/components is a responsible
 Sonara abstention, not a zero. `mood_aggressive` remains a separate heuristic;
 `tension_index` measures harmonic/musical tension relative to this library.
-Neither is a fallback for unavailable aggression. Pre-Sonara-0.3.1 caches need
-an audio rescan because the fused evidence cannot be reconstructed from the
-stored similarity embedding.
+Neither is a fallback for unavailable aggression. Sonara 0.3.3 computes rank-v3
+in a canonical 22.05 kHz aggression lane while preserving the source-rate
+domain for the rest of the analysis. Schema-5/rank-v2 caches need an audio
+rescan because rank-v3 cannot be reconstructed from the stored similarity
+embedding.
 
 ### Graph-derived Track properties (schema v2)
 

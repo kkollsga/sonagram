@@ -30,11 +30,13 @@ cached analyses migrated without decoding audio, reused
 (hash match / stat match), failed (with per-file messages), and
 elapsed time.
 
-Sonara 0.3.1 adds fused aggression evidence to Sonagram's default analysis.
-Older canonical caches therefore require an audio rescan: the current rank and
-diagnostics cannot be regenerated from the stored 48-D embedding. A null rank
-after that scan can be a valid model abstention and remains cached with its
-support/components.
+Sonara 0.3.3 supplies Sonagram's fused aggression evidence. Its rank-v3 model
+normalizes only the aggression analysis to a canonical 22.05 kHz lane, making
+the rank comparable across source sample rates while leaving the main analysis
+and its provenance in the source-rate domain. Schema-5/rank-v2 caches require
+an audio rescan: rank-v3 and its diagnostics cannot be regenerated from the
+stored 48-D embedding. A null rank after that scan can be a valid model
+abstention and remains cached with its support/components.
 
 ## `sonagram enrich`
 

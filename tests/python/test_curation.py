@@ -20,12 +20,12 @@ with tempfile.TemporaryDirectory() as tmp:
         data = json.loads(source.read_text())
         content_hash = data["source"]["content_hash"]
         provenance = data["analysis"]["provenance"]
-        provenance["schema_version"] = 5
+        provenance["schema_version"] = 6
         provenance["requested_features"] = sorted(
             set(provenance["requested_features"] + ["aggression"])
         )
         provenance["vocalness_model_id"] = "sonara-vocalness-v2"
-        provenance["aggression_model_id"] = "aggression-rank-v2"
+        provenance["aggression_model_id"] = "aggression-rank-v3-sr22050"
         data["analysis"].update(
             aggression_score=0.63,
             aggression_confidence=0.91,

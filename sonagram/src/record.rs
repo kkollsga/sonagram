@@ -547,7 +547,7 @@ mod tests {
                     ]),
                     genre_model_id: Some("genre-model-v1".to_string()),
                     vocalness_model_id: Some("sonara-vocalness-v2".to_string()),
-                    aggression_model_id: Some("aggression-rank-v2".to_string()),
+                    aggression_model_id: Some("aggression-rank-v3-sr22050".to_string()),
                 },
                 duration_sec: 210.5,
                 bpm: 119.7,
@@ -767,7 +767,7 @@ mod tests {
         let json = rec.to_json_pretty().unwrap();
         assert!(json.contains(r#""genre_model_id": "genre-model-v1""#));
         assert!(json.contains(r#""vocalness_model_id": "sonara-vocalness-v2""#));
-        assert!(json.contains(r#""aggression_model_id": "aggression-rank-v2""#));
+        assert!(json.contains(r#""aggression_model_id": "aggression-rank-v3-sr22050""#));
 
         let back = AnalysisRecord::from_json(&json).unwrap();
         assert_eq!(
@@ -780,7 +780,7 @@ mod tests {
         );
         assert_eq!(
             back.analysis.provenance.aggression_model_id.as_deref(),
-            Some("aggression-rank-v2")
+            Some("aggression-rank-v3-sr22050")
         );
     }
 
