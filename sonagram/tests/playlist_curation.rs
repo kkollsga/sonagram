@@ -937,6 +937,50 @@ fn relative_aggression_is_seed_owned_and_unknown_is_structured() {
 }
 
 #[test]
+fn relative_aggression_rejects_unusable_pinned_reference_that_fills_target() {
+    let source = records()[..1].to_vec();
+    let mut evidence = BTreeMap::new();
+    evidence.insert(format!("{:064x}", 0), AggressionFixture::abstained());
+    let graph = graph_with_aggression(source, evidence);
+    let brief = PlaylistBrief {
+        target_tracks: 1,
+        seed_ids: vec![format!("{:064x}", 0)],
+        seed_role: SeedRole::PinnedAndReference,
+        ..PlaylistBrief::default()
+    };
+    let mut policy = relaxed_aggression_policy();
+    policy.targets.relative_aggression = RelativeDirection::Lower;
+
+    let result = curate_playlist(&graph, &brief, &policy).unwrap();
+    assert!(!result.exportable);
+    assert!(result
+        .audit
+        .issues
+        .iter()
+        .any(|issue| issue.code == "aggression_unknown"));
+}
+
+#[test]
+fn non_finite_aggression_score_is_invalid_not_abstained() {
+    for score in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let graph = graph_with_aggression(records()[..1].to_vec(), aggression_map(&[score]));
+        let mut policy = relaxed_aggression_policy();
+        policy.targets.aggression = Some(0.8);
+        let ids = vec![format!("{:064x}", 0)];
+
+        let audit = audit_playlist(&graph, &ids, &policy).unwrap();
+        assert!(audit
+            .issues
+            .iter()
+            .any(|issue| issue.code == "aggression_unknown"));
+        let explanation = explain_playlist(&graph, &ids, &policy).unwrap();
+        let evidence = explanation.tracks[0].aggression.as_ref().unwrap();
+        assert_eq!(evidence.status, AggressionStatus::InvalidDiagnostics);
+        assert_eq!(evidence.score, None);
+    }
+}
+
+#[test]
 fn invalid_aggression_policy_is_non_exportable() {
     let graph = graph_with_aggression(records()[..1].to_vec(), aggression_map(&[0.5]));
     let mut policy = relaxed_aggression_policy();

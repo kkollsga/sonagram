@@ -179,49 +179,76 @@ impl TrackCandidate {
 }
 
 fn aggression_evidence(node: &NodeData, graph: &DirGraph) -> AggressionEvidence {
+    let score = aggression_number(node, "aggression", graph);
+    let confidence = aggression_number(node, "aggression_confidence", graph);
+    let forcefulness = aggression_number(node, "aggression_forcefulness", graph);
+    let harshness = aggression_number(node, "aggression_harshness", graph);
+    let tension = aggression_number(node, "aggression_tension", graph);
+    let rhythm = aggression_number(node, "aggression_rhythm", graph);
     let evidence = AggressionEvidence {
         status: AggressionStatus::Missing,
         model_id: prop_string(node, "aggression_model_id", graph),
-        score: prop_f64(node, "aggression", graph),
-        confidence: prop_f64(node, "aggression_confidence", graph),
-        forcefulness: prop_f64(node, "aggression_forcefulness", graph),
-        harshness: prop_f64(node, "aggression_harshness", graph),
-        tension: prop_f64(node, "aggression_tension", graph),
-        rhythm: prop_f64(node, "aggression_rhythm", graph),
+        score: score.finite_value(),
+        confidence: confidence.finite_value(),
+        forcefulness: forcefulness.finite_value(),
+        harshness: harshness.finite_value(),
+        tension: tension.finite_value(),
+        rhythm: rhythm.finite_value(),
     };
-    let any_numeric = evidence.score.is_some()
-        || evidence.confidence.is_some()
-        || evidence.forcefulness.is_some()
-        || evidence.harshness.is_some()
-        || evidence.tension.is_some()
-        || evidence.rhythm.is_some();
-    let status = if evidence.model_id.is_none() && !any_numeric {
+    let diagnostics = [confidence, forcefulness, harshness, tension, rhythm];
+    let any_numeric_evidence =
+        score.is_present() || diagnostics.iter().any(|value| value.is_present());
+    let status = if evidence.model_id.is_none() && !any_numeric_evidence {
         AggressionStatus::Missing
     } else if evidence.model_id.as_deref() != Some(sonara::aggression::AGGRESSION_MODEL_ID) {
         AggressionStatus::IncompatibleModel
+    } else if !diagnostics.into_iter().all(NumericEvidence::is_bounded) {
+        AggressionStatus::InvalidDiagnostics
     } else {
-        let diagnostics = [
-            evidence.confidence,
-            evidence.forcefulness,
-            evidence.harshness,
-            evidence.tension,
-            evidence.rhythm,
-        ];
-        if diagnostics.into_iter().all(is_bounded) {
-            match evidence.score {
-                Some(score) if is_bounded(Some(score)) => AggressionStatus::Available,
-                None => AggressionStatus::Abstained,
-                Some(_) => AggressionStatus::InvalidDiagnostics,
+        match score {
+            NumericEvidence::Finite(score) if (0.0..=1.0).contains(&score) => {
+                AggressionStatus::Available
             }
-        } else {
-            AggressionStatus::InvalidDiagnostics
+            NumericEvidence::Missing => AggressionStatus::Abstained,
+            NumericEvidence::Finite(_) | NumericEvidence::Invalid => {
+                AggressionStatus::InvalidDiagnostics
+            }
         }
     };
     AggressionEvidence { status, ..evidence }
 }
 
-fn is_bounded(value: Option<f64>) -> bool {
-    value.is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value))
+#[derive(Debug, Clone, Copy)]
+enum NumericEvidence {
+    Missing,
+    Finite(f64),
+    Invalid,
+}
+
+impl NumericEvidence {
+    fn finite_value(self) -> Option<f64> {
+        match self {
+            Self::Finite(value) => Some(value),
+            Self::Missing | Self::Invalid => None,
+        }
+    }
+
+    fn is_present(&self) -> bool {
+        !matches!(self, Self::Missing)
+    }
+
+    fn is_bounded(self) -> bool {
+        matches!(self, Self::Finite(value) if (0.0..=1.0).contains(&value))
+    }
+}
+
+fn aggression_number(node: &NodeData, name: &str, graph: &DirGraph) -> NumericEvidence {
+    match resolve_node_property(node, name, graph) {
+        Value::Null => NumericEvidence::Missing,
+        Value::Float64(value) if value.is_finite() => NumericEvidence::Finite(value),
+        Value::Int64(value) => NumericEvidence::Finite(value as f64),
+        _ => NumericEvidence::Invalid,
+    }
 }
 
 #[derive(Default)]

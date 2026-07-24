@@ -377,6 +377,16 @@ pub fn audit_playlist_for_brief(
             _ => {}
         }
         if matches!(brief.seed_role, SeedRole::Reference | SeedRole::PinnedAndReference) {
+            if policy.targets.relative_aggression != RelativeDirection::Any
+                && seed.aggression_score().is_none()
+            {
+                audit.issues.push(issue(
+                    AuditSeverity::Error,
+                    "aggression_unknown",
+                    format!("reference seed {id}: {}", aggression_unknown_message(seed)),
+                    Vec::new(),
+                ));
+            }
             seeds.push(seed);
         }
     }
