@@ -19,7 +19,8 @@ An agent works the graph through three MCP tools:
   inline every literal (`{title:'Marry You'}`, `[0.1, ...]`). A `$param`
   reference errors.
 - **`music_library_profile`** — report eligible counts, axis coverage, and
-  means before translating an unusual request.
+  distributions before translating an unusual request. Read coverage and
+  p25/median/p75 before choosing any numeric threshold.
 
 Typed `music_curation_policy`, `music_curate_playlist`,
 `music_audit_playlist`, `music_explain_playlist`, and `music_playlist*` store
@@ -58,14 +59,23 @@ targets and eligibility filters for artist, genre, style, decade, and year.
 Unknown fields are rejected; explicitly unsupported intent produces a
 structured non-exportable result.
 
+Aggression is opt-in policy, never a preset assumption. Profile its coverage,
+percentiles, and exact model counts first, then use typed
+`eligibility.min_aggression` / `max_aggression`, `targets.aggression`, or
+`targets.relative_aggression` plus its margin. The score is a perceptual rank,
+not a probability; confidence is evidence support. A null score is a valid
+abstention but fails an active directive as `aggression_unknown`. Do not replace
+it with the separate `mood_aggressive` heuristic, `tension_index`, or private
+agent ranking.
+
 The independent audit enforces eligibility, Track/Song deduplication,
 artist/album concentration and spacing, duration, transitions, and arc error.
 If a passing result is still poor, record that measurable defect as a Sonagram
 library issue rather than hiding it with an agent-only heuristic.
 
 The manual also carries extensive **pitfalls and field notes** from live agent
-validation (e.g. gate `bpm` on `bpm_confidence`; `mood_aggressive` inverts on
-extreme material; `SIMILAR_TO` is directed; compilation folder names often beat
-scalars for vibe grouping). Read
+validation (e.g. gate `bpm` on `bpm_confidence`; use exact-model fused aggression
+rather than `mood_aggressive`; `SIMILAR_TO` is directed; compilation folder
+names often beat scalars for vibe grouping). Read
 [`AGENT-GUIDE.md`](https://github.com/kkollsga/sonagram/blob/main/AGENT-GUIDE.md)
 in the repo before curating against a real library.

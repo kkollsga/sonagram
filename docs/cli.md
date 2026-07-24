@@ -30,6 +30,12 @@ cached analyses migrated without decoding audio, reused
 (hash match / stat match), failed (with per-file messages), and
 elapsed time.
 
+Sonara 0.3.1 adds fused aggression evidence to Sonagram's default analysis.
+Older canonical caches therefore require an audio rescan: the current rank and
+diagnostics cannot be regenerated from the stored 48-D embedding. A null rank
+after that scan can be a valid model abstention and remains cached with its
+support/components.
+
 ## `sonagram enrich`
 
 ```bash
@@ -123,6 +129,16 @@ seed similarity/relative feature targets plus artist, genre, detected-style,
 decade, and year eligibility. Unknown fields are rejected. Known constraints
 that cannot be enforced belong in `brief.unsupported_intents` and make the
 result structurally non-exportable.
+
+Every preset leaves aggression neutral. Before setting
+`eligibility.min_aggression` / `max_aggression`, `targets.aggression`, or
+`targets.relative_aggression` and its margin, inspect `sonagram profile --format
+json` for coverage, p25/median/p75, and exact model counts. Active aggression
+directives validate the exact model and complete bounded diagnostics; missing,
+abstained, incompatible, or invalid evidence yields `aggression_unknown`. The
+rank is not a probability and `aggression_confidence` is evidence support, not
+certainty. Audit/explain surface the status; the CLI never substitutes mood or
+tension and never hand-ranks around it.
 
 ## `sonagram status`
 

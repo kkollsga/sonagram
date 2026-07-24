@@ -1,6 +1,6 @@
 ---
 name: music_curation_policy
-description: "TRIGGER for every request to create, improve, or vary a playlist. Translate intent into a Sonagram preset and compact brief, then invoke the library curation method. SKIP hand-authored candidate selection or ordering: Cypher is exploratory, never the final playlist engine."
+description: "TRIGGER for every request to create, improve, or vary a playlist, including aggressive or non-aggressive intent. Translate intent into a Sonagram preset and typed policy/brief, then invoke the library curation method. SKIP hand-authored candidate selection or ordering: Cypher is exploratory, never the final playlist engine."
 references_tools: [music_library_profile, music_curation_policy, music_curate_playlist]
 applies_when:
   tool_registered: music_curate_playlist
@@ -25,6 +25,16 @@ Hard categorical intent belongs in policy eligibility: normalized
 decades; `min_year` / `max_year` cover exact ranges. Exclusion dominates.
 Resolve a complete preset policy with `music_curation_policy`, amend only typed
 fields, then invoke `music_curate_playlist` with the brief and optional policy.
+
+All presets are aggression-neutral. For explicit aggression intent, profile the
+library first, then amend `eligibility.min_aggression` / `max_aggression`,
+`targets.aggression`, or `targets.relative_aggression` plus
+`relative_aggression_margin`. Sonara's score is a perceptual rank, not a
+probability, and its confidence is evidence support rather than certainty.
+Exact model identity is part of comparability. Missing, abstained, incompatible,
+or invalid aggression evidence fails an active directive with
+`aggression_unknown`; never fall back to mood, tension, energy, genre, or an
+agent-authored ranking.
 Pass `store.name` only when the result should be persisted; the tool refuses to
 store a failed audit. CLI/Python parity remains available as:
 

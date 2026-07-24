@@ -49,6 +49,11 @@ and is invoked as `progress(stage, done, total)` where `stage` is one of
 `analyzed`, `migrated_analysis`, `reused_hash_match`, `reused_stat_match`, `failed` (a list of
 `(path, message)` tuples), and `elapsed_sec`.
 
+The default Sonara 0.3.1 feature set includes fused aggression analysis.
+Pre-0.3.1 canonical caches require an audio rescan because this rank cannot be
+reconstructed from a stored embedding. A null rank with complete diagnostics is
+a valid abstention, not a scan failure.
+
 ## `enrich`
 
 ```python
@@ -169,6 +174,18 @@ normally with structured audit issues.
 typed seed-relative targets or categorical eligibility. Unknown keys are
 rejected; `brief.unsupported_intents` records constraints the library cannot
 enforce and deliberately produces a non-exportable result.
+
+All presets are aggression-neutral. For an explicit request, inspect
+`profile["stats"]` coverage and p25/median/p75 plus
+`profile["aggression_models"]`, then amend
+either `policy["eligibility"]["min_aggression"]` or
+`policy["eligibility"]["max_aggression"]`,
+`policy["targets"]["aggression"]`, or
+`policy["targets"]["relative_aggression"]` and
+`relative_aggression_margin`. Scores are ranks, confidence is content/evidence
+support, and comparability requires the exact same model id. Missing, abstained,
+incompatible, or invalid evidence produces the hard audit issue
+`aggression_unknown`; no preset or API falls back to mood/tension/energy.
 
 ## Errors
 

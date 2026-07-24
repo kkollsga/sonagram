@@ -42,6 +42,13 @@ be null (opt-in analysis that wasn't run, or a tag the file lacked).
 | `instrumentalness` | float | yes | 0–1, exactly `1 − vocalness` (collinear) |
 | `dissonance` | float | yes | 0–1 |
 | `mood_happy` / `mood_aggressive` / `mood_relaxed` / `mood_sad` | float | yes | 0–1 heuristic |
+| `aggression` | float | yes | Sonara fused perceptual aggression rank `[0,1]`; **not a probability**. Null can be a valid abstention |
+| `aggression_confidence` | float | yes | content/evidence support `[0,1]`; **not certainty about the rank** |
+| `aggression_forcefulness` | float | yes | diagnostic component `[0,1]` |
+| `aggression_harshness` | float | yes | diagnostic component `[0,1]` |
+| `aggression_tension` | float | yes | diagnostic aggression component `[0,1]`; distinct from library-relative `tension_index` |
+| `aggression_rhythm` | float | yes | diagnostic component `[0,1]` |
+| `aggression_model_id` | str | yes | exact model provenance; current comparable records use `aggression-rank-v2` |
 | `energy_level` | int | yes | coarse energy bucket 1–10 |
 | `key` | str | yes | e.g. `"A minor"` |
 | `camelot` | str | yes | Camelot code, e.g. `"8A"` |
@@ -64,6 +71,15 @@ be null (opt-in analysis that wasn't run, or a tag the file lacked).
 | `embedding_version` | int | yes | provenance |
 | `genre_model_id` | str | yes | exact Sonara genre-model identity; null when no model ran |
 | `vocalness_model_id` | str | yes | exact Sonara vocalness-model identity; current scans require `sonara-vocalness-v2` |
+
+The seven aggression fields above are the graph-schema-v3 addition. Compare
+ranks only under the exact same non-null `aggression_model_id`. A null score
+with a model id and complete bounded confidence/components is a responsible
+Sonara abstention, not a zero. `mood_aggressive` remains a separate heuristic;
+`tension_index` measures harmonic/musical tension relative to this library.
+Neither is a fallback for unavailable aggression. Pre-Sonara-0.3.1 caches need
+an audio rescan because the fused evidence cannot be reconstructed from the
+stored similarity embedding.
 
 ### Graph-derived Track properties (schema v2)
 

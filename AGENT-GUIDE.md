@@ -11,7 +11,7 @@ library mapped into [kglite](https://github.com/kkollsga/kglite) and served by
 - **`graph_overview`** — the node/edge inventory with live counts and sample
   ids. Call it first on an unfamiliar graph to see the library's shape.
 - **`music_library_profile`** — fast eligible counts, per-axis coverage, and
-  means before unusual curation requests.
+  p25/median/p75 distributions before unusual curation requests.
 
 Typed library operations are **`music_curation_policy`**,
 **`music_curate_playlist`**, **`music_audit_playlist`**,
@@ -39,6 +39,10 @@ contract supports:
 - positive/negative seed similarity, optional minimum similarity, and
   `lower|similar|any|higher` targets for energy, arousal, tension, and vocalness;
   optional per-feature margins require a measurable relative change;
+- explicit fused-aggression eligibility (`min_aggression` / `max_aggression`),
+  absolute target, and seed-relative target/margin. Every preset leaves these
+  neutral; profile the library distribution and exact model counts before
+  setting them;
 - include/exclude filters for artists, genres, detected styles, and decades,
   plus exact year bounds.
 
@@ -100,6 +104,13 @@ that wasn't run, or a tag the file lacked).
 | `instrumentalness` | float | yes | 0–1, exactly `1 − vocalness` (collinear — no added signal over `vocalness`) |
 | `dissonance` | float | yes | 0–1 |
 | `mood_happy` / `mood_aggressive` / `mood_relaxed` / `mood_sad` | float | yes | 0–1 heuristic v1 (see Pitfalls) |
+| `aggression` | float | yes | Sonara fused perceptual aggression rank `[0,1]`; **not a probability**. Null can be a valid abstention |
+| `aggression_confidence` | float | yes | content/evidence support `[0,1]`; **not certainty about the rank** |
+| `aggression_forcefulness` | float | yes | diagnostic component `[0,1]` |
+| `aggression_harshness` | float | yes | diagnostic component `[0,1]` |
+| `aggression_tension` | float | yes | diagnostic component `[0,1]`; distinct from library-relative `tension_index` |
+| `aggression_rhythm` | float | yes | diagnostic component `[0,1]` |
+| `aggression_model_id` | str | yes | exact model identity; current comparable ranks use `aggression-rank-v2` |
 | `energy_level` | int | yes | coarse energy bucket 1–10 |
 | `key` | str | yes | e.g. `"A minor"` |
 | `camelot` | str | yes | Camelot code, e.g. `"8A"` |
@@ -122,6 +133,14 @@ that wasn't run, or a tag the file lacked).
 | `embedding_version` | int | yes | provenance |
 | `genre_model_id` | str | yes | exact Sonara genre model identity; null when no genre model ran |
 | `vocalness_model_id` | str | yes | exact Sonara vocalness model identity; current scans require `sonara-vocalness-v2` |
+
+The seven aggression fields are the graph-schema-v3 addition. Compare ranks
+only when `aggression_model_id` matches exactly. A null score with complete
+bounded support/components is a valid abstention, not zero. Pre-Sonara-0.3.1
+caches need an audio rescan because the fused evidence cannot be reconstructed
+from the similarity embedding. `mood_aggressive` is a separate legacy
+heuristic, while `tension_index` is library-relative harmonic/musical tension;
+neither is a fallback for unavailable aggression.
 
 **P21 curve-derived features** (graph schema v2 — computed from the full
 analysis curves at build time):
@@ -314,12 +333,16 @@ for `curate_playlist`.
   meaningless. Add `WHERE t.bpm_confidence >= 0.6` before ordering or filtering by
   `bpm`, and for calm/acoustic sets order by `energy` or `duration_sec`, never
   `bpm`.
-- **`mood_aggressive` inverts on genuinely extreme material** (same heuristic
-  family): scalar-top "aggressive" tracks were Bros and Paula Abdul while
-  Slayer reads 0.25–0.34. For hard/metal asks lead with artist knowledge +
-  **`loudness_lufs`** (−9 to −11 = modern brickwalled extreme vs −15 vintage)
-  + `energy` + `onset_density`. `mood_happy`, by contrast, has proven a
-  trustworthy primary sorter for feel-good pool ranking.
+- **Use fused aggression, never `mood_aggressive`, for explicit aggression
+  intent.** The legacy mood heuristic can invert on extreme material; it is not
+  a compatibility fallback. Profile `aggression` coverage, p25/median/p75, and
+  `aggression_models`, then express intent through the typed policy. The score
+  is a rank, confidence is content/evidence support, and only an exact current
+  model id is comparable. Null score + complete diagnostics is a valid
+  abstention, but an active directive fails closed as `aggression_unknown`.
+  `aggression_tension` is one model diagnostic; `tension_index` remains a
+  separate harmonic/musical axis. Never hand-rank with loudness, energy, genre,
+  artist knowledge, or any combination when the library reports unknown.
 - **`genre_tag` is spotty real-world data** — it's whatever the file's ID3 tag
   says (or null). It is not an audio-derived classification. Expect missing,
   inconsistent, and idiosyncratic values (`"rap & hip-hop"` vs `"hip-hop"`).
@@ -394,6 +417,8 @@ for `curate_playlist`.
   such as `flow_smoothness` and `chord_entropy`. Treat `valence_index` as a
   ranking hint, then cross-check with `mood_*`, `energy`, and `vocalness` when
   diagnosing results. The curation policy owns the arc and duration bounds.
+  For explicit aggressive/non-aggressive intent, use the fused aggression
+  policy separately; do not infer it from mood or tension.
 - **Vibe-over-time recipe**: cross-tab Genre × Decade to find a vibe spanning
   eras, hold it with a tight `acousticness`/`energy` band, and read
   `avg(loudness_lufs)` per decade for production evolution. HARD RULE, now
@@ -440,6 +465,11 @@ The library audit—not an agent checklist—is the export gate. It enforces mus
 and canonical eligibility, quality/duration bounds, Track/Song deduplication,
 artist/album concentration and spacing, transitions, and requested arc. Inspect
 its metrics and the explanation before claiming quality.
+
+An explicit aggression directive also validates exact model provenance and all
+diagnostics. Missing, abstained, incompatible, or invalid evidence produces the
+hard `aggression_unknown` issue; explanation status preserves which case
+occurred. Report that evidence honestly instead of substituting another signal.
 
 Some human-facing claims remain useful diagnostics: an era request should be
 supported by `era_source = 'original_year'`; a genre-critical peak should belong

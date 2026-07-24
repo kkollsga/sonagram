@@ -1,6 +1,6 @@
 ---
 name: sonagram-playlist
-description: Create and evaluate playlists through Sonagram's deterministic library curation engine — "make me a work playlist", "a party mix", "songs like X but calmer". The agent translates intent into a typed preset/brief; Sonagram owns selection, ordering, audit, explanation, and storage.
+description: Create and evaluate playlists through Sonagram's deterministic library curation engine — "make me a work playlist", "a party mix", "songs like X but calmer", "aggressive music". The agent translates intent into a typed preset/brief; Sonagram owns profiling, selection, ordering, audit, explanation, and storage.
 ---
 
 # sonagram-playlist
@@ -104,9 +104,11 @@ sharpen playlist curation.
    minimum change); use eligibility include/exclude
    lists for artists, genres, styles, decades, and year bounds. Resolve the full
    preset with the MCP `music_curation_policy` tool, CLI `sonagram policy`, or
-   Python `sonagram.curation_policy()`. Use `music_library_profile` only when an
-   unusual brief genuinely needs calibration. Cypher is for exploring the
-   library, never for selecting or ordering a final playlist.
+   Python `sonagram.curation_policy()`. Use `music_library_profile` when an
+   unusual brief needs calibration, and always before inventing a numeric
+   aggression threshold: inspect coverage, p25/median/p75, and exact model
+   counts first. Cypher is for exploring the library, never for selecting or
+   ordering a final playlist.
 4. **Curate + store through the library**:
    call MCP `music_curate_playlist` with the typed brief and `store.name`, or use
    `sonagram curate --preset <preset> --tracks <N> --name "<request-derived name>" --description "<the user's ask>" --format json`.
@@ -135,6 +137,16 @@ sharpen playlist curation.
   `arousal_index`/`tension_index` targets and treats nullable `valence_index`
   conservatively. Use raw axes/curve features to explain or diagnose a result,
   not to hand-replace its IDs.
+- Aggression is an explicit, fail-closed policy signal. Every preset leaves it
+  neutral. Amend only typed fields: `eligibility.min_aggression` /
+  `max_aggression`, `targets.aggression`, or `targets.relative_aggression` with
+  `relative_aggression_margin`. `aggression` is a perceptual rank, not a
+  probability; `aggression_confidence` is content/evidence support, not model
+  certainty. Compare scores only when `aggression_model_id` is the exact current
+  model. A null score with complete diagnostics is a valid Sonara abstention,
+  but any explicit aggression directive must fail closed with
+  `aggression_unknown`. Never substitute `mood_aggressive`, `tension_index`,
+  energy, genre, or private agent ranking.
 - Unknown typed fields are rejected. Put constraints the graph cannot enforce
   (such as lyrical subject matter without lyrics) in
   `brief.unsupported_intents`; a structured non-exportable result is required.
