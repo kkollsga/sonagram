@@ -136,8 +136,8 @@ that wasn't run, or a tag the file lacked).
 
 The seven aggression fields are the graph-schema-v3 addition. Compare ranks
 only when `aggression_model_id` matches exactly. A null score with complete
-bounded support/components is a valid abstention, not zero. Sonara 0.3.3
-normalizes the aggression branch to a canonical 22.05 kHz lane, so rank-v3 is
+bounded support/components is a valid abstention, not zero. Sonara 0.3.4
+uses an optimized canonical 22.05 kHz aggression lane, so rank-v3 is
 comparable across source sample rates while other analysis stays in its native
 rate domain. Schema-5/rank-v2 caches need an audio rescan because rank-v3 cannot
 be reconstructed from the similarity embedding. `mood_aggressive` is a

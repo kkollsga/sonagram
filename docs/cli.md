@@ -30,8 +30,8 @@ cached analyses migrated without decoding audio, reused
 (hash match / stat match), failed (with per-file messages), and
 elapsed time.
 
-Sonara 0.3.3 supplies Sonagram's fused aggression evidence. Its rank-v3 model
-normalizes only the aggression analysis to a canonical 22.05 kHz lane, making
+Sonara 0.3.4 supplies Sonagram's fused aggression evidence. Its rank-v3 model
+uses an optimized canonical 22.05 kHz aggression lane, making
 the rank comparable across source sample rates while leaving the main analysis
 and its provenance in the source-rate domain. Schema-5/rank-v2 caches require
 an audio rescan: rank-v3 and its diagnostics cannot be regenerated from the

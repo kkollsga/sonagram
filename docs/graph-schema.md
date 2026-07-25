@@ -77,11 +77,11 @@ ranks only under the exact same non-null `aggression_model_id`. A null score
 with a model id and complete bounded confidence/components is a responsible
 Sonara abstention, not a zero. `mood_aggressive` remains a separate heuristic;
 `tension_index` measures harmonic/musical tension relative to this library.
-Neither is a fallback for unavailable aggression. Sonara 0.3.3 computes rank-v3
-in a canonical 22.05 kHz aggression lane while preserving the source-rate
-domain for the rest of the analysis. Schema-5/rank-v2 caches need an audio
-rescan because rank-v3 cannot be reconstructed from the stored similarity
-embedding.
+Neither is a fallback for unavailable aggression. Sonara 0.3.4 computes rank-v3
+in an optimized canonical 22.05 kHz aggression lane while preserving the
+source-rate domain for the rest of the analysis. Schema-5/rank-v2 caches need
+an audio rescan because rank-v3 cannot be reconstructed from the stored
+similarity embedding.
 
 ### Graph-derived Track properties (schema v2)
 
