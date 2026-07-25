@@ -4,60 +4,66 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
-## [Unreleased]
+## [0.2.1] - 2026-07-25
 
-Statistics-driven mood + quality layer plus song/version clustering (P21 Stages
-A, B, C). Pure mapper change — no scan, analysis, or CLI/status behaviour is
-touched; the graph is built from the curves already cached on disk. Graph schema
-moves to **v2**, so both golden digests were regenerated in this change (plain
-`9977d14b141a`, enriched `40709837f90c`).
+Library-owned playlist curation, richer graph statistics and version semantics,
+and hardened analysis/cache integration with Sonara 0.3.4.
 
 ### Graph schema
 
-Graph schema **v2**. `Track` gains fifteen new properties, all null when their
-source curve/scalar is absent (the existing null-property policy), except
-`is_canonical` which is non-null on every `Track`. A new `Song` node type groups
-version families:
-
-- **Stage A — curve-derived flat features** (computed per track from the cached
-  `loudness_curve` / `energy_curve` / `tempo_curve` / `chord_events` /
-  `segments`): `macro_dynamics` (loudness-curve population stdev),
-  `energy_arc_range` (`(p95−p5)/mean` of the energy curve),
-  `energy_builds_per_min` (maximal ≥8-sample rising runs per minute),
-  `flow_smoothness` (`1 − mean|Δ|/mean`, clamped), `chord_vocab` (distinct chord
-  labels), `chord_entropy` (Shannon bits of the chord-label distribution),
-  `chord_churn` (chord events per minute), `tempo_steadiness` (`1 − cv`,
-  clamped), `seg_density` (segments per minute).
-- **Stage B — percentile-calibrated composite axes** (library-relative, computed
-  after all raw features exist; each is a percentile rank in `[0,1]` of a
-  signed-z-score composite, tie-broken by `content_hash`): `arousal_index`,
-  `valence_index` (documented weak prior — literature R² 0.12–0.28),
-  `tension_index`, `recording_quality`, plus `quality_tier` (`high`/`mid`/`low`
-  by percentile thirds of `recording_quality`).
-- **Stage C — song/version layer.** Recordings that share a version key
-  `(artist_id, normalized_title)` are grouped: every group of two or more gets a
-  `Song` node (id `"<artist_id>|<normalized_title>"`, properties `title`,
-  `artist`, `n_versions`, `canonical_hash`) with a `Track -[:VERSION_OF]-> Song`
-  edge from each member. Singletons get no `Song`. Every `Track` gains a non-null
-  `is_canonical` bool — `true` unless the track is a non-best member of a version
-  group; within a group the best member is the highest `recording_quality` (nulls
-  lowest), tie-broken by `content_hash` — so `WHERE t.is_canonical` skips
-  duplicate/inferior takes. Grouping is title+artist only in this iteration
-  (embeddings/duration deferred; the grouping seam is structured for a later
-  splitter).
+Graph schema moves from **v1 to v3**. **Existing stored `.kgl` graphs must be
+rebuilt after upgrading.** `Track` gains curve-derived dynamics, rhythm and
+harmony features; library-relative arousal, valence, tension and recording
+quality axes; music/canonical flags; Last.fm recognition and popularity; and
+distinct Sonara aggression rank, evidence, component and model-provenance
+properties. The new `Song` node and `VERSION_OF` edge group recording versions,
+while `Source` and `Library` fingerprints now bind the analysis inputs. The
+intentional golden transitions and final digests are recorded in
+`GRAPH-GATE.md`.
 
 ### Added
 
-- `graph/features.rs` — pure statistics module for the P21 Stage-A curve
-  features and the Stage-B two-pass z-score + percentile composite axes, with
-  unit tests for every feature (including empty/constant/too-short curves) and a
-  determinism test for the percentile pass.
-- `graph/song.rs` — the P21 Stage-C version-grouping + canonical-selection
-  module, plus `normalize::normalized_title` (lowercase; strip
-  bracketed/parenthesized and trailing edition markers; fold Unicode
-  apostrophes). Unit-tested for title normalization, canonical selection (null
-  `recording_quality`, tie-break, singleton exclusion) and order-independence;
-  `tests/song_versions.rs` is the integration gate over a synthetic version set.
+- Deterministic, typed playlist curation with library profiles, presets and
+  policies, seed-relative intent, eligibility and diversity constraints,
+  sequencing/repair, independent audit and explanation, and provenance-aware
+  playlist storage.
+- Rust, CLI and Python curation APIs plus a typed MCP front end with modular,
+  live-revealed music skills for profiling, policy resolution, curation,
+  playlist auditing, storage and song-version inspection.
+- Statistics-driven music features and calibrated composite mood/quality axes,
+  with non-music excluded from calibration.
+- Song/version clustering with deterministic canonical selection, Last.fm
+  release recognition, and similarity-confirmed repair for explicit unknown-
+  artist tags.
+
+### Changed
+
+- Sonara 0.3.4 supplies sample-rate-stable `aggression-rank-v3-sr22050`
+  analysis. Aggression remains distinct from legacy mood, supports valid null
+  abstention, and is used only by explicit fail-closed curation intent.
+- Analysis freshness is schema/model aware. Compatible old records migrate
+  without decoding; stale aggression-model records reanalyse from audio.
+- KGLite integration now uses deterministic graph persistence, typed music MCP
+  registration and packaged skill revelation through the bundled server.
+- Agent and public guidance now routes final playlist selection, ordering and
+  audit through Sonagram instead of private agent heuristics.
+
+### Fixed
+
+- Graph builds use the scan index as authority, coalesce duplicate content
+  hashes before analysis, preserve usable enrichment records, and fingerprint
+  analysis/model provenance so stale graphs are detected reliably.
+- Canonical selection prefers recognized releases before recording quality;
+  artist aliases use MusicBrainz identity and unknown-artist regrouping cannot
+  cascade or absorb known covers.
+- The packaged MCP server resolves correctly from virtual environments, with
+  deterministic managed assets and fail-closed mutation behavior.
+
+### Performance
+
+- Sonara 0.3.4 reduces bounded 21-track cold aggression overhead to **5.38%**
+  (gate: at most 10%); an unchanged rescan analyses zero tracks and reuses all
+  cached records. The private full library was not part of the release gate.
 
 ## [0.2.0] - 2026-07-17
 

@@ -22,7 +22,7 @@ import tempfile
 import sonagram
 from sonagram.cli import main
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 assert sonagram.__version__ == VERSION, (
     f"expected {VERSION}, got {sonagram.__version__!r}"
@@ -80,7 +80,7 @@ else:
     script = [sys.executable, "-c", shim]
     how = "cli.main subprocess (console script not installed by maturin develop)"
 
-# --version prints "sonagram 0.2.0" to stdout and exits 0.
+# --version prints "sonagram 0.2.1" to stdout and exits 0.
 res = run(script, "--version")
 assert res.returncode == 0, f"--version rc={res.returncode}; stderr={res.stderr!r}"
 assert VERSION in res.stdout, f"--version stdout missing {VERSION}: {res.stdout!r}"
