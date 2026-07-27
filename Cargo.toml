@@ -27,8 +27,8 @@ ureq = { version = "2", features = ["json"] }
 # persistence). See
 # dev-docs/designs/upstream-contracts.md.
 sonara = { version = "0.3.4", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.14.4", path = "../KGLite/crates/kglite", default-features = false }
-kglite-mcp-server = { version = "0.14.4", path = "../KGLite/crates/kglite-mcp-server", default-features = false }
+kglite = { version = "0.15.1", path = "../KGLite/crates/kglite", default-features = false }
+kglite-mcp-server = { version = "0.15.1", path = "../KGLite/crates/kglite-mcp-server", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
