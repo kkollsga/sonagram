@@ -21,7 +21,7 @@ jobs:
           - os: macos-latest
           - os: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -35,12 +35,12 @@ jobs:
       # siblings out INSIDE it and move them up to where ../sonara &
       # ../KGLite path deps expect them.
       - name: Check out sonara
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: kkollsga/sonara
           path: _siblings/sonara
       - name: Check out kglite
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: kkollsga/kglite
           path: _siblings/KGLite

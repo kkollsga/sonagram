@@ -38,7 +38,7 @@ jobs:
       should_publish: ${{ steps.check.outputs.should_publish }}
       version: ${{ steps.check.outputs.version }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Check pyproject version against PyPI
         id: check
         run: |
@@ -64,7 +64,7 @@ jobs:
     name: Pre-publish gate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -77,12 +77,12 @@ jobs:
       # siblings out INSIDE it and move them up to where ../sonara &
       # ../KGLite path deps expect them.
       - name: Check out sonara
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: kkollsga/sonara
           path: _siblings/sonara
       - name: Check out kglite
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: kkollsga/kglite
           path: _siblings/KGLite
@@ -136,14 +136,14 @@ jobs:
           - os: macos-latest
             target: x86_64-apple-darwin
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Check out sonara
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: kkollsga/sonara
           path: _siblings/sonara
       - name: Check out kglite
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: kkollsga/kglite
           path: _siblings/KGLite
@@ -169,7 +169,7 @@ jobs:
             -v ${{ github.workspace }}/../KGLite:${{ github.workspace }}/../KGLite
 
       - name: Upload wheel artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: wheel-${{ matrix.target }}
           path: dist/*.whl
@@ -184,17 +184,17 @@ jobs:
       id-token: write
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       # The sdist build runs cargo metadata, which must resolve the ../sonara
       # and ../KGLite path deps (maturin bundles path dependencies into the
       # sdist, making it self-contained for end users).
       - name: Check out sonara
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: kkollsga/sonara
           path: _siblings/sonara
       - name: Check out kglite
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: kkollsga/kglite
           path: _siblings/KGLite
@@ -211,7 +211,7 @@ jobs:
           args: -m sonagram-python/Cargo.toml --out dist
 
       - name: Collect wheels
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: wheel-*
           path: dist
