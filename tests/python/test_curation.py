@@ -20,6 +20,13 @@ with tempfile.TemporaryDirectory() as tmp:
         data = json.loads(source.read_text())
         content_hash = data["source"]["content_hash"]
         data["analysis"]["provenance"]["vocalness_model_id"] = "sonara-vocalness-v2"
+        # The frozen fixtures were captured at analysis schema 4; sonara 0.3.4
+        # reports 6, and `load_records` keeps only records the current build
+        # considers fresh. These tests seed the cache and call build() directly
+        # (no scan(), so nothing migrates them), so stamp the current schema —
+        # the same normalization the Rust fixture helpers do. Literal for the
+        # same reason as above: an upstream bump should fail loudly.
+        data["analysis"]["provenance"]["schema_version"] = 6
         (analysis / f"{content_hash}.json").write_text(json.dumps(data, indent=2) + "\n")
         index[data["source"]["path"]] = {
             "size": data["source"]["file_size"],

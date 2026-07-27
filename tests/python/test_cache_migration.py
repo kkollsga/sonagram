@@ -49,7 +49,11 @@ with tempfile.TemporaryDirectory() as tmp:
     assert report["failed"] == [], report
 
     migrated = json.loads((analysis / "cached-hash.json").read_text())
-    assert migrated["analysis"]["provenance"]["schema_version"] == 4
+    # Migration stamps the CURRENT sonara ANALYSIS_SCHEMA_VERSION (6 as of
+    # sonara 0.3.4). Pinned as a literal on purpose, mirroring the Rust
+    # `contract_sonara` gate: an upstream bump must fail loudly here rather
+    # than pass silently against whatever the constant happens to be.
+    assert migrated["analysis"]["provenance"]["schema_version"] == 6
     assert (
         migrated["analysis"]["provenance"]["vocalness_model_id"]
         == "sonara-vocalness-v2"

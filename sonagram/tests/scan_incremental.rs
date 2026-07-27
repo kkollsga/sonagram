@@ -120,6 +120,16 @@ fn load_a_fixture() -> AnalysisRecord {
     let mut record = AnalysisRecord::from_json(&text).expect("parse fixture");
     record.analysis.provenance.vocalness_model_id =
         Some(sonagram::scan::VOCALNESS_MODEL_ID.to_string());
+    // `scan::is_fresh` compares BOTH the vocalness model id (stamped above) and
+    // the analysis schema version, each by exact equality. This helper's whole
+    // contract is "a record the CURRENT build considers fresh", so it must
+    // normalize both. Leaving the schema unstamped was latent: it only bit when
+    // sonara moved ANALYSIS_SCHEMA_VERSION 4 -> 6 in 0.3.4, at which point every
+    // fixture-derived record read as stale and 18 tests across scan_incremental,
+    // p19_bootstrap, cli_status and status_probe failed at once. Tests that
+    // deliberately want an OLD schema override this field explicitly after
+    // calling the helper, so stamping here is safe.
+    record.analysis.provenance.schema_version = sonara::analyze::ANALYSIS_SCHEMA_VERSION;
     record
 }
 
@@ -294,6 +304,12 @@ fn schema_three_cache_migrates_exactly_from_stored_features() {
 fn schema_four_cache_without_model_provenance_is_migrated() {
     let expected = load_a_fixture();
     let mut unstamped = expected.clone();
+    // State the old-schema premise explicitly, as the schema-3 cases do.
+    // `migrate_cached_record` only accepts `schema_version` 3 | 4, and this test
+    // is named for schema 4, so it must say so rather than inherit whatever the
+    // frozen fixture happened to be captured under (that implicit coupling is
+    // what broke when sonara moved the constant 4 -> 6).
+    unstamped.analysis.provenance.schema_version = 4;
     unstamped.analysis.provenance.vocalness_model_id = None;
     unstamped.analysis.vocalness = Some(0.0);
     unstamped.analysis.instrumentalness = Some(1.0);
@@ -313,6 +329,8 @@ fn schema_four_cache_without_model_provenance_is_migrated() {
 fn schema_four_v1_cache_migrates_to_v2_without_audio() {
     let expected = load_a_fixture();
     let mut v1 = expected.clone();
+    // Same as above: the schema-4 premise is stated, not inherited.
+    v1.analysis.provenance.schema_version = 4;
     v1.analysis.provenance.vocalness_model_id =
         Some("sonara-vocalness-v1".to_string());
     v1.analysis.vocalness = Some(0.0);

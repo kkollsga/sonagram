@@ -532,13 +532,30 @@ fn contract_sonara() {
     assert_eq!(vocalness_model.embedding_version(), SIMILARITY_VERSION);
 
     // WHY: each Track carries `analysis_schema_version`. If sonara bumps its
-    // schema, previously captured fixtures no longer describe the same analysis
-    // semantics — the goldens must be recaptured, not silently trusted. Pinned to
-    // 3 as of sonara 0.2.4 (vocalness v2 inversion fix + acousticness/danceability
-    // recalibration + new bpm_confidence); a future bump must recapture the 15
-    // fixtures + regen the golden in the same commit.
+    // schema, previously captured fixtures may no longer describe the same
+    // analysis semantics — the goldens must be re-examined, not silently trusted.
+    //
+    // Pinned to 6 as of sonara 0.3.4. This is the first bump where the fixtures
+    // did NOT need re-capturing, and the reason is worth recording: both 4->5 and
+    // 5->6 are aggression-only (sonara's own notes — v5 "stored aggression values
+    // require an audio rescan", v6 "bundled aggression values are evaluated at the
+    // model's canonical 22.05 kHz sample rate. Main-pass fields and frame
+    // provenance stay in the caller-requested sample-rate domain"). Sonagram does
+    // not enable sonara's opt-in `aggression` feature, every aggression field in
+    // analyze.rs is `#[cfg(feature = "aggression")]`, and the new `mood.rs` is a
+    // documented bit-for-bit move of heuristic v1 out of `perceptual.rs`. So a
+    // default-feature sonara 0.3.4 reproduces the frozen fixtures' main-pass
+    // values exactly, and the only golden movement is `build_input_fingerprint`,
+    // which mixes this constant in by design.
+    //
+    // The fixtures therefore still honestly record `schema_version = 4` — the
+    // version they were actually captured under. Do not rewrite that field
+    // without real audio; fabricated provenance is worse than a stale number.
+    //
+    // A future bump that touches MAIN-PASS analysis must recapture the 15
+    // fixtures + regen the goldens in the same commit.
     assert_eq!(
-        ANALYSIS_SCHEMA_VERSION, 4,
+        ANALYSIS_SCHEMA_VERSION, 6,
         "sonara ANALYSIS_SCHEMA_VERSION changed — recapture fixtures + goldens"
     );
 

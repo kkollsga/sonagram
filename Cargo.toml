@@ -20,9 +20,10 @@ rayon = "1.11"
 ureq = { version = "2", features = ["json"] }
 
 # Upstreams — consumed as cargo libraries, read-only here. `version` must be
-# satisfiable by the LOCAL path checkout: sonara 0.2.9 (validated v2 vocalness
-# model, fail-closed public analysis/model contracts, complete recoverable MP3
-# probing, deterministic chord summaries), kglite 0.15.0 (durability levels
+# satisfiable by the LOCAL path checkout: sonara 0.3.4 (opt-in `aggression`
+# feature, which sonagram does NOT enable — so analysis output is bit-for-bit
+# the 0.2.9 heuristic v1; the 4->6 ANALYSIS_SCHEMA_VERSION bump is
+# aggression-only), kglite 0.15.0 (durability levels
 # `full`/`normal`/`off` + `sync()`, real integrity constraints with typed
 # ConstraintViolationError, locked schemas rejecting unknown node labels, and
 # the columnar-REMOVE resurrection fix). See
@@ -33,7 +34,7 @@ ureq = { version = "2", features = ["json"] }
 # for the published sdist, not decorative. It is also the only tripwire that
 # stops a sibling release from silently changing what sonagram builds against;
 # when it fires, bump it deliberately rather than widening it.
-sonara = { version = ">=0.2.9, <0.3", path = "../sonara/sonara" }
+sonara = { version = ">=0.3.4, <0.4", path = "../sonara/sonara" }
 kglite = { version = "0.15.0", path = "../KGLite/crates/kglite", default-features = false }
 kglite-mcp-server = { version = "0.15.0", path = "../KGLite/crates/kglite-mcp-server", default-features = false }
 
