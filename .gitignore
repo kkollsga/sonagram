@@ -1,5 +1,5 @@
 # Rust
-/target/
+/target
 **/*.rs.bk
 
 # Docs (Sphinx / Read the Docs build output)
