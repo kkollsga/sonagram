@@ -22,12 +22,20 @@ ureq = { version = "2", features = ["json"] }
 # Upstreams — consumed as cargo libraries, read-only here. `version` must be
 # satisfiable by the LOCAL path checkout: sonara 0.2.9 (validated v2 vocalness
 # model, fail-closed public analysis/model contracts, complete recoverable MP3
-# probing, deterministic chord summaries), kglite 0.14.4 (deterministic
-# embedding persistence). See
+# probing, deterministic chord summaries), kglite 0.15.0 (durability levels
+# `full`/`normal`/`off` + `sync()`, real integrity constraints with typed
+# ConstraintViolationError, locked schemas rejecting unknown node labels, and
+# the columnar-REMOVE resurrection fix). See
 # dev-docs/designs/upstream-contracts.md.
+#
+# NOTE: these are path deps into sibling working trees, and `cargo package`
+# rewrites them to registry deps using `version` — so the pin is load-bearing
+# for the published sdist, not decorative. It is also the only tripwire that
+# stops a sibling release from silently changing what sonagram builds against;
+# when it fires, bump it deliberately rather than widening it.
 sonara = { version = ">=0.2.9, <0.3", path = "../sonara/sonara" }
-kglite = { version = "0.14.4", path = "../KGLite/crates/kglite", default-features = false }
-kglite-mcp-server = { version = "0.14.4", path = "../KGLite/crates/kglite-mcp-server", default-features = false }
+kglite = { version = "0.15.0", path = "../KGLite/crates/kglite", default-features = false }
+kglite-mcp-server = { version = "0.15.0", path = "../KGLite/crates/kglite-mcp-server", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;

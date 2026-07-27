@@ -33,8 +33,12 @@ classifiers = [
     "Topic :: Multimedia :: Sound/Audio :: Analysis",
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
+# The installed `kglite` wheel is the READER for `.kgl` files this package's
+# Rust extension WRITES (see sonagram-python/src/lib.rs — the bytes handoff).
+# The floor must therefore be >= the kglite the extension links, or an older
+# reader is asked to parse a newer writer's file. Bumped with the Rust pin.
 dependencies = [
-    "kglite>=0.14.4",
+    "kglite>=0.15.0",
 ]
 
 # Bundled Rust console script. The CLI is linked into this wheel's existing
