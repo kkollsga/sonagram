@@ -1,0 +1,27 @@
+# Local development against the sibling checkouts, WITHOUT shipping them.
+#
+# This lives here rather than in Cargo.toml deliberately. maturin makes an
+# sdist self-contained by vendoring every path dependency, so declaring
+# `path = "../KGLite/..."` in [workspace.dependencies] made the published
+# sdist carry 258 files of KGLite and 65 of sonara -- ~72% of a 2.1 MB
+# artifact -- and compile a working-tree snapshot of kglite 0.14.5 while the
+# manifest declared 0.14.4.
+#
+# Moving the redirect into Cargo.toml's own [patch.crates-io] does NOT work:
+# that section is part of the manifest, so it ships inside the sdist and a
+# consumer without the siblings fails with "unable to update ../KGLite".
+# `.cargo/config.toml` is build configuration, not package content -- it is
+# not packaged, so published builds resolve kglite/sonara from crates.io while
+# a local checkout still compiles against the siblings.
+#
+# sonara is NOT redirected here: it is not published to crates.io at all, so
+# its path dependency stays in Cargo.toml and it is still vendored into the
+# sdist. That is load-bearing, not waste -- without it the sdist cannot
+# build. Publishing sonara to crates.io would let it move here too.
+#
+# The trade this makes deliberate: the versions declared in Cargo.toml are now
+# load-bearing rather than decorative. Building against unreleased
+# kglite/sonara changes means releasing those first.
+[patch.crates-io]
+kglite = { path = "../KGLite/crates/kglite" }
+kglite-mcp-server = { path = "../KGLite/crates/kglite-mcp-server" }
