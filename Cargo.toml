@@ -20,16 +20,19 @@ rayon = "1.11"
 ureq = { version = "2", features = ["json"] }
 
 # Upstreams — consumed as cargo libraries, read-only here. `version` must be
-# satisfiable by the LOCAL path checkout: sonara 0.3.4 (validated v2 vocalness
+# satisfiable by the LOCAL path checkout: sonara 0.3.5 (validated v2 vocalness
 # model, sample-rate-robust aggression-rank-v3 analysis with evidence support,
 # stable public analysis/model behavior, complete recoverable MP3 probing,
-# deterministic chord summaries), kglite 0.15.1 (deterministic embedding
+# deterministic chord summaries; 0.3.5 itself is release/CI-only and
+# analysis-identical to 0.3.4), kglite 0.15.3 (deterministic embedding
 # persistence, declared MSRVs on every published crate, disk graphs with an
-# empty node type load back). See
+# empty node type load back, a build that resolves and compiles at its own
+# declared dependency floors, and a CI-verified sdist so a platform without a
+# kglite wheel can still install one from source). See
 # dev-docs/designs/upstream-contracts.md.
-sonara = { version = "0.3.4", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.15.1", default-features = false }
-kglite-mcp-server = { version = "0.15.1", default-features = false }
+sonara = { version = "0.3.5", path = "../sonara/sonara", features = ["aggression"] }
+kglite = { version = "0.15.3", default-features = false }
+kglite-mcp-server = { version = "0.15.3", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
