@@ -16,6 +16,12 @@ name: Release
 # these platforms need NO Rust toolchain; the sdist remains the fallback for
 # everything else.
 #
+# SDIST: built and PROVEN in its own `build-sdist` job, not inside `publish`.
+# It is the only artifact that resolves kglite from crates.io instead of the
+# sibling ../KGLite checkout, and that property is invisible to every other CI
+# context — so the job asserts it (scripts/verify_sdist.sh) and then actually
+# pip-installs and imports the tarball before anything is uploaded.
+#
 # Idempotent + version-gated: the `version` job reads pyproject.toml, checks
 # PyPI, and every expensive job skips when that version already exists — so a
 # re-push of `main` at an unchanged version is a safe no-op.
@@ -175,19 +181,27 @@ jobs:
           path: dist/*.whl
           if-no-files-found: error
 
-  publish:
-    needs: [version, test, build-wheels]
+  # The sdist is the fallback for every platform without a prebuilt wheel, and
+  # it is the ONLY artifact whose kglite comes from crates.io rather than from
+  # this repo's sibling checkouts. That property (see PR #9 and
+  # .cargo/config.toml) is invisible to every other CI context, so it gets
+  # built, asserted, and actually installed here — before publish, not inside
+  # it. Runs in parallel with build-wheels.
+  build-sdist:
+    name: Sdist + install probe
+    needs: [version]
     if: needs.version.outputs.should_publish == 'true'
     runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-      contents: write
+    # The probe compiles the whole extension under lto = "fat" +
+    # codegen-units = 1 (symphonia, rustfft, ndarray, rubato, ferricml, kglite,
+    # pyo3). 15-30 min is normal.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-      # The sdist build runs cargo metadata, which must resolve the ../sonara
-      # and ../KGLite path deps (maturin bundles path dependencies into the
-      # sdist, making it self-contained for end users).
+      # BOTH siblings are required to BUILD the sdist even though only sonara
+      # ends up inside it: sonara is a path dep maturin vendors, and the
+      # .cargo/config.toml [patch.crates-io] entries force cargo to load
+      # ../KGLite while resolving. A checkout of sonagram alone fails here.
       - name: Check out sonara
         uses: actions/checkout@v7
         with:
@@ -204,13 +218,119 @@ jobs:
           mv _siblings/KGLite ../KGLite
           rmdir _siblings
 
-      - name: Build sdist
-        uses: PyO3/maturin-action@v1
+      - uses: actions/setup-python@v6
         with:
-          command: sdist
-          args: -m sonagram-python/Cargo.toml --out dist
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Collect wheels
+      - name: Build sdist
+        id: sdist
+        run: |
+          set -euo pipefail
+          pip install maturin
+          maturin sdist -m sonagram-python/Cargo.toml --out dist
+          # Glob rather than reconstruct the filename: PEP 625 normalisation
+          # means the tarball name is maturin's to decide, not ours.
+          shopt -s nullglob
+          found=(dist/*.tar.gz)
+          if [ "${#found[@]}" -ne 1 ]; then
+            echo "expected exactly one sdist in dist/, got ${#found[@]}: ${found[*]:-<none>}" >&2
+            exit 1
+          fi
+          echo "path=$(pwd)/${found[0]}" >> "$GITHUB_OUTPUT"
+
+      # Asserts the PR #9 contract (no vendored kglite, sonara vendored, no
+      # .cargo/config.toml packaged, cargo metadata resolves kglite from
+      # crates.io) rather than merely "the tarball exists". The script unpacks
+      # strictly outside the workspace — see its header for why that matters.
+      - name: Verify sdist contract
+        run: ./scripts/verify_sdist.sh "${{ steps.sdist.outputs.path }}"
+
+      # Installing a .tar.gz already builds from source. Deliberately NOT
+      # --no-binary :all: — sonagram runtime-depends on the kglite PyPI wheel,
+      # and :all: would compile that from source too: 10+ extra minutes spent
+      # testing kglite's sdist instead of ours.
+      #
+      # Everything happens under $RUNNER_TEMP, never under $GITHUB_WORKSPACE:
+      # cargo discovers .cargo/config.toml by walking CWD upward, so a build or
+      # an import inside the workspace would find this repo's [patch.crates-io]
+      # and quietly resolve kglite from ../KGLite — passing the probe for
+      # exactly the wrong reason.
+      - name: Install the sdist into a clean venv and probe it
+        env:
+          EXPECTED_VERSION: ${{ needs.version.outputs.version }}
+          SDIST: ${{ steps.sdist.outputs.path }}
+        run: |
+          set -euo pipefail
+          PROBE="$(mktemp -d "${RUNNER_TEMP}/sdist-probe.XXXXXXXX")"
+          case "$PROBE/" in
+            "$GITHUB_WORKSPACE"/*)
+              echo "probe dir $PROBE is inside the workspace — refusing" >&2
+              exit 1 ;;
+          esac
+          cd "$PROBE"
+          python -m venv venv
+          ./venv/bin/pip install --upgrade pip
+          ./venv/bin/pip install --no-binary sonagram "$SDIST"
+
+          EMPTY="$PROBE/empty-library"
+          mkdir -p "$EMPTY"
+
+          ./venv/bin/python - <<'PY'
+          import os
+          import sonagram
+
+          expected = os.environ["EXPECTED_VERSION"]
+          assert sonagram.__version__ == expected, (
+              f"sdist install reports {sonagram.__version__!r}, expected {expected!r}"
+          )
+          # Pure in-memory, no I/O and no music library needed.
+          policy = sonagram.curation_policy("focus")
+          assert policy, "curation_policy('focus') returned nothing"
+          print(f"import OK: sonagram {sonagram.__version__}")
+          PY
+
+          # Console scripts prove the [project.scripts] wiring reaches
+          # _sonagram._run_cli. Exit codes match tests/python/test_cli.py.
+          ./venv/bin/sonagram --version
+          echo "sonagram --version -> 0"
+          ./venv/bin/sonagram skill show > /dev/null
+          echo "sonagram skill show -> 0"
+          set +e
+          ./venv/bin/sonagram status "$EMPTY" > /dev/null 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 2 ]; then
+            echo "sonagram status <uncached dir> should exit 2, got $rc" >&2
+            exit 1
+          fi
+          echo "sonagram status <uncached dir> -> 2"
+
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@v7
+        with:
+          # `wheel-` prefix on purpose: publish collects everything matching
+          # `wheel-*` with merge-multiple, so this needs no change there.
+          name: wheel-sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [version, test, build-wheels, build-sdist]
+    if: needs.version.outputs.should_publish == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # Wheels from build-wheels plus the sdist from build-sdist (uploaded as
+      # `wheel-sdist`). This job builds nothing — it needs no Rust toolchain and
+      # no sibling checkouts, which keeps the job holding `id-token: write` as
+      # small as it can be.
+      - name: Collect distributions
         uses: actions/download-artifact@v8
         with:
           pattern: wheel-*
