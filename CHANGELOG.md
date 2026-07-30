@@ -4,6 +4,47 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.2] - 2026-07-30
+
+A packaging and upstream-hygiene release: the source distribution no longer
+carries a stale copy of KGLite, the embedded KGLite moves to 0.15.3, and the
+version a user reads in the docs is now mechanically tied to the one sonagram
+actually builds against.
+
+### Graph schema
+
+No change. Graph schema stays at **v3** and both canonical digests are
+byte-identical to 0.2.1 — **stored `.kgl` graphs do not need rebuilding.** The
+KGLite 0.15.3 move touches only error-message wording and Cypher planner
+warnings, neither of which feeds the graph.
+
+### Fixed
+
+- The source distribution shipped a vendored snapshot of KGLite that could be
+  newer than the version the manifest declared (0.14.5 vendored against a 0.14.4
+  declaration in 0.2.1). Installing from source now resolves KGLite from
+  crates.io, which also cuts the sdist from ~2.1 MB to ~872 KB.
+- The error shown when the `kglite` package is missing told users to
+  `pip install kglite>=0.14`, a version this project's own metadata rejects. It
+  now names the real floor.
+
+### Changed
+
+- Embedded KGLite moves from 0.15.1 to **0.15.3**, raising the `kglite` runtime
+  requirement to `>=0.15.3`. Upstream changes are internal (a `did_you_mean`
+  edit-distance fix, unknown-label warnings inside `CALL`/`EXISTS`/`UNION`
+  blocks, and corrected dependency floors); no API sonagram uses moved.
+
+### Added
+
+- A version-consistency test binds the embedded KGLite version to a single
+  source — the workspace manifest — and fails with the full list of any
+  documentation, metadata or error-string site that disagrees. It caught two
+  statements that had silently gone stale.
+- Release CI now builds the source distribution, verifies it carries no vendored
+  KGLite, then installs it into a clean environment and exercises the package
+  and its console scripts before anything is published.
+
 ## [0.2.1] - 2026-07-25
 
 Library-owned playlist curation, richer graph statistics and version semantics,
