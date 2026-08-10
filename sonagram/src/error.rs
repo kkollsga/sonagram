@@ -3,8 +3,9 @@
 //! sonagram owns the mapping and schema; mapping/schema failures are ours.
 //! An error that originates in analysis surfaces as [`SonagramError::Audio`]
 //! (from `sonara`), and one that originates in the graph engine as
-//! [`SonagramError::Graph`]. Per `dev-docs/designs/upstream-contracts.md`,
-//! upstream defects are reproduced and routed, not absorbed silently.
+//! [`SonagramError::Graph`]. Both upstreams are read-only from here: an
+//! upstream defect is reproduced and routed to the project that owns it, never
+//! absorbed silently behind a mapping-layer workaround.
 
 use thiserror::Error;
 

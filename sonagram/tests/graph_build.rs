@@ -366,7 +366,12 @@ fn embedding_store_is_present_and_shaped() {
     assert_eq!(store.metric.as_deref(), Some("euclidean"));
 }
 
-/// Not a gate — writes a human-readable graph summary to `dev-docs/temp/`.
+/// Not a gate — writes a human-readable graph summary under cargo's per-target
+/// temp dir (`CARGO_TARGET_TMPDIR`), or `$SONAGRAM_DUMP_DIR` when set. The path
+/// is printed on stderr. Deliberately *not* a fixed in-repo directory: the dump
+/// is a throwaway diagnostic, and a test that writes into the working tree
+/// leaves an artifact with no owner and no purge.
+///
 /// Run with: `cargo test -p sonagram --test graph_build -- --ignored dump`.
 #[test]
 #[ignore = "diagnostic dump, not an assertion"]
@@ -417,7 +422,9 @@ fn dump_graph_stats() {
     )
     .unwrap();
 
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dev-docs/temp");
+    let dir = std::env::var_os("SONAGRAM_DUMP_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("p4-graph-dump.txt");
     std::fs::write(&path, &out).unwrap();

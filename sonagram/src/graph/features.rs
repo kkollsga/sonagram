@@ -3,8 +3,7 @@
 //!
 //! The graph historically ingested only the scalar summaries of each analysis
 //! record and discarded the curves (energy/loudness/tempo/chords/segments), where
-//! recording quality and musical character actually live (see
-//! `dev-docs/designs/p21-stats-mood-quality.md`). This module reads those curves
+//! recording quality and musical character actually live. This module reads those curves
 //! — already cached on disk for every track — at build time and projects them
 //! into flat, queryable `Track` properties. It is a **pure mapper**: no scan or
 //! analysis is re-run.

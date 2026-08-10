@@ -6,8 +6,10 @@
 //!
 //! It is a **graph builder over two upstreams**: `sonara` supplies per-track
 //! analysis (typed `TrackAnalysis`), `kglite` supplies the graph engine.
-//! sonagram owns the **mapping and the schema** between them and nothing else
-//! (see `dev-docs/designs/upstream-contracts.md`).
+//! sonagram owns the **mapping and the schema** between them and nothing else:
+//! analysis stays in `sonara`, and storage, Cypher and embeddings stay in
+//! `kglite`. A fix that wants to live upstream is routed there rather than
+//! growing a shadow implementation here.
 //!
 //! ## Module map
 //! The modules below are stubs filled in as the phased build lands:

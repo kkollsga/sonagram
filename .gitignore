@@ -66,9 +66,11 @@ desktop.ini
 CLAUDE.md
 AGENTS.md
 
-# Local dev working folder + cross-project coordination channel — never committed.
-# See dev-docs/README.md and inbox/README.md for the canonical layouts, and the
-# dev-docs-cleanup / read-inbox skills for the auto-purged time-boxed tiers within.
+# Local dev working folder + cross-project coordination channel — never
+# committed. Each has a README describing its own layout, and the
+# dev-docs-cleanup / read-inbox skills own the auto-purged tiers within.
+# Nothing tracked may cite a path inside either: the citation would outlive the
+# file it names and become a dangling instruction.
 /dev-docs/
 /inbox/
 

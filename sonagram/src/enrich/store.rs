@@ -34,9 +34,10 @@ use crate::{Result, SonagramError};
 /// a way that invalidates previously written `lastfm/*.json`.
 pub const ENRICH_VERSION: u32 = 1;
 
-/// A single similar track from `track.getSimilar`, **keeping the match weight**
-/// (the prototype dropped it at store time — the bug P12 must not re-import;
-/// see `dev-docs/plans/prototype-adoption.md` §A). `match_weight` is Last.fm's
+/// A single similar track from `track.getSimilar`, **keeping the match weight**.
+/// The prototype this layer replaced dropped the weight at store time, which
+/// flattened every similarity edge to equal strength and cannot be recovered
+/// afterwards — so the field is load-bearing, not decorative. `match_weight` is Last.fm's
 /// `[0, 1]` co-listening similarity; it becomes the `CROWD_SIMILAR` edge `score`.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SimilarTrack {

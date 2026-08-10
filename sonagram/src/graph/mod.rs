@@ -1,5 +1,6 @@
 //! Graph mapping v1: deterministic projection of analysis records into a
-//! `kglite` `DirGraph`, following `dev-docs/designs/graph-schema.md`.
+//! `kglite` `DirGraph`. This module *is* the schema; `GRAPH-GATE.md` and the
+//! committed goldens pin what it produces.
 //!
 //! sonagram owns exactly this mapping. Given a set of [`AnalysisRecord`]s (the
 //! frozen fixtures or a live scan's cache) it builds one `Track` node per audio
