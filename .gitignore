@@ -56,8 +56,13 @@ secrets.toml
 Thumbs.db
 desktop.ini
 
-# Claude / AI tooling (local only)
+# Agent instruction trees (local only, both harnesses). `CLAUDE.md` +
+# `.claude/skills/` are the authority; `AGENTS.md` + `.agents/skills/` are
+# generated adapters. All four are ignored deliberately: they are local
+# working instructions, and tracking a generated adapter would put a
+# regeneration artifact under review on every conventions edit.
 .claude/
+/.agents/
 CLAUDE.md
 AGENTS.md
 
