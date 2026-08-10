@@ -24,15 +24,20 @@ ureq = { version = "2", features = ["json"] }
 # model, sample-rate-robust aggression-rank-v3 analysis with evidence support,
 # stable public analysis/model behavior, complete recoverable MP3 probing,
 # deterministic chord summaries; 0.3.5 itself is release/CI-only and
-# analysis-identical to 0.3.4), kglite 0.15.3 (deterministic embedding
-# persistence, declared MSRVs on every published crate, disk graphs with an
-# empty node type load back, a build that resolves and compiles at its own
-# declared dependency floors, and a CI-verified sdist so a platform without a
-# kglite wheel can still install one from source). See
-# dev-docs/designs/upstream-contracts.md.
+# analysis-identical to 0.3.4), kglite 0.15.8 (a saved graph records its
+# storage mode and reopens in it, `storage=` converts an existing graph
+# instead of refusing, the servers' `--storage` applies to an existing graph,
+# boot-validated Cypher recipe catalogs for MCP agents, a write loop no longer
+# evicts other graphs' cached query plans, and negative numeric literals parse
+# in MATCH inline property maps).
+#
+# The upstream contract these pins encode — what we consume, what we must never
+# depend on, and what we owe each upstream in notification — is recorded in the
+# repo's local design notes; `sonagram/tests/version_consistency.rs` is the
+# mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.5", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.15.3", default-features = false }
-kglite-mcp-server = { version = "0.15.3", default-features = false }
+kglite = { version = "0.15.8", default-features = false }
+kglite-mcp-server = { version = "0.15.8", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
