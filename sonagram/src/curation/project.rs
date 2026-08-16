@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use kglite::api::cypher::resolve_node_property;
-use kglite::api::{DirGraph, NodeData, Value};
+use kglite::api::{DirGraph, NodeView, Value};
 use sonara::similarity::{SIMILARITY_SCALE, WEIGHTS};
 
 use super::types::{AggressionEvidence, AggressionStatus};
@@ -11,7 +11,7 @@ pub(crate) const TRACK: &str = "Track";
 
 pub(crate) fn graph_build_input_fingerprint(graph: &DirGraph) -> Option<String> {
     let index = graph.type_indices.get("Library")?.to_vec().into_iter().next()?;
-    let node = graph.get_node(index)?;
+    let node = graph.node_view(index)?;
     prop_string(node, "build_input_fingerprint", graph)
 }
 
@@ -71,13 +71,13 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
         let Some((source, target)) = stable.edge_endpoints(edge_idx) else {
             continue;
         };
-        let Some(source_node) = stable.node_weight(source) else {
+        let Some(source_node) = graph.node_view(source) else {
             continue;
         };
         if source_node.node_type_str(&graph.interner) != TRACK {
             continue;
         }
-        let Some(target_node) = stable.node_weight(target) else {
+        let Some(target_node) = graph.node_view(target) else {
             continue;
         };
         let Some(target_id) = value_string(target_node.id().into_owned()) else {
@@ -122,7 +122,7 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
         .get(&(TRACK.to_string(), "similarity".to_string()));
     let mut out = Vec::with_capacity(indices.len());
     for idx in indices {
-        let node = graph.get_node(idx).ok_or_else(|| {
+        let node = graph.node_view(idx).ok_or_else(|| {
             SonagramError::Graph(format!("Track index {} has no node", idx.index()))
         })?;
         let id = prop_string(node, "content_hash", graph)
@@ -178,7 +178,7 @@ impl TrackCandidate {
     }
 }
 
-fn aggression_evidence(node: &NodeData, graph: &DirGraph) -> AggressionEvidence {
+fn aggression_evidence(node: NodeView<'_>, graph: &DirGraph) -> AggressionEvidence {
     let score = aggression_number(node, "aggression", graph);
     let confidence = aggression_number(node, "aggression_confidence", graph);
     let forcefulness = aggression_number(node, "aggression_forcefulness", graph);
@@ -242,7 +242,7 @@ impl NumericEvidence {
     }
 }
 
-fn aggression_number(node: &NodeData, name: &str, graph: &DirGraph) -> NumericEvidence {
+fn aggression_number(node: NodeView<'_>, name: &str, graph: &DirGraph) -> NumericEvidence {
     match resolve_node_property(node, name, graph) {
         Value::Null => NumericEvidence::Missing,
         Value::Float64(value) if value.is_finite() => NumericEvidence::Finite(value),
@@ -288,7 +288,7 @@ pub(crate) fn group_key(value: Option<&str>) -> String {
     value.map(str::trim).filter(|s| !s.is_empty()).map(str::to_lowercase).unwrap_or_default()
 }
 
-fn prop_string(node: &NodeData, name: &str, graph: &DirGraph) -> Option<String> {
+fn prop_string(node: NodeView<'_>, name: &str, graph: &DirGraph) -> Option<String> {
     value_string(resolve_node_property(node, name, graph))
 }
 
@@ -299,7 +299,7 @@ fn value_string(value: Value) -> Option<String> {
     }
 }
 
-fn prop_f64(node: &NodeData, name: &str, graph: &DirGraph) -> Option<f64> {
+fn prop_f64(node: NodeView<'_>, name: &str, graph: &DirGraph) -> Option<f64> {
     match resolve_node_property(node, name, graph) {
         Value::Float64(value) if value.is_finite() => Some(value),
         Value::Int64(value) => Some(value as f64),
@@ -307,14 +307,14 @@ fn prop_f64(node: &NodeData, name: &str, graph: &DirGraph) -> Option<f64> {
     }
 }
 
-fn prop_i64(node: &NodeData, name: &str, graph: &DirGraph) -> Option<i64> {
+fn prop_i64(node: NodeView<'_>, name: &str, graph: &DirGraph) -> Option<i64> {
     match resolve_node_property(node, name, graph) {
         Value::Int64(value) => Some(value),
         _ => None,
     }
 }
 
-fn prop_bool(node: &NodeData, name: &str, graph: &DirGraph) -> Option<bool> {
+fn prop_bool(node: NodeView<'_>, name: &str, graph: &DirGraph) -> Option<bool> {
     match resolve_node_property(node, name, graph) {
         Value::Boolean(value) => Some(value),
         _ => None,

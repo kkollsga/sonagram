@@ -118,7 +118,7 @@ fn canonical_graph_string(g: &kglite::api::DirGraph) -> String {
         type_counts.insert(tname.clone(), refs.len());
         for ni in refs.to_vec() {
             let node = g
-                .get_node(ni)
+                .node_view(ni)
                 .unwrap_or_else(|| panic!("type_indices points at missing node in {tname}"));
             let id = canon(&node.id());
             id_by_index.insert(ni.index(), id.clone());
@@ -138,7 +138,8 @@ fn canonical_graph_string(g: &kglite::api::DirGraph) -> String {
     }
 
     // ── Edge-type counts (via get_edge_type_counts) ─────────────────────────
-    let edge_counts: BTreeMap<String, usize> = g.get_edge_type_counts().into_iter().collect();
+    let edge_counts: BTreeMap<String, usize> =
+        g.get_edge_type_counts().iter().map(|(ty, n)| (ty.clone(), *n)).collect();
     s.push_str("## edge_type_counts\n");
     for (ty, n) in &edge_counts {
         s.push_str(&format!("{ty}\t{n}\n"));
@@ -163,8 +164,8 @@ fn canonical_graph_string(g: &kglite::api::DirGraph) -> String {
     for e in sg.edge_indices() {
         let edge = sg.edge_weight(e).expect("edge weight");
         let (si, ti) = sg.edge_endpoints(e).expect("edge endpoints");
-        let sn = sg.node_weight(si).expect("edge source node");
-        let tn = sg.node_weight(ti).expect("edge target node");
+        let sn = g.node_view(si).expect("edge source node");
+        let tn = g.node_view(ti).expect("edge target node");
         let props: BTreeMap<String, String> = edge
             .properties_cloned(&g.interner)
             .into_iter()

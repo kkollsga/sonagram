@@ -232,7 +232,7 @@ fn load_via_kglite(py: Python<'_>, path: &Path) -> PyResult<Py<PyAny>> {
     let kglite = py.import("kglite").map_err(|e| {
         PyRuntimeError::new_err(format!(
             "sonagram.build()/scan_and_build() return a kglite.KnowledgeGraph, but \
-             importing `kglite` failed ({e}). Install it: `pip install kglite>=0.15.8`."
+             importing `kglite` failed ({e}). Install it: `pip install kglite>=0.16.2`."
         ))
     })?;
     let graph = kglite.call_method1("load", (path.to_string_lossy().as_ref(),))?;

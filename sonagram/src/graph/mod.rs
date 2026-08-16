@@ -603,13 +603,12 @@ fn listener_percentile_rank(
 /// Persist a built graph to `path` as a `.kgl` file.
 ///
 /// Delegates to `kglite::api::io::save_graph`, which runs the mandatory
-/// `prepare_save` + `enable_columnar` before writing (skipping them drops all
-/// properties on reload).
+/// `prepare_save` before writing (skipping it drops all properties on reload).
 pub fn save(graph: &mut Arc<DirGraph>, path: &Path) -> Result<()> {
     let p = path
         .to_str()
         .ok_or_else(|| SonagramError::Graph(format!("non-UTF-8 path: {}", path.display())))?;
-    kglite::api::io::save_graph(graph, p).map_err(SonagramError::Graph)
+    kglite::api::io::save_graph(graph, p).map_err(|e| SonagramError::Graph(e.to_string()))
 }
 
 /// Pre-weight a raw 48-dim similarity embedding so kglite's Euclidean metric

@@ -64,7 +64,7 @@ fn prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> Value {
     let ni = graph
         .lookup_by_id_readonly(node_type, &Value::String(id.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {id}"));
-    let node = graph.get_node(ni).unwrap();
+    let node = graph.node_view(ni).unwrap();
     resolve_node_property(node, prop, graph)
 }
 
@@ -80,8 +80,8 @@ fn crowd_similar_stats(g: &DirGraph) -> (usize, usize, usize, usize) {
             continue;
         }
         let (si, ti) = sg.edge_endpoints(e).unwrap();
-        let sn = sg.node_weight(si).unwrap();
-        let tn = sg.node_weight(ti).unwrap();
+        let sn = g.node_view(si).unwrap();
+        let tn = g.node_view(ti).unwrap();
         let s_type = sn.node_type_str(&g.interner);
         let t_type = tn.node_type_str(&g.interner);
         let props = edge.properties_cloned(&g.interner);
@@ -282,8 +282,8 @@ fn crowd_similar_edges_weighted_and_attributed_and_dropped() {
             continue;
         }
         let (si, ti) = sg.edge_endpoints(e).unwrap();
-        let s = sg.node_weight(si).unwrap().id().into_owned();
-        let t = sg.node_weight(ti).unwrap().id().into_owned();
+        let s = g.node_view(si).unwrap().id().into_owned();
+        let t = g.node_view(ti).unwrap().id().into_owned();
         if s == Value::String(ABBA_HASH.to_string())
             && t == Value::String(BRUNO_HASH.to_string())
         {

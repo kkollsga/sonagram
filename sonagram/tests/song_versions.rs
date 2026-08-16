@@ -87,7 +87,7 @@ fn str_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> String {
     let ni = graph
         .lookup_by_id_readonly(node_type, &Value::String(id.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {id}"));
-    let node = graph.get_node(ni).unwrap();
+    let node = graph.node_view(ni).unwrap();
     match resolve_node_property(node, prop, graph) {
         Value::String(s) => s,
         other => panic!("{prop} is not String: {other:?}"),
@@ -98,7 +98,7 @@ fn int_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> i64 {
     let ni = graph
         .lookup_by_id_readonly(node_type, &Value::String(id.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {id}"));
-    let node = graph.get_node(ni).unwrap();
+    let node = graph.node_view(ni).unwrap();
     match resolve_node_property(node, prop, graph) {
         Value::Int64(v) => v,
         other => panic!("{prop} is not Int64: {other:?}"),
@@ -109,7 +109,7 @@ fn bool_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> bool {
     let ni = graph
         .lookup_by_id_readonly(node_type, &Value::String(id.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {id}"));
-    let node = graph.get_node(ni).unwrap();
+    let node = graph.node_view(ni).unwrap();
     match resolve_node_property(node, prop, graph) {
         Value::Boolean(v) => v,
         other => panic!("{prop} is not Boolean: {other:?}"),
@@ -120,7 +120,7 @@ fn float_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> f64 {
     let ni = graph
         .lookup_by_id_readonly(node_type, &Value::String(id.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {id}"));
-    let node = graph.get_node(ni).unwrap();
+    let node = graph.node_view(ni).unwrap();
     match resolve_node_property(node, prop, graph) {
         Value::Float64(v) => v,
         other => panic!("{prop} is not Float64: {other:?}"),
@@ -137,11 +137,11 @@ fn version_of_edges(graph: &DirGraph) -> Vec<(String, String)> {
             continue;
         }
         let (si, ti) = sg.edge_endpoints(e).unwrap();
-        let src = match sg.node_weight(si).unwrap().id().into_owned() {
+        let src = match graph.node_view(si).unwrap().id().into_owned() {
             Value::String(s) => s,
             other => panic!("track id not a string: {other:?}"),
         };
-        let tgt = match sg.node_weight(ti).unwrap().id().into_owned() {
+        let tgt = match graph.node_view(ti).unwrap().id().into_owned() {
             Value::String(s) => s,
             other => panic!("song id not a string: {other:?}"),
         };

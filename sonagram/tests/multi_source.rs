@@ -46,7 +46,7 @@ fn node_count(graph: &DirGraph, node_type: &str) -> usize {
 
 fn str_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> Option<String> {
     let ni = graph.lookup_by_id_readonly(node_type, &Value::String(id.to_string()))?;
-    let node = graph.get_node(ni)?;
+    let node = graph.node_view(ni)?;
     match resolve_node_property(node, prop, graph) {
         Value::String(s) if !s.is_empty() => Some(s),
         _ => None,
@@ -63,11 +63,11 @@ fn from_source_edges(graph: &DirGraph) -> Vec<(String, String)> {
             continue;
         }
         let (si, ti) = sg.edge_endpoints(e).unwrap();
-        let src = match sg.node_weight(si).unwrap().id().into_owned() {
+        let src = match graph.node_view(si).unwrap().id().into_owned() {
             Value::String(s) => s,
             other => panic!("track id not a string: {other:?}"),
         };
-        let tgt = match sg.node_weight(ti).unwrap().id().into_owned() {
+        let tgt = match graph.node_view(ti).unwrap().id().into_owned() {
             Value::String(s) => s,
             other => panic!("source id not a string: {other:?}"),
         };

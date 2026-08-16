@@ -227,7 +227,7 @@ fn status_reports_graph_stale_transitions() {
 
 fn source_fingerprint(graph: &DirGraph, id: &str) -> Option<String> {
     let ni = graph.lookup_by_id_readonly("Source", &Value::String(id.to_string()))?;
-    let node = graph.get_node(ni)?;
+    let node = graph.node_view(ni)?;
     match resolve_node_property(node, "scan_fingerprint", graph) {
         Value::String(s) if !s.is_empty() => Some(s),
         _ => None,
@@ -236,7 +236,7 @@ fn source_fingerprint(graph: &DirGraph, id: &str) -> Option<String> {
 
 fn string_property(graph: &DirGraph, node_type: &str, id: &str, property: &str) -> Option<String> {
     let ni = graph.lookup_by_id_readonly(node_type, &Value::String(id.to_string()))?;
-    let node = graph.get_node(ni)?;
+    let node = graph.node_view(ni)?;
     match resolve_node_property(node, property, graph) {
         Value::String(value) if !value.is_empty() => Some(value),
         _ => None,

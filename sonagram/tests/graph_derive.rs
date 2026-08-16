@@ -57,8 +57,8 @@ fn edges_of(
             continue;
         }
         let (si, ti) = sg.edge_endpoints(e).expect("endpoints");
-        let src = id_string(sg.node_weight(si).expect("src").id());
-        let tgt = id_string(sg.node_weight(ti).expect("tgt").id());
+        let src = id_string(graph.node_view(si).expect("src").id());
+        let tgt = id_string(graph.node_view(ti).expect("tgt").id());
         let props: HashMap<String, Value> = edge.properties_cloned(&graph.interner);
         out.push((src, tgt, props));
     }
@@ -170,7 +170,7 @@ fn style_ids(graph: &DirGraph) -> Vec<String> {
         .map(|r| r.to_vec())
         .unwrap_or_default()
         .into_iter()
-        .map(|ni| id_string(graph.get_node(ni).unwrap().id()))
+        .map(|ni| id_string(graph.node_view(ni).unwrap().id()))
         .collect();
     ids.sort();
     ids
@@ -198,7 +198,7 @@ fn styles_are_two_on_fixtures_under_adaptive_threshold() {
     let lib = graph
         .lookup_by_id_readonly("Library", &Value::String("fixtures".to_string()))
         .expect("Library node present");
-    let thr = match resolve_node_property(graph.get_node(lib).unwrap(), "style_threshold", &graph) {
+    let thr = match resolve_node_property(graph.node_view(lib).unwrap(), "style_threshold", &graph) {
         Value::Float64(v) => v,
         other => panic!("style_threshold not Float64: {other:?}"),
     };
@@ -406,7 +406,7 @@ fn style_table_dump() {
         .unwrap_or_default()
         .into_iter()
         .map(|ni| {
-            let node = graph.get_node(ni).unwrap();
+            let node = graph.node_view(ni).unwrap();
             let name = match resolve_node_property(node, "name", &graph) {
                 Value::String(s) => s,
                 _ => "?".to_string(),
@@ -438,7 +438,7 @@ fn style_table_dump() {
     // The adaptive threshold this build chose, stamped on the Library root.
     let chosen = graph
         .lookup_by_id_readonly("Library", &Value::String("subset".to_string()))
-        .and_then(|ni| match resolve_node_property(graph.get_node(ni).unwrap(), "style_threshold", &graph) {
+        .and_then(|ni| match resolve_node_property(graph.node_view(ni).unwrap(), "style_threshold", &graph) {
             Value::Float64(v) => Some(v),
             _ => None,
         })
@@ -470,7 +470,7 @@ fn style_profiles_are_shaped_and_deterministic() {
         let ni_a = a
             .lookup_by_id_readonly("Style", &Value::String(id.to_string()))
             .unwrap_or_else(|| panic!("style {id} present"));
-        let node_a = a.get_node(ni_a).unwrap();
+        let node_a = a.node_view(ni_a).unwrap();
 
         // name: template string with 2–3 dash-segments — the middle
         // acoustic/electric term (three-way) is omitted for mid-acousticness
@@ -494,7 +494,7 @@ fn style_profiles_are_shaped_and_deterministic() {
         let ni_b = b
             .lookup_by_id_readonly("Style", &Value::String(id.to_string()))
             .unwrap();
-        let ex_b = resolve_node_property(b.get_node(ni_b).unwrap(), "exemplar_titles", &b);
+        let ex_b = resolve_node_property(b.node_view(ni_b).unwrap(), "exemplar_titles", &b);
         assert_eq!(ex_a, ex_b, "exemplar_titles deterministic for {id}");
 
         // n_tracks matches the IN_STYLE member count for this style.

@@ -366,7 +366,7 @@ pub fn entries_from_graph(
                 continue;
             }
         };
-        let node = match graph.get_node(node_idx) {
+        let node = match graph.node_view(node_idx) {
             Some(n) => n,
             None => {
                 missing.push(id.clone());
@@ -505,11 +505,7 @@ fn id_from_value(value: &Value) -> Option<String> {
 }
 
 /// Read a non-empty string property from a node, or `None`.
-fn prop_string(
-    node: &kglite::api::NodeData,
-    prop: &str,
-    graph: &DirGraph,
-) -> Option<String> {
+fn prop_string(node: kglite::api::NodeView<'_>, prop: &str, graph: &DirGraph) -> Option<String> {
     match resolve_node_property(node, prop, graph) {
         Value::String(s) if !s.is_empty() => Some(s),
         _ => None,
@@ -517,7 +513,7 @@ fn prop_string(
 }
 
 /// Read a numeric property from a node as `f32`, or `None`.
-fn prop_f32(node: &kglite::api::NodeData, prop: &str, graph: &DirGraph) -> Option<f32> {
+fn prop_f32(node: kglite::api::NodeView<'_>, prop: &str, graph: &DirGraph) -> Option<f32> {
     match resolve_node_property(node, prop, graph) {
         Value::Float64(v) => Some(v as f32),
         Value::Int64(v) => Some(v as f32),

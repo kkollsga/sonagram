@@ -113,16 +113,14 @@ fn graph_with_aggression(
     let by_id: BTreeMap<String, _> = indices
         .into_iter()
         .map(|index| {
-            let node = graph.get_node(index).unwrap();
+            let node = graph.node_view(index).unwrap();
             let Value::String(id) = resolve_node_property(node, "content_hash", &graph) else {
                 panic!("Track content_hash must be a string")
             };
             (id, index)
         })
         .collect();
-    let mut interner = graph.interner.clone();
-    for index in by_id.values() {
-        let node = graph.get_node_mut(*index).unwrap();
+    for index in by_id.values().copied() {
         for name in [
             "aggression_model_id",
             "aggression",
@@ -132,21 +130,16 @@ fn graph_with_aggression(
             "aggression_tension",
             "aggression_rhythm",
         ] {
-            node.remove_property(name);
+            graph.remove_node_property(index, name);
         }
     }
     for (id, evidence) in evidence {
         let index = by_id[&id];
-        let node = graph.get_node_mut(index).unwrap();
         if let Some(model_id) = evidence.model_id {
-            node.set_property(
-                "aggression_model_id",
-                Value::String(model_id.into()),
-                &mut interner,
-            );
+            graph.set_node_property(index, "aggression_model_id", Value::String(model_id.into()));
         }
         if let Some(score) = evidence.score {
-            node.set_property("aggression", Value::Float64(score), &mut interner);
+            graph.set_node_property(index, "aggression", Value::Float64(score));
         }
         for (name, value) in [
             ("aggression_confidence", evidence.diagnostics[0]),
@@ -156,11 +149,10 @@ fn graph_with_aggression(
             ("aggression_rhythm", evidence.diagnostics[4]),
         ] {
             if let Some(value) = value {
-                node.set_property(name, Value::Float64(value), &mut interner);
+                graph.set_node_property(index, name, Value::Float64(value));
             }
         }
     }
-    graph.interner = interner;
     std::sync::Arc::new(graph)
 }
 

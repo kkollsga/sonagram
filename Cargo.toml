@@ -24,20 +24,23 @@ ureq = { version = "2", features = ["json"] }
 # model, sample-rate-robust aggression-rank-v3 analysis with evidence support,
 # stable public analysis/model behavior, complete recoverable MP3 probing,
 # deterministic chord summaries; 0.3.5 itself is release/CI-only and
-# analysis-identical to 0.3.4), kglite 0.15.8 (a saved graph records its
-# storage mode and reopens in it, `storage=` converts an existing graph
-# instead of refusing, the servers' `--storage` applies to an existing graph,
-# boot-validated Cypher recipe catalogs for MCP agents, a write loop no longer
-# evicts other graphs' cached query plans, and negative numeric literals parse
-# in MATCH inline property maps).
+# analysis-identical to 0.3.4), kglite 0.16.2 (node properties are columnar on
+# every construction path, so a freshly built graph and a reloaded one are the
+# same shape and `save()` is a consolidation pass a settled graph skips rather
+# than a mandatory rebuild; the `.kgl` container moves to v6, a deliberate
+# one-way break — 0.16 reads v5 and v6, engines at 0.15.14 and earlier refuse
+# a v6 file by version number; `NodeView` (via `DirGraph::node_view`) is the
+# only route that resolves a raw node's identity and properties, since the
+# `NodeData` fields now carry the columnar sentinel on memory graphs; and
+# `io::save_graph` reports a typed `SaveError` instead of a string).
 #
 # The upstream contract these pins encode — what we consume, what we must never
 # depend on, and what we owe each upstream in notification — is recorded in the
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.5", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.15.8", default-features = false }
-kglite-mcp-server = { version = "0.15.8", default-features = false }
+kglite = { version = "0.16.2", default-features = false }
+kglite-mcp-server = { version = "0.16.2", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
