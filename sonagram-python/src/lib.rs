@@ -235,8 +235,43 @@ fn load_via_kglite(py: Python<'_>, path: &Path) -> PyResult<Py<PyAny>> {
              importing `kglite` failed ({e}). Install it: `pip install kglite>=0.16.2`."
         ))
     })?;
-    let graph = kglite.call_method1("load", (path.to_string_lossy().as_ref(),))?;
-    Ok(graph.unbind())
+    kglite
+        .call_method1("load", (path.to_string_lossy().as_ref(),))
+        .map(|graph| graph.unbind())
+        .map_err(|e| {
+            // The load may be one the caller never wrote: `build()` hands the
+            // graph over through an invisible temp `.kgl`. A wheel older than
+            // the container format we write reports a bare FileFormatError with
+            // no hint that the *installed wheel* is the thing to fix — so name
+            // the version skew and the upgrade here.
+            let installed: Option<String> = kglite
+                .getattr("__version__")
+                .ok()
+                .and_then(|v| v.extract().ok());
+            PyRuntimeError::new_err(kglite_load_failure_message(
+                installed.as_deref(),
+                &e.to_string(),
+            ))
+        })
+}
+
+/// The actionable message for a failed `kglite.load()` of a graph *we* just
+/// wrote: keeps the original error text, names the installed wheel version, and
+/// gives the one command that fixes the common cause (a stale pip `kglite`
+/// whose container format predates ours).
+///
+/// Pure string formatting so it is unit-testable without a Python interpreter.
+fn kglite_load_failure_message(installed_version: Option<&str>, original_error: &str) -> String {
+    let installed = match installed_version {
+        Some(v) => format!("the installed `kglite` wheel is {v}"),
+        None => "the installed `kglite` wheel does not report a version".to_string(),
+    };
+    format!(
+        "sonagram built the graph, but handing it to `kglite` failed: {original_error}. \
+         sonagram writes `.kgl` files that need kglite>=0.16.2, and {installed} — \
+         an older wheel cannot read that container format. \
+         Upgrade it: `pip install -U 'kglite>=0.16.2'`."
+    )
 }
 
 /// Build the `dict` form of an [`EnrichReport`] — per-entity fetched/skipped/
@@ -712,6 +747,33 @@ mod tests {
         assert_eq!(library_label(Path::new("Music")), "Music");
         // Trailing slash still yields the final component.
         assert_eq!(library_label(Path::new("/a/b/Music/")), "Music");
+    }
+
+    #[test]
+    fn kglite_load_failure_names_the_wheel_version_and_the_upgrade() {
+        let msg = kglite_load_failure_message(
+            Some("0.15.3"),
+            "FileFormatError: File uses .kgl container version 6",
+        );
+        // The original error survives — the user still sees what kglite said.
+        assert!(
+            msg.contains("File uses .kgl container version 6"),
+            "original error text dropped: {msg}"
+        );
+        // …and the two things that make it actionable.
+        assert!(msg.contains("0.15.3"), "installed wheel version missing: {msg}");
+        assert!(
+            msg.contains("pip install -U 'kglite>=0.16.2'"),
+            "upgrade command missing: {msg}"
+        );
+    }
+
+    #[test]
+    fn kglite_load_failure_survives_a_wheel_with_no_version_attribute() {
+        let msg = kglite_load_failure_message(None, "boom");
+        assert!(msg.contains("boom"));
+        assert!(msg.contains("does not report a version"), "{msg}");
+        assert!(msg.contains("pip install -U 'kglite>=0.16.2'"), "{msg}");
     }
 
     #[test]

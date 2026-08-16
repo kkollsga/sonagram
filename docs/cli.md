@@ -185,7 +185,8 @@ adds:
 | `sources[].graph_current` | bool\|null | compatibility alias for `graph_current_for_cache` |
 | `graph` | string\|null | the configured graph path |
 | `graph_present` | bool | the graph file exists |
-| `graph_stale` | bool | the graph must be rebuilt (missing, or a source drifted) |
+| `graph_stale` | bool | the graph must be rebuilt (missing, unreadable, or a source drifted) |
+| `graph_error` | string\|null | set when the file is there but this build cannot read it |
 
 A stale graph is **action-worthy: exit `1`** even when every cache is fresh
 (status `needs_build`) — the fix is a `sonagram build` (~1s from cache). The

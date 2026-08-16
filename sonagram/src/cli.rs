@@ -1527,14 +1527,15 @@ fn cmd_status(args: &[String]) -> i32 {
             // cached-analysis fingerprint can be compared to the currently
             // usable cache. Source scan failures remain a separate status axis:
             // a graph can be current for every analyzable record while files
-            // still need retrying.
+            // still need retrying. Three outcomes, kept distinct: no file at
+            // all, a file this build cannot read (an unreadable graph is NOT
+            // "no graph" — the user needs the load error, not a build hint), and
+            // a loaded graph.
             let graph_path = cfg.resolved_graph().ok();
-            let graph = graph_path
-                .as_ref()
-                .filter(|p| p.exists())
-                .and_then(|p| p.to_str())
-                .and_then(|s| kglite::api::io::load_file(s).ok());
-            let graph_present = graph.is_some();
+            let graph_state = load_status_graph(graph_path.as_deref());
+            let graph = graph_state.loaded();
+            let graph_present = !matches!(graph_state, GraphState::Missing);
+            let graph_error = graph_state.error();
 
             let mut worst = 0i32;
             let mut any_graph_stale = false;
@@ -1551,7 +1552,7 @@ fn cmd_status(args: &[String]) -> i32 {
                 worst = worst.max(code);
                 // Per-source graph freshness for the usable analysis cache.
                 // `None` when there is no graph to compare against.
-                let graph_current: Option<bool> = graph.as_ref().map(|g| {
+                let graph_current: Option<bool> = graph.map(|g| {
                     let src_abs = abs_string(src);
                     match graph_source_build_fingerprint(g.as_ref(), &src_abs) {
                         // Source present and stamped → compare exact fresh cache
@@ -1581,10 +1582,10 @@ fn cmd_status(args: &[String]) -> i32 {
                 }
             }
 
-            // A missing graph (with sources configured) needs a build; so does any
-            // stale Source. Graph-staleness is action-worthy (exit 1) even when the
-            // caches are fully fresh.
-            let graph_stale = !graph_present || any_graph_stale;
+            // A missing *or unreadable* graph (with sources configured) needs a
+            // build; so does any stale Source. Graph-staleness is action-worthy
+            // (exit 1) even when the caches are fully fresh.
+            let graph_stale = graph.is_none() || any_graph_stale;
             let final_exit = worst.max(if graph_stale { 1 } else { 0 });
             let overall = if worst != 0 {
                 status_label(worst)
@@ -1602,6 +1603,7 @@ fn cmd_status(args: &[String]) -> i32 {
                     "graph": graph_path.as_ref().map(|p| p.to_string_lossy().into_owned()),
                     "graph_present": graph_present,
                     "graph_stale": graph_stale,
+                    "graph_error": graph_error,
                     "status": overall,
                     "exit_code": final_exit,
                 });
@@ -1617,16 +1619,69 @@ fn cmd_status(args: &[String]) -> i32 {
                     }
                 }
                 println!("=> worst: {}", status_label(worst));
-                if !graph_present {
-                    println!("=> graph: not built yet — run `sonagram build`");
-                } else if graph_stale {
-                    println!("=> graph: STALE — run `sonagram build` (~1s from cache)");
-                } else {
-                    println!("=> graph: current");
-                }
+                println!("{}", graph_status_line(&graph_state, graph_stale));
             }
             final_exit
         }
+    }
+}
+
+/// What `status` found at the configured graph path. The unreadable case used
+/// to be folded into "missing" by an `.ok()`, which reported an existing but
+/// broken `.kgl` as "not built yet" — a wrong diagnosis that sends the user to
+/// `build` without ever showing them the load error.
+enum GraphState {
+    /// No graph configured, or nothing at the configured path.
+    Missing,
+    /// A file is there, but this build could not load it (container-format
+    /// skew, truncation, corruption). Carries the engine's own error text.
+    Unreadable(String),
+    Loaded(std::sync::Arc<kglite::api::DirGraph>),
+}
+
+impl GraphState {
+    /// The graph, if it actually loaded.
+    fn loaded(&self) -> Option<&std::sync::Arc<kglite::api::DirGraph>> {
+        match self {
+            GraphState::Loaded(g) => Some(g),
+            _ => None,
+        }
+    }
+
+    /// The load error text, if the file was there but unreadable.
+    fn error(&self) -> Option<&str> {
+        match self {
+            GraphState::Unreadable(e) => Some(e.as_str()),
+            _ => None,
+        }
+    }
+}
+
+/// Probe the configured graph path into a [`GraphState`].
+fn load_status_graph(path: Option<&Path>) -> GraphState {
+    let Some(path) = path.filter(|p| p.exists()) else {
+        return GraphState::Missing;
+    };
+    let Some(s) = path.to_str() else {
+        return GraphState::Unreadable("graph path is not valid UTF-8".to_string());
+    };
+    match kglite::api::io::load_file(s) {
+        Ok(g) => GraphState::Loaded(g),
+        Err(e) => GraphState::Unreadable(one_line(&e.to_string()).to_string()),
+    }
+}
+
+/// The trailing `=> graph:` summary line, in the surrounding status voice.
+fn graph_status_line(state: &GraphState, graph_stale: bool) -> String {
+    match state {
+        GraphState::Missing => "=> graph: not built yet — run `sonagram build`".to_string(),
+        GraphState::Unreadable(e) => format!(
+            "=> graph: exists but this build cannot read it: {e} — run `sonagram build` to rewrite it"
+        ),
+        GraphState::Loaded(_) if graph_stale => {
+            "=> graph: STALE — run `sonagram build` (~1s from cache)".to_string()
+        }
+        GraphState::Loaded(_) => "=> graph: current".to_string(),
     }
 }
 
@@ -2051,6 +2106,51 @@ mod tests {
             deleted_in_index: deleted,
             has_cache,
         }
+    }
+
+    #[test]
+    fn an_unreadable_graph_is_not_reported_as_a_missing_one() {
+        let dir = std::env::temp_dir().join(format!(
+            "sonagram-graphstate-{}-{:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("music.kgl");
+
+        // 1. Nothing there at all → Missing, and the build hint.
+        let missing = load_status_graph(Some(&path));
+        assert!(matches!(missing, GraphState::Missing));
+        assert_eq!(
+            graph_status_line(&missing, true),
+            "=> graph: not built yet — run `sonagram build`"
+        );
+
+        // 2. A file that exists but no kglite can read → Unreadable, carrying
+        //    the engine's own error text (this is the case the old `.ok()`
+        //    silently reported as "not built yet").
+        std::fs::write(&path, b"this is not a .kgl container").unwrap();
+        let broken = load_status_graph(Some(&path));
+        let err = match &broken {
+            GraphState::Unreadable(e) => e.clone(),
+            _ => panic!("garbage bytes must not load as a graph"),
+        };
+        assert!(!err.is_empty(), "the load error text must be surfaced");
+        let line = graph_status_line(&broken, true);
+        assert!(
+            line.contains("exists but this build cannot read it"),
+            "unreadable graph must not read as missing: {line}"
+        );
+        assert!(line.contains(&err), "the load error must reach the user: {line}");
+        assert!(
+            !line.contains("not built yet"),
+            "unreadable is not missing: {line}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
