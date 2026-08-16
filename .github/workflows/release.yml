@@ -91,6 +91,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: kkollsga/kglite
+          ref: v0.16.2
           path: _siblings/KGLite
       - name: Place siblings beside the workspace
         run: |
@@ -152,6 +153,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: kkollsga/kglite
+          ref: v0.16.2
           path: _siblings/KGLite
       - name: Place siblings beside the workspace
         shell: bash
@@ -211,6 +213,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: kkollsga/kglite
+          ref: v0.16.2
           path: _siblings/KGLite
       - name: Place siblings beside the workspace
         run: |
