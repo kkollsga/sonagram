@@ -83,7 +83,11 @@ verbatim — never re-sorted.
 Pass **exactly one** selector:
 
 - `--cypher '<query>'` — a read-only query whose result is a `Track`-node or
-  `content_hash` column (`RETURN t.content_hash` or `RETURN t`).
+  `content_hash` column (`RETURN t.content_hash` or `RETURN t`). It is worth
+  giving that column a name — end the query with `RETURN t.content_hash AS
+  content_hash`. Otherwise sonagram has to work out for itself which column
+  holds the songs, and that guess follows the order you happened to list things
+  in.
 - `--ids <hash1,hash2,...>` — comma-separated content hashes directly.
 
 Pass **at least one** destination (both are allowed together):

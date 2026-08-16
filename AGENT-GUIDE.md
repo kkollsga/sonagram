@@ -290,6 +290,17 @@ RETURN b.title, b.artist_name, b.bpm, b.energy, e.transition
 ORDER BY b.energy LIMIT 10
 ```
 
+**Curation queries: name the id column.** The four archetypes above are for
+*reading*. A query you hand to `sonagram playlist --cypher` (or
+`export_m3u(cypher=...)`) has to return Track ids, and the resolver takes the
+first column named `content_hash` or `id` (bare or in the qualified
+`t.content_hash` form). Only when no column is named that does it fall back to
+**position** — the first column whose first row is a Track node or a string that
+resolves to a `Track`. That fallback depends on the order your `RETURN` happens
+to produce, so make the column explicit and it never fires:
+`RETURN t.content_hash AS content_hash` (any other columns may follow, in any
+order).
+
 ## Creating and materializing a playlist
 
 For agent-created playlists, use the curation engine directly:
