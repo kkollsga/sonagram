@@ -335,4 +335,89 @@ mod tests {
         let actual = embedding_similarity(&pre_a, &pre_b).unwrap();
         assert!((actual - expected).abs() < 1e-6, "actual={actual} expected={expected}");
     }
+
+    fn fixture_records() -> Vec<crate::record::AnalysisRecord> {
+        let dir =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/analyses");
+        let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("read fixtures dir {}: {e}", dir.display()))
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+            .collect();
+        paths.sort();
+        paths
+            .iter()
+            .map(|path| {
+                crate::record::AnalysisRecord::from_json(&std::fs::read_to_string(path).unwrap())
+                    .unwrap()
+            })
+            .collect()
+    }
+
+    fn fixture_library(n_tracks: usize) -> crate::graph::LibraryInfo {
+        crate::graph::LibraryInfo { root: "projection-guard-fixtures".into(), n_tracks }
+    }
+
+    /// The curation guard for the kglite 0.16.0 identity change.
+    ///
+    /// WHY: since 0.16.0 the raw `NodeData::id()` field is a `Value::Null`
+    /// sentinel on a memory-backed graph — identity lives in the column store
+    /// and only a resolving read (`NodeView::id`, used at the edge sweep above)
+    /// answers it. A raw read still *compiles*, and when it silently answers
+    /// Null every edge endpoint fails `value_string` and **every** relation-
+    /// derived key on `TrackCandidate` comes back empty. Nothing else sees it:
+    /// the golden digests render the graph, not the projection, so they stay
+    /// green while curation quietly loses artist/style/genre/decade grouping.
+    /// These counts are the concrete damage, pinned against the frozen 15-record
+    /// fixture set (change the fixtures → change these numbers deliberately).
+    ///
+    /// NOTE: the frozen set contains no `VERSION_OF` edges (no two records are
+    /// versions of one song), so `song_key` is `None` for every fixture track
+    /// and cannot be asserted here — the shared `value_string(target.id())` read
+    /// it depends on is covered by the four relations that *are* present.
+    #[test]
+    fn projection_keeps_relation_derived_keys() {
+        let records = fixture_records();
+        let graph = crate::graph::build_graph(&records, &fixture_library(records.len())).unwrap();
+        let tracks = project_tracks(&graph).unwrap();
+        assert_eq!(tracks.len(), 15, "frozen fixture set no longer has 15 tracks");
+
+        let with_styles = tracks.iter().filter(|t| !t.style_keys.is_empty()).count();
+        let with_genres = tracks.iter().filter(|t| !t.genre_keys.is_empty()).count();
+        let with_decades = tracks.iter().filter(|t| !t.decade_keys.is_empty()).count();
+        assert_eq!(
+            (with_styles, with_genres, with_decades),
+            (8, 14, 15),
+            "relation-derived keys collapsed (styles/genres/decades) — the graph \
+             has IN_STYLE/IN_GENRE/FROM_DECADE edges but the projection lost \
+             them; suspect a node-id read that no longer resolves"
+        );
+
+        // The enriched build is the only one that carries Artist MBIDs, so it is
+        // the only place `artist_key` is *relation*-derived rather than the
+        // artist-name fallback — i.e. the only place a lost BY_ARTIST edge shows.
+        let enrichment = crate::enrich::EnrichmentData::load_from_dir(
+            &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/lastfm"),
+        )
+        .expect("load Last.fm enrichment fixtures");
+        let enriched = crate::graph::build_graph_with_enrichment(
+            &records,
+            Some(&enrichment),
+            &fixture_library(records.len()),
+        )
+        .unwrap();
+        let mbid_keys = project_tracks(&enriched)
+            .unwrap()
+            .into_iter()
+            .filter(|t| {
+                t.artist_key.len() == 36 && t.artist_key.chars().filter(|c| *c == '-').count() == 4
+            })
+            .count();
+        assert_eq!(
+            mbid_keys, 4,
+            "BY_ARTIST projection lost its MBID artist keys — every track fell \
+             back to the artist-name key, which is exactly what a Null-answering \
+             node-id read produces"
+        );
+    }
 }

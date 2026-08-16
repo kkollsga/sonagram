@@ -582,11 +582,12 @@ fn contract_sonara() {
 
 #[test]
 fn contract_kglite() {
-    use kglite::api::mutation::EdgeSpec;
+    use kglite::api::mutation::{add_nodes, EdgeSpec};
     use kglite::api::storage::{EmbeddingStore, StorageMode};
-    use kglite::api::Value;
-    use kglite::datatypes::values::DataFrame;
+    use kglite::api::{DirGraph, NodeView, Value};
+    use kglite::datatypes::values::{ColumnData, ColumnType, DataFrame};
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     // EdgeSpec construction: the builder emits these for every graph edge.
     // WHY: a field rename breaks `graph::edge` / `add_edges_from_specs`.
@@ -612,6 +613,80 @@ fn contract_kglite() {
     // WHY: the `.kgl` open path (P8 handoff) selects a storage mode; `Memory`
     // must remain a variant or that path won't compile.
     let _mode = StorageMode::Memory;
+
+    // ── the 0.16.0 identity/read/save contract (three probes) ───────────────
+    //
+    // kglite 0.16.0 moved node identity into the per-type column store: on a
+    // memory-backed graph the raw `NodeData::id()`/`.title()` fields hold a
+    // `Value::Null` *sentinel* and only a resolving read (`NodeView::id`)
+    // answers what the caller meant. That shape is silent — a raw `.id()` read
+    // still compiles and just returns Null — and during the 0.16.2 migration it
+    // dropped every curation relation before it was caught. These three probes
+    // are the mechanical detectors for that class of engine change.
+
+    // (a) `resolve_node_property` takes the *view*, not `&NodeData`. WHY: this
+    // is the one property read the whole curation projection is built on
+    // (`curation/project.rs`, `playlist.rs`, `cli.rs`); pinning the signature
+    // makes a receiver change a compile error here instead of a silent Null.
+    let _: fn(NodeView<'_>, &str, &DirGraph) -> Value = kglite::api::cypher::resolve_node_property;
+
+    // (b) THE tripwire: a freshly built, memory-backed node must answer its
+    // *inserted* id through `node_view`, not the Null sentinel. WHY: node
+    // identity read back from the graph is what every edge sweep keys on
+    // (`project_tracks` resolves each edge endpoint to an id). If an engine bump
+    // moves identity out from under this read again, this assertion is the only
+    // thing between it and a silently empty relation set — the goldens render
+    // the graph, not the projection, so they would stay green.
+    let mut probe = DirGraph::new();
+    let mut probe_df = DataFrame::new(Vec::new());
+    probe_df
+        .add_column(
+            "id".to_string(),
+            ColumnType::String,
+            ColumnData::String(vec![Some("probe-id".to_string())]),
+        )
+        .expect("add_column(id)");
+    probe_df
+        .add_column(
+            "name".to_string(),
+            ColumnType::String,
+            ColumnData::String(vec![Some("Probe".to_string())]),
+        )
+        .expect("add_column(name)");
+    add_nodes(
+        &mut probe,
+        probe_df,
+        "Probe".to_string(),
+        "id".to_string(),
+        Some("name".to_string()),
+        None,
+    )
+    .expect("kglite add_nodes rejected a one-row batch");
+    let probe_idx = probe
+        .type_indices
+        .get("Probe")
+        .and_then(|nodes| nodes.to_vec().into_iter().next())
+        .expect("kglite add_nodes registered no Probe index");
+    let probe_id = probe.node_view(probe_idx).expect("no NodeView for a just-added node").id();
+    assert_ne!(
+        *probe_id,
+        Value::Null,
+        "kglite node identity no longer resolves through NodeView::id — a raw \
+         read now answers the Null sentinel; re-audit every `.id()` acquisition \
+         (this is the 0.16.0 class of change)"
+    );
+    assert_eq!(
+        *probe_id,
+        Value::String("probe-id".to_string()),
+        "kglite NodeView::id returned an id sonagram never inserted"
+    );
+
+    // (c) `save_graph` reports a typed `SaveError`, not a `String`. WHY:
+    // `graph::save` is the single save choke point and maps this into
+    // `SonagramError::Graph` via `e.to_string()`; a change in the error shape
+    // (or in the `&mut Arc<DirGraph>` receiver) must fail here, loudly.
+    let _: fn(&mut Arc<DirGraph>, &str) -> Result<(), kglite::api::io::SaveError> =
+        kglite::api::io::save_graph;
 }
 
 // ─────────────────────── part 4: golden regeneration ────────────────────────
