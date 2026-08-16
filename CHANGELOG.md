@@ -4,6 +4,50 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.3] - 2026-08-16
+
+An engine-upgrade release: the embedded KGLite moves from 0.15.8 to 0.16.2,
+bringing its columnar-everywhere storage rewrite and large graph-build
+speedups, and sonagram's node reads move to the engine's NodeView API. CI now
+builds against exactly the KGLite release we ship.
+
+### Graph schema
+
+No change. Graph schema stays at **v3** and both canonical digests are
+byte-identical to 0.2.2 — **stored `.kgl` graphs do not need rebuilding**, and
+0.16.2 reads existing (v5) graph files as-is. One compatibility note in the
+other direction: a graph **saved** by this version uses KGLite's `.kgl`
+container v6, which KGLite tools older than 0.16 cannot read. The `kglite`
+Python package requirement therefore moves to `>=0.16.2`, and `pip install -U
+sonagram` upgrades it alongside.
+
+### Changed
+
+- Embedded KGLite engine: 0.15.8 → 0.16.2. Node reads go through the engine's
+  `NodeView` API (the raw node record no longer carries identity on in-memory
+  graphs), and the graph gate now pins that contract with explicit tripwires —
+  including one that fails the build if node identity ever silently reads as
+  null again.
+- The four CI/release workflow checkouts of KGLite are pinned to the `v0.16.2`
+  tag, so CI tests exactly the engine version the published wheels embed.
+
+### Fixed
+
+- `sonagram status` no longer reports an existing-but-unreadable graph file as
+  if no graph had been built: it now says the file exists but cannot be read,
+  includes the load error, and the JSON output carries it in a new
+  `graph_error` field.
+- When the separately installed `kglite` Python package is too old to read a
+  graph sonagram just wrote, the error now names the installed version and the
+  fix (`pip install -U 'kglite>=0.16.2'`) instead of surfacing a bare
+  file-format error from a load call the user never wrote.
+
+### Added
+
+- Docs: playlist curation queries should name their id column
+  (`RETURN t.content_hash AS content_hash`); the agent guide and CLI docs now
+  say so explicitly rather than relying on positional auto-detection.
+
 ## [0.2.2] - 2026-07-30
 
 A packaging and upstream-hygiene release: the source distribution no longer
