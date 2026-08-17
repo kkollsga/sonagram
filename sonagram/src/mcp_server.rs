@@ -143,9 +143,20 @@ where
     }) {
         startup_graph_path(&argv)?;
     }
+    scrub_inherited_credentials();
     let extensions = server_extensions();
     kglite_mcp_server::run_with_extensions(argv, extensions)?;
     Ok(())
+}
+
+/// Drop GitHub credentials the launching client happened to export: a music
+/// server holds no GitHub authority, so this is defense in depth over
+/// mcp-methods 0.4.5 (where the GitHub tools are already opt-in-off) — and it
+/// runs before any child, so `--selftest` inherits the scrubbed environment.
+fn scrub_inherited_credentials() {
+    for name in ["GITHUB_TOKEN", "GH_TOKEN"] {
+        std::env::remove_var(name);
+    }
 }
 
 fn server_extensions() -> ServerExtensions {
@@ -532,6 +543,22 @@ mod tests {
         ];
         assert!(startup_graph_path(&duplicate).is_err());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn boot_scrubs_inherited_github_credentials() {
+        let _guard = crate::TEST_ENV_LOCK.lock().unwrap();
+        std::env::set_var("GITHUB_TOKEN", "ghp_inherited");
+        std::env::set_var("GH_TOKEN", "gho_inherited");
+        scrub_inherited_credentials();
+        assert!(
+            std::env::var_os("GITHUB_TOKEN").is_none(),
+            "GITHUB_TOKEN must not survive into the served process"
+        );
+        assert!(
+            std::env::var_os("GH_TOKEN").is_none(),
+            "GH_TOKEN must not survive into the served process"
+        );
     }
 
     #[test]
