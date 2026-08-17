@@ -82,9 +82,27 @@ def inspect_server(graph_path, server, env=None):
         raise
 
 
+def tool_text(result):
+    return "\n".join(part.get("text", "") for part in result.get("content", []))
+
+
 def tool_payload(result):
-    text = "\n".join(part.get("text", "") for part in result.get("content", []))
-    return json.loads(text)
+    return json.loads(tool_text(result))
+
+
+def track_count(process, request_id):
+    text = tool_text(rpc(
+        process,
+        request_id,
+        "tools/call",
+        {
+            "name": "cypher_query",
+            "arguments": {"query": "MATCH (t:Track) RETURN count(t) AS tracks"},
+        },
+    ))
+    header, rows = text.split("tracks\n", 1)
+    assert header.startswith("1 row(s):"), text
+    return int(rows.splitlines()[0])
 
 
 repo = Path(__file__).resolve().parents[2]
@@ -203,7 +221,11 @@ with tempfile.TemporaryDirectory() as tmp:
         text=True,
     )
     assert "Selftest PASSED" in selftest.stdout
-    process, tools, prompts = inspect_server(graph_path, server_path, env=env)
+    # Boot the live server with credentials the music deployment must never
+    # forward: mcp_server::run scrubs them, so kglite's github builtin stays off
+    # and no github_* route can reach the surface asserted below.
+    hostile_env = {**env, "GITHUB_TOKEN": "dummy", "GH_TOKEN": "dummy"}
+    process, tools, prompts = inspect_server(graph_path, server_path, env=hostile_env)
     try:
         by_name = {tool["name"]: tool for tool in tools}
         domain_tools = {
@@ -218,6 +240,21 @@ with tempfile.TemporaryDirectory() as tmp:
             "music_playlist_delete",
         }
         assert domain_tools.issubset(by_name)
+        # The manifest's tools_allow is a closed surface, and an unmatched entry
+        # is a silent no-op upstream: exact equality is the only thing that
+        # catches a typo'd or dropped name, so subset checks are not enough.
+        expected_tools = {
+            "ping",
+            "cypher_query",
+            "graph_overview",
+            "reload_graph",
+            *domain_tools,
+        }
+        assert set(by_name) == expected_tools, (
+            f"served tool surface drifted: unexpected="
+            f"{sorted(set(by_name) - expected_tools)} "
+            f"missing={sorted(expected_tools - set(by_name))}"
+        )
         policy_schema = json.dumps(
             by_name["music_curate_playlist"].get("inputSchema", {}),
             sort_keys=True,
@@ -249,8 +286,19 @@ with tempfile.TemporaryDirectory() as tmp:
         assert "sonagram-curation-contract:v1" in description
         # Playlist methodology is routed through the dedicated profile tool;
         # do not repeat several KB on every generic Cypher/overview reveal.
-        assert len(by_name["cypher_query"].get("description", "")) < 8000
-        assert len(by_name["graph_overview"].get("description", "")) < 8000
+        cypher_description = by_name["cypher_query"].get("description", "")
+        overview_description = by_name["graph_overview"].get("description", "")
+        assert len(cypher_description) < 8000
+        assert len(overview_description) < 8000
+        # The manifest's description overrides speak in the music voice and
+        # kglite appends its own skill body after them, so the override is a
+        # prefix. Losing it means the agent meets a generic graph tool instead.
+        cypher_prefix = "Read-only Cypher over the Sonagram music graph:"
+        overview_prefix = "Inventory of the Sonagram music graph:"
+        assert cypher_description.startswith(cypher_prefix), cypher_description[:200]
+        assert overview_description.startswith(overview_prefix), (
+            overview_description[:200]
+        )
         prompt_names = {prompt["name"] for prompt in prompts}
         assert {
             "music_library_profile",
@@ -419,6 +467,39 @@ with tempfile.TemporaryDirectory() as tmp:
         assert not any(name.startswith("music_") for name in by_name)
         prompt_names = {prompt["name"] for prompt in prompts}
         assert not any(name.startswith("music_") for name in prompt_names)
+    finally:
+        process.kill()
+        process.wait()
+
+    # A rescan rewrites the served .kgl underneath a running server, so
+    # reload_graph has to reach the live query path — without the call the
+    # server keeps answering from the graph it booted on.
+    served_path = root / "served.kgl"
+    shutil.copyfile(graph_path, served_path)
+    shutil.copyfile(root / "music_mcp.yaml", root / "served_mcp.yaml")
+    shutil.copytree(root / "music_mcp.skills", root / "served_mcp.skills")
+    process, tools, _ = inspect_server(served_path, server_path, env=env)
+    try:
+        assert "reload_graph" in {tool["name"] for tool in tools}
+        booted_tracks = track_count(process, 30)
+        assert booted_tracks == 15, booted_tracks
+        reloaded = tool_text(rpc(
+            process, 31, "tools/call", {"name": "reload_graph", "arguments": {}}
+        ))
+        assert reloaded.startswith("Reloaded "), reloaded
+        unchanged_tracks = track_count(process, 32)
+        assert unchanged_tracks == 15, unchanged_tracks
+        # Swap the served file for the one-Track generic graph: the reload has
+        # to be what changes the answer.
+        shutil.copyfile(other_path, served_path)
+        swapped = tool_text(rpc(
+            process, 33, "tools/call", {"name": "reload_graph", "arguments": {}}
+        ))
+        assert "1 nodes" in swapped, swapped
+        swapped_tracks = track_count(process, 34)
+        assert swapped_tracks == 1, (
+            f"reload did not reach the query path: {swapped_tracks}"
+        )
     finally:
         process.kill()
         process.wait()
