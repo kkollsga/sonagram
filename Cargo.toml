@@ -24,23 +24,27 @@ ureq = { version = "2", features = ["json"] }
 # model, sample-rate-robust aggression-rank-v3 analysis with evidence support,
 # stable public analysis/model behavior, complete recoverable MP3 probing,
 # deterministic chord summaries; 0.3.5 itself is release/CI-only and
-# analysis-identical to 0.3.4), kglite 0.16.2 (node properties are columnar on
-# every construction path, so a freshly built graph and a reloaded one are the
-# same shape and `save()` is a consolidation pass a settled graph skips rather
-# than a mandatory rebuild; the `.kgl` container moves to v6, a deliberate
-# one-way break — 0.16 reads v5 and v6, engines at 0.15.14 and earlier refuse
-# a v6 file by version number; `NodeView` (via `DirGraph::node_view`) is the
-# only route that resolves a raw node's identity and properties, since the
-# `NodeData` fields now carry the columnar sentinel on memory graphs; and
-# `io::save_graph` reports a typed `SaveError` instead of a string).
+# analysis-identical to 0.3.4), kglite 0.16.3 (an MCP-layer release: the engine,
+# the columnar node-property representation and the v6 `.kgl` container are
+# untouched, so nothing about the graph we build or the bytes we write moves.
+# What changes is the served tool surface: `extensions.tools_allow` pins a
+# closed-by-default tool list matched against the final agent-visible names, so
+# no dependency, credential or mode change can widen it; `reload_graph` re-reads
+# the served `.kgl` from disk and `extensions.graph_watch` does it automatically
+# on rewrite; `explore` and `read_code_source` auto-deregister on a read-only
+# `--graph` server whose graph carries no `Function`/`Class` nodes, which is
+# every music graph we serve; a read-only server no longer holds the file's
+# single-writer lease, so a served graph can be rebuilt in place; and
+# mcp-methods 0.4.5 makes the GitHub tools an explicit `builtins.github` opt-in
+# that is off by default).
 #
 # The upstream contract these pins encode — what we consume, what we must never
 # depend on, and what we owe each upstream in notification — is recorded in the
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.5", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.2", default-features = false }
-kglite-mcp-server = { version = "0.16.2", default-features = false }
+kglite = { version = "0.16.3", default-features = false }
+kglite-mcp-server = { version = "0.16.3", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;

@@ -232,7 +232,7 @@ fn load_via_kglite(py: Python<'_>, path: &Path) -> PyResult<Py<PyAny>> {
     let kglite = py.import("kglite").map_err(|e| {
         PyRuntimeError::new_err(format!(
             "sonagram.build()/scan_and_build() return a kglite.KnowledgeGraph, but \
-             importing `kglite` failed ({e}). Install it: `pip install kglite>=0.16.2`."
+             importing `kglite` failed ({e}). Install it: `pip install kglite>=0.16.3`."
         ))
     })?;
     kglite
@@ -268,9 +268,9 @@ fn kglite_load_failure_message(installed_version: Option<&str>, original_error: 
     };
     format!(
         "sonagram built the graph, but handing it to `kglite` failed: {original_error}. \
-         sonagram writes `.kgl` files that need kglite>=0.16.2, and {installed} — \
+         sonagram writes `.kgl` files that need kglite>=0.16.3, and {installed} — \
          an older wheel cannot read that container format. \
-         Upgrade it: `pip install -U 'kglite>=0.16.2'`."
+         Upgrade it: `pip install -U 'kglite>=0.16.3'`."
     )
 }
 
@@ -763,7 +763,7 @@ mod tests {
         // …and the two things that make it actionable.
         assert!(msg.contains("0.15.3"), "installed wheel version missing: {msg}");
         assert!(
-            msg.contains("pip install -U 'kglite>=0.16.2'"),
+            msg.contains("pip install -U 'kglite>=0.16.3'"),
             "upgrade command missing: {msg}"
         );
     }
@@ -773,7 +773,7 @@ mod tests {
         let msg = kglite_load_failure_message(None, "boom");
         assert!(msg.contains("boom"));
         assert!(msg.contains("does not report a version"), "{msg}");
-        assert!(msg.contains("pip install -U 'kglite>=0.16.2'"), "{msg}");
+        assert!(msg.contains("pip install -U 'kglite>=0.16.3'"), "{msg}");
     }
 
     #[test]
