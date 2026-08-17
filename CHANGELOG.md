@@ -4,6 +4,61 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.4] - 2026-08-17
+
+A security release for the MCP server: the served tool surface is now closed
+by default, GitHub credentials can no longer reach a music server, and a
+running server picks up a rebuilt graph without a client restart. The embedded
+engines move to KGLite 0.16.3 and Sonara 0.3.6.
+
+**After upgrading, re-run `sonagram mcp install --force` to refresh the
+installed server assets** — the new manifest is what closes the surface.
+
+### Graph schema
+
+No change. Graph schema stays at **v3** and both canonical digests are
+byte-identical to 0.2.3 — stored `.kgl` graphs do not need rebuilding, and no
+engine move in this release touches the graph or the container format.
+
+### Fixed
+
+- The MCP server's tool surface is now an explicit allowlist of exactly the 13
+  music-relevant tools. Previously the surface was open by default: a
+  `GITHUB_TOKEN` reachable from the environment (including via a `.env` file
+  found by an upward directory walk) silently added authenticated GitHub tools
+  to a personal music server. Three defenses now stack: the manifest allowlist
+  (anything not named is rejected), the server scrubbing `GITHUB_TOKEN` and
+  `GH_TOKEN` at startup, and environment loading pinned to a dedicated
+  `sonagram_mcp.env` beside the manifest — the walk-up is gone. (Reported by
+  our first production operator; the underlying opt-in default also landed
+  upstream in KGLite 0.16.3 / mcp-methods 0.4.5 at our request.)
+- Two code-graph tools that could never return anything on a music graph
+  (`explore`, `read_code_source`) no longer appear.
+
+### Added
+
+- Live graph refresh: the server watches the served `.kgl` and lazily reloads
+  it after `sonagram build` rewrites it, and a `reload_graph` tool forces the
+  same refresh on demand — usable from shell-less clients like Claude Desktop.
+  A read-only server no longer holds the file's writer lease, so rebuilding a
+  served graph in place is now possible at all.
+- `sonagram mcp install` creates an operator-owned `sonagram_mcp.env` beside
+  the manifest when absent (never overwritten, exempt from `--force`) for
+  server environment such as a Last.fm key.
+- The generic exploration tools now describe themselves in music-library
+  terms instead of code-graph terms.
+
+### Changed
+
+- Embedded KGLite: 0.16.2 → 0.16.3 (MCP-server layer only). Embedded Sonara:
+  0.3.5 → 0.3.6, which adds the per-feature analysis lane this release banks
+  for a future scan improvement — re-acquiring a single feature (such as
+  aggression) will no longer require re-analyzing a whole library. Analysis
+  output is bit-identical; cached records carry over untouched.
+- CI now builds both sibling engines from their release tags (`v0.16.3`,
+  `v0.3.6`) instead of their default branches, so published artifacts are
+  provably built against the pinned releases.
+
 ## [0.2.3] - 2026-08-16
 
 An engine-upgrade release: the embedded KGLite moves from 0.15.8 to 0.16.2,
