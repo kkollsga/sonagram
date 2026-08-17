@@ -38,6 +38,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: kkollsga/sonara
+          ref: v0.3.6
           path: _siblings/sonara
       - name: Check out kglite
         uses: actions/checkout@v7
