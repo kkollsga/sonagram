@@ -507,6 +507,13 @@ fn _analysis_provenance_fields_present(p: sonara::analyze::AnalysisProvenance) {
         hop_length: _,
         mode: _,
         requested_features: _,
+        // sonara 0.3.6 added these additively: the octave-folding tempo range in
+        // effect at analysis time. We do not persist them yet (a change in the
+        // configured range invalidates stored `bpm`, which future freshness
+        // logic will want) — but the exhaustive pattern forces that to stay a
+        // conscious decision rather than an oversight.
+        bpm_min: _,
+        bpm_max: _,
         genre_model_id: _,
         vocalness_model_id: _,
         aggression_model_id: _,
@@ -577,6 +584,122 @@ fn contract_sonara() {
     assert_eq!(
         SIMILARITY_VERSION, 2,
         "sonara SIMILARITY_VERSION changed — embedding_model_id + goldens move; recapture"
+    );
+
+    // ── sonara 0.3.6: the per-feature augment lane (pinned, not yet consumed) ──
+    //
+    // WHY pin an API we do not call: the incremental-rescan work plans cache
+    // freshness on exactly this surface — "can this one feature be recomputed
+    // from the record we already hold, without decoding the audio, and if not
+    // why not". Sonagram consumes it in a later plan; until then a rename or a
+    // reshape upstream would only surface when that plan starts. These
+    // ascriptions make it a compile error in the gate instead.
+    let _: fn(&sonara::analyze::TrackAnalysis, &str) -> Option<sonara::analyze::AugmentBlocker> =
+        sonara::analyze::augment_blocker;
+    let _: fn(&sonara::analyze::TrackAnalysis, &str) -> bool = sonara::analyze::can_augment;
+    let _: fn(
+        &sonara::analyze::TrackAnalysis,
+        &[&str],
+        Option<&std::path::Path>,
+        &AnalysisConfig,
+    ) -> sonara::Result<sonara::analyze::TrackAnalysis> = sonara::analyze::augment_analysis;
+
+    // The blocker enum is the *reason* half of that contract — a scan planner
+    // branches on these variants (re-analyze vs. decode vs. skip), so a variant
+    // rename or a payload reshape must fail here too.
+    let _blockers = [
+        sonara::analyze::AugmentBlocker::UnknownFeature,
+        sonara::analyze::AugmentBlocker::NeedsAudio(sonara::analyze::DependencyClass::Audio),
+        sonara::analyze::AugmentBlocker::SchemaVersionMismatch {
+            record: 5,
+            current: 6,
+        },
+        sonara::analyze::AugmentBlocker::EmbeddingVersionMismatch {
+            record: 1,
+            current: 2,
+        },
+        sonara::analyze::AugmentBlocker::MissingEvidence(vec!["chroma_mean"]),
+    ];
+
+    // The dependency map itself: an exhaustive destructure (a new row field is a
+    // conscious decision) plus the two rows whose class decides whether a
+    // rescan can stay decode-free.
+    let deps: BTreeMap<&'static str, sonara::analyze::FeatureDependency> =
+        sonara::analyze::feature_dependencies()
+            .map(|dep| (dep.name, dep))
+            .collect();
+    assert!(
+        !deps.is_empty(),
+        "sonara feature_dependencies() is empty — the dependency map vanished"
+    );
+    for dep in deps.values() {
+        let sonara::analyze::FeatureDependency {
+            name: _,
+            class: _,
+            required_evidence: _,
+            needs_extended: _,
+            opt_in_only: _,
+            full_only: _,
+        } = dep;
+    }
+    let embedding = deps
+        .get("embedding")
+        .expect("sonara must declare an `embedding` feature — the store is built from it");
+    assert_eq!(
+        embedding.class,
+        sonara::analyze::DependencyClass::Embedding,
+        "`embedding` left the Embedding class — decode-free re-embedding is what \
+         an incremental rescan is built on"
+    );
+    assert!(
+        !embedding.required_evidence.is_empty(),
+        "`embedding` declares no required evidence — a decode-free recompute \
+         cannot be planned against an empty evidence list"
+    );
+    let aggression = deps
+        .get("aggression")
+        .expect("the `aggression` cargo feature is enabled, so its row must exist");
+    assert_eq!(
+        aggression.class,
+        sonara::analyze::DependencyClass::Audio,
+        "`aggression` is Audio-class: it can never be augmented decode-free, and \
+         a rescan planner that believes otherwise would silently skip a decode"
+    );
+
+    // ── sonara 0.3.6: versioned similarity profiles ─────────────────────────
+    //
+    // The Rust core exposes the selectable set as `SimilarityProfile::ALL` +
+    // `name()`/`version()`; sonara-python publishes the same pairs as the
+    // `SIMILARITY_PROFILES` dict. Profiles are applied at distance time and
+    // never change the stored vector, so adding one must not move a digest —
+    // this probe pins the set, the versions, and (crucially) that `default`
+    // still selects the historical `WEIGHTS` table our goldens were built with.
+    let profiles: BTreeMap<&'static str, u32> = sonara::similarity::SimilarityProfile::ALL
+        .iter()
+        .map(|p| (p.name(), p.version()))
+        .collect();
+    assert_eq!(
+        profiles.get("default").copied(),
+        Some(2),
+        "sonara similarity profile `default` is not version 2 (profiles: {profiles:?}) — \
+         the default table is what every stored embedding is compared under"
+    );
+    assert_eq!(
+        profiles.get("timbre").copied(),
+        Some(1),
+        "sonara similarity profile `timbre` is not version 1 (profiles: {profiles:?})"
+    );
+    assert_eq!(
+        sonara::similarity::SimilarityProfile::default(),
+        sonara::similarity::SimilarityProfile::Default,
+        "the default `SimilarityProfile` is no longer `Default` — every distance \
+         we compute without naming a profile would silently change metric"
+    );
+    assert_eq!(
+        sonara::similarity::SimilarityProfile::Default.weights(),
+        &WEIGHTS,
+        "the `default` profile no longer selects the historical WEIGHTS table — \
+         distances (and any digest derived from them) move"
     );
 }
 
