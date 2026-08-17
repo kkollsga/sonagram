@@ -1422,6 +1422,11 @@ fn cmd_mcp(args: &[String]) -> Result<()> {
             println!("  manifest:  {}", report.manifest_path.display());
             println!("  skills:    {}", report.skills_dir.display());
             println!("  sandbox:   {}", report.public_source_dir.display());
+            println!(
+                "  env:       {} ({})",
+                report.env_path.display(),
+                if report.env_created { "created" } else { "kept" }
+            );
             if let Some(binary) = &report.server_binary {
                 println!("  server:    {}", binary.display());
             }

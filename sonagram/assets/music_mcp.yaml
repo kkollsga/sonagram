@@ -2,6 +2,15 @@ name: Sonagram Music Library
 skills: true
 source_root: ./.sonagram-mcp-public
 
+# Server environment for this deployment. Declaring env_file pins environment
+# loading to exactly this file and disables kglite's upward `.env` walk, so no
+# stray `.env` in a parent directory can reach the music server. Operators put
+# server environment here (a Last.fm key, any other credential the deployment
+# genuinely needs). The path is resolved beside this manifest, and a missing
+# file is a hard boot error — `sonagram mcp install` therefore creates it when
+# it is absent and never touches it again; its contents are yours.
+env_file: ./sonagram_mcp.env
+
 instructions: |
   This graph describes a local music library built by Sonagram. Use
   graph_overview and cypher_query for exploration and the typed
@@ -19,10 +28,46 @@ overview_prefix: |
 builtins:
   save_graph: false
 
+extensions:
+  # The served surface is closed by default: every route not named here is
+  # disabled, whatever kglite, mcp-methods or a future dependency registers.
+  # Adding a tool to the music server is a deliberate edit of this list.
+  tools_allow:
+    - ping
+    - cypher_query
+    - graph_overview
+    - reload_graph
+    - music_library_profile
+    - music_curation_policy
+    - music_curate_playlist
+    - music_audit_playlist
+    - music_explain_playlist
+    - music_playlists_list
+    - music_playlist_show
+    - music_playlist_update
+    - music_playlist_delete
+  # Lazily re-read the served `.kgl` after a Sonagram build rewrites it, so a
+  # rescan reaches a running server without a client restart.
+  graph_watch: true
+
+# Music-voiced descriptions for the two always-registered generic routes.
+# Kglite appends its own skill body after this text, so what follows is read as
+# a prefix, not a replacement.
 tools:
-  - bundled: read_source
-    hidden: true
-  - bundled: grep
-    hidden: true
-  - bundled: list_source
-    hidden: true
+  - bundled: cypher_query
+    description: |
+      Read-only Cypher over the Sonagram music graph: Tracks and the Artists,
+      Albums, Genres, Styles, Keys, TempoBands, EnergyLevels, Decades and Songs
+      they connect to. Use it to explore the collection — what exists, how much
+      of it, which corners are thin — and to check an assumption before you
+      commit to a playlist brief. Exploration only: never assemble or reorder a
+      final playlist from these rows. Curation goes through the typed music_*
+      tools, which own selection, ordering, repair, audit and storage.
+  - bundled: graph_overview
+    description: |
+      Inventory of the Sonagram music graph: node types (Track, Artist, Album,
+      Genre, Style, Key, TempoBand, EnergyLevel, Decade, Song, Library,
+      Source), their properties and relationships. Start here to learn the
+      shape of the library, then use music_library_profile for the curation
+      numbers (eligible tracks, diversity, per-axis coverage) and the typed
+      music_* tools to build anything.

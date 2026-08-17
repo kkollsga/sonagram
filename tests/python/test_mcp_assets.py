@@ -156,9 +156,28 @@ with tempfile.TemporaryDirectory() as tmp:
         capture_output=True,
         text=True,
     )
+    # The six managed assets (manifest + five skills) carry the counters; the
+    # env file the manifest pins is operator-owned and reported on its own line.
     assert "changed:   6" in first.stdout
     assert "changed:   0" in second.stdout
     assert "unchanged: 6" in second.stdout
+    env_file = root / "sonagram_mcp.env"
+    # Install reports the canonical path (macOS /var -> /private/var).
+    reported_env = root.resolve() / "sonagram_mcp.env"
+    assert f"env:       {reported_env} (created)" in first.stdout
+    assert f"env:       {reported_env} (kept)" in second.stdout
+    assert env_file.is_file()
+    operator_env = env_file.read_text() + "LASTFM_API_KEY=operator-owned\n"
+    env_file.write_text(operator_env)
+    forced = subprocess.run(
+        [binary, "mcp", "install", "--force"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert f"env:       {reported_env} (kept)" in forced.stdout
+    assert env_file.read_text() == operator_env
     assert (root / "music_mcp.yaml").exists()
     assert len(list((root / "music_mcp.skills").glob("*.md"))) == 5
     assert (root / ".sonagram-mcp-public").is_dir()

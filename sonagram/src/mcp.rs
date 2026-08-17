@@ -14,6 +14,21 @@ use crate::{Result, SonagramError};
 pub const MANIFEST_YAML: &str = include_str!("../assets/music_mcp.yaml");
 pub const CURATION_CONTRACT_MARKER: &str = "sonagram-curation-contract:v1";
 
+/// The manifest's `env_file:` target, resolved beside the manifest. A missing
+/// file is a hard boot error in kglite, so install must create it.
+pub const ENV_FILE_NAME: &str = "sonagram_mcp.env";
+
+/// Seed contents for a freshly created env file. Comment-only: the deployment
+/// needs no credential to serve a music graph, and whatever the operator adds
+/// afterwards is never inspected, compared, or replaced by Sonagram.
+pub const ENV_FILE_TEMPLATE: &str = "\
+# Server environment for sonagram-mcp-server.
+# Pinned via the manifest's env_file: — the .env walk-up is disabled, so this
+# file is the only environment source the server reads.
+# One KEY=VALUE per line; an already-exported variable is never overwritten.
+# Sonagram creates this file once and then leaves it alone, --force included.
+";
+
 pub fn launch_label() -> &'static str {
     if cfg!(windows) {
         "RUN (PowerShell)"
@@ -51,8 +66,16 @@ pub struct InstallReport {
     pub manifest_path: PathBuf,
     pub skills_dir: PathBuf,
     pub public_source_dir: PathBuf,
+    /// The operator-owned env file the manifest pins with `env_file:`.
+    pub env_path: PathBuf,
+    /// True when this install created the env file; false when one was already
+    /// there and was left untouched.
+    pub env_created: bool,
     pub server_binary: Option<PathBuf>,
+    /// Managed assets (manifest + skills) rewritten by this install. The env
+    /// file is operator-owned and never counted here.
     pub written: usize,
+    /// Managed assets already byte-identical to the bundled ones.
     pub unchanged: usize,
 }
 
@@ -99,9 +122,11 @@ fn install_for_graph(graph_path: &Path, force: bool) -> Result<InstallReport> {
     let manifest_path = parent.join(format!("{stem}_mcp.yaml"));
     let skills_dir = parent.join(format!("{stem}_mcp.skills"));
     let public_source_dir = parent.join(".sonagram-mcp-public");
+    let env_path = parent.join(ENV_FILE_NAME);
     validate_public_source_dir(&public_source_dir)?;
     reject_symlink(&manifest_path)?;
     reject_symlink(&skills_dir)?;
+    reject_symlink(&env_path)?;
     let mut assets = vec![(manifest_path.clone(), MANIFEST_YAML.as_bytes())];
     assets.extend(
         SKILL_ASSETS
@@ -140,12 +165,23 @@ fn install_for_graph(graph_path: &Path, force: bool) -> Result<InstallReport> {
         changed.push((path.clone(), *expected));
     }
     let written = changed.len();
+    // The env file the manifest pins is created once and then belongs to the
+    // operator: it may hold credentials, so it is never byte-compared, never
+    // replaced, and exempt from `--force`. Creation still rides the same
+    // all-or-nothing transaction as the managed assets, so a manifest that
+    // requires the file is never committed without it.
+    let env_created = !env_path.exists();
+    if env_created {
+        changed.push((env_path.clone(), ENV_FILE_TEMPLATE.as_bytes()));
+    }
     write_transaction(&changed)?;
     Ok(InstallReport {
         graph_path,
         manifest_path,
         skills_dir,
         public_source_dir,
+        env_path,
+        env_created,
         server_binary: resolve_server_binary(),
         written,
         unchanged,
@@ -392,6 +428,37 @@ mod tests {
     }
 
     #[test]
+    fn manifest_pins_the_env_file_it_installs_and_a_closed_tool_surface() {
+        // Kglite hard-errors at boot when `env_file:` points at a missing file,
+        // so the manifest's name and the file install creates must not drift.
+        assert!(
+            MANIFEST_YAML.contains(&format!("env_file: ./{ENV_FILE_NAME}\n")),
+            "manifest env_file must name {ENV_FILE_NAME}"
+        );
+        assert!(MANIFEST_YAML.contains("graph_watch: true"));
+        for tool in [
+            "ping",
+            "cypher_query",
+            "graph_overview",
+            "reload_graph",
+            "music_library_profile",
+            "music_curation_policy",
+            "music_curate_playlist",
+            "music_audit_playlist",
+            "music_explain_playlist",
+            "music_playlists_list",
+            "music_playlist_show",
+            "music_playlist_update",
+            "music_playlist_delete",
+        ] {
+            assert!(MANIFEST_YAML.contains(&format!("\n    - {tool}\n")), "{tool}");
+        }
+        // The three source-reading routes are disabled by omission from the
+        // allowlist; a leftover `hidden:` entry would only hide the drift.
+        assert!(!MANIFEST_YAML.contains("hidden: true"));
+    }
+
+    #[test]
     fn install_is_idempotent_and_preserves_operator_edits() {
         let graph = temp_graph("idempotent");
         let first = install_for_graph(&graph, false).unwrap();
@@ -402,16 +469,32 @@ mod tests {
         assert!(first.public_source_dir.is_dir());
         assert_eq!(std::fs::read_dir(&first.public_source_dir).unwrap().count(), 0);
 
+        assert!(first.env_created);
+        assert_eq!(first.env_path, first.manifest_path.parent().unwrap().join(ENV_FILE_NAME));
+        assert_eq!(std::fs::read_to_string(&first.env_path).unwrap(), ENV_FILE_TEMPLATE);
+
         let second = install_for_graph(&graph, false).unwrap();
         assert_eq!(second.written, 0);
         assert_eq!(second.unchanged, 1 + SKILL_ASSETS.len());
+        assert!(!second.env_created);
+
+        // The env file is operator-owned: an edited one is neither rejected as
+        // drift nor counted as a managed asset, and --force never touches it.
+        std::fs::write(&first.env_path, b"LASTFM_API_KEY=secret\n").unwrap();
+        let third = install_for_graph(&graph, false).unwrap();
+        assert!(!third.env_created);
+        assert_eq!(third.written, 0);
+        assert_eq!(third.unchanged, 1 + SKILL_ASSETS.len());
+        assert_eq!(std::fs::read(&first.env_path).unwrap(), b"LASTFM_API_KEY=secret\n");
 
         std::fs::write(&first.manifest_path, b"operator edit").unwrap();
         assert!(install_for_graph(&graph, false).is_err());
         assert_eq!(std::fs::read(&first.manifest_path).unwrap(), b"operator edit");
         let forced = install_for_graph(&graph, true).unwrap();
         assert_eq!(forced.written, 1);
+        assert!(!forced.env_created);
         assert_eq!(std::fs::read_to_string(&first.manifest_path).unwrap(), MANIFEST_YAML);
+        assert_eq!(std::fs::read(&first.env_path).unwrap(), b"LASTFM_API_KEY=secret\n");
     }
 
     #[cfg(unix)]
@@ -438,6 +521,19 @@ mod tests {
         let exposed = parent.join("private-skills");
         std::fs::create_dir_all(&exposed).unwrap();
         symlink(&exposed, parent.join("work music_mcp.skills")).unwrap();
+        assert!(install_for_graph(&graph, false).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_rejects_symlinked_env_file() {
+        use std::os::unix::fs::symlink;
+
+        let graph = temp_graph("env-symlink");
+        let parent = graph.parent().unwrap();
+        let exposed = parent.join("elsewhere.env");
+        std::fs::write(&exposed, b"SECRET=value").unwrap();
+        symlink(&exposed, parent.join(ENV_FILE_NAME)).unwrap();
         assert!(install_for_graph(&graph, false).is_err());
     }
 
