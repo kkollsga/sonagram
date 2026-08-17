@@ -431,8 +431,12 @@ mod tests {
     fn manifest_pins_the_env_file_it_installs_and_a_closed_tool_surface() {
         // Kglite hard-errors at boot when `env_file:` points at a missing file,
         // so the manifest's name and the file install creates must not drift.
+        // Line-wise (`str::lines` strips `\r`): a Windows checkout embeds the
+        // asset with CRLF endings, which a `\n`-anchored substring misses.
         assert!(
-            MANIFEST_YAML.contains(&format!("env_file: ./{ENV_FILE_NAME}\n")),
+            MANIFEST_YAML
+                .lines()
+                .any(|l| l == format!("env_file: ./{ENV_FILE_NAME}")),
             "manifest env_file must name {ENV_FILE_NAME}"
         );
         assert!(MANIFEST_YAML.contains("graph_watch: true"));
@@ -451,7 +455,10 @@ mod tests {
             "music_playlist_update",
             "music_playlist_delete",
         ] {
-            assert!(MANIFEST_YAML.contains(&format!("\n    - {tool}\n")), "{tool}");
+            assert!(
+                MANIFEST_YAML.lines().any(|l| l == format!("    - {tool}")),
+                "{tool}"
+            );
         }
         // The three source-reading routes are disabled by omission from the
         // allowlist; a leftover `hidden:` entry would only hide the drift.
