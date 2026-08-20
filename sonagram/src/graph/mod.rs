@@ -121,9 +121,7 @@ fn hash_fingerprint_field(hasher: &mut blake3::Hasher, bytes: &[u8]) {
     hasher.update(bytes);
 }
 
-fn combined_build_input_fingerprint(
-    source_fingerprints: &BTreeMap<String, String>,
-) -> String {
+fn combined_build_input_fingerprint(source_fingerprints: &BTreeMap<String, String>) -> String {
     let mut hasher = blake3::Hasher::new();
     hash_fingerprint_field(&mut hasher, b"sonagram-combined-build-input-v1");
     hash_fingerprint_field(
@@ -310,8 +308,7 @@ pub fn build_graph_from_sources(
             .entry(s.root.clone())
             .or_insert(fingerprint);
     }
-    let combined_build_fingerprint =
-        combined_build_input_fingerprint(&source_build_fingerprints);
+    let combined_build_fingerprint = combined_build_input_fingerprint(&source_build_fingerprints);
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     let mut sorted: Vec<&AnalysisRecord> = Vec::new();
     for s in &srcs {
@@ -570,9 +567,7 @@ fn listener_percentile_rank(
     let mut ranked: Vec<(usize, i64, &str)> = listeners
         .iter()
         .enumerate()
-        .filter_map(|(i, value)| {
-            value.map(|v| (i, v, sorted[i].source.content_hash.as_str()))
-        })
+        .filter_map(|(i, value)| value.map(|v| (i, v, sorted[i].source.content_hash.as_str())))
         .collect();
     ranked.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.2.cmp(b.2)));
 
@@ -658,11 +653,28 @@ fn add_artists(
     // the plain build's Artist table (and golden digest) is byte-unchanged.
     if let Some(enr) = enrichment {
         let get = |k: &String| enr.artists.get(k).filter(|r| r.fetched && !r.failed);
-        let playcount: Vec<Option<i64>> = artists.keys().map(|k| get(k).and_then(|r| r.playcount)).collect();
-        let listeners: Vec<Option<i64>> = artists.keys().map(|k| get(k).and_then(|r| r.listeners)).collect();
-        let mbid: Vec<Option<String>> = artists.keys().map(|k| get(k).and_then(|r| r.mbid.clone())).collect();
-        cols.push(("lastfm_playcount", ColumnType::Int64, ColumnData::Int64(playcount)));
-        cols.push(("lastfm_listeners", ColumnType::Int64, ColumnData::Int64(listeners)));
+        let playcount: Vec<Option<i64>> = artists
+            .keys()
+            .map(|k| get(k).and_then(|r| r.playcount))
+            .collect();
+        let listeners: Vec<Option<i64>> = artists
+            .keys()
+            .map(|k| get(k).and_then(|r| r.listeners))
+            .collect();
+        let mbid: Vec<Option<String>> = artists
+            .keys()
+            .map(|k| get(k).and_then(|r| r.mbid.clone()))
+            .collect();
+        cols.push((
+            "lastfm_playcount",
+            ColumnType::Int64,
+            ColumnData::Int64(playcount),
+        ));
+        cols.push((
+            "lastfm_listeners",
+            ColumnType::Int64,
+            ColumnData::Int64(listeners),
+        ));
         cols.push(("mbid", ColumnType::String, ColumnData::String(mbid)));
     }
     add(graph, build_df(cols), ARTIST, "id", "name")
@@ -689,13 +701,36 @@ fn add_albums(
     // P12: enrichment properties (null-safe; only when enrichment is present).
     if let Some(enr) = enrichment {
         let get = |k: &String| enr.albums.get(k).filter(|r| r.fetched && !r.failed);
-        let playcount: Vec<Option<i64>> = albums.keys().map(|k| get(k).and_then(|r| r.playcount)).collect();
-        let listeners: Vec<Option<i64>> = albums.keys().map(|k| get(k).and_then(|r| r.listeners)).collect();
-        let mbid: Vec<Option<String>> = albums.keys().map(|k| get(k).and_then(|r| r.mbid.clone())).collect();
-        let url: Vec<Option<String>> = albums.keys().map(|k| get(k).and_then(|r| r.url.clone())).collect();
-        let wiki: Vec<Option<String>> = albums.keys().map(|k| get(k).and_then(|r| r.wiki_summary.clone())).collect();
-        cols.push(("lastfm_playcount", ColumnType::Int64, ColumnData::Int64(playcount)));
-        cols.push(("lastfm_listeners", ColumnType::Int64, ColumnData::Int64(listeners)));
+        let playcount: Vec<Option<i64>> = albums
+            .keys()
+            .map(|k| get(k).and_then(|r| r.playcount))
+            .collect();
+        let listeners: Vec<Option<i64>> = albums
+            .keys()
+            .map(|k| get(k).and_then(|r| r.listeners))
+            .collect();
+        let mbid: Vec<Option<String>> = albums
+            .keys()
+            .map(|k| get(k).and_then(|r| r.mbid.clone()))
+            .collect();
+        let url: Vec<Option<String>> = albums
+            .keys()
+            .map(|k| get(k).and_then(|r| r.url.clone()))
+            .collect();
+        let wiki: Vec<Option<String>> = albums
+            .keys()
+            .map(|k| get(k).and_then(|r| r.wiki_summary.clone()))
+            .collect();
+        cols.push((
+            "lastfm_playcount",
+            ColumnType::Int64,
+            ColumnData::Int64(playcount),
+        ));
+        cols.push((
+            "lastfm_listeners",
+            ColumnType::Int64,
+            ColumnData::Int64(listeners),
+        ));
         cols.push(("mbid", ColumnType::String, ColumnData::String(mbid)));
         cols.push(("lastfm_url", ColumnType::String, ColumnData::String(url)));
         cols.push(("wiki_summary", ColumnType::String, ColumnData::String(wiki)));
@@ -731,7 +766,10 @@ fn add_keys(graph: &mut DirGraph) -> Result<()> {
 }
 
 fn add_tempo_bands(graph: &mut DirGraph) -> Result<()> {
-    let ids: Vec<Option<String>> = TEMPO_BANDS.iter().map(|(n, _, _)| Some(n.to_string())).collect();
+    let ids: Vec<Option<String>> = TEMPO_BANDS
+        .iter()
+        .map(|(n, _, _)| Some(n.to_string()))
+        .collect();
     let names = ids.clone();
     let df = build_df(vec![
         ("id", ColumnType::String, ColumnData::String(ids)),
@@ -802,7 +840,11 @@ fn add_sources(
             .keys()
             .map(|k| source_fingerprints.get(k).cloned().flatten())
             .collect();
-        cols.push(("scan_fingerprint", ColumnType::String, ColumnData::String(fps)));
+        cols.push((
+            "scan_fingerprint",
+            ColumnType::String,
+            ColumnData::String(fps),
+        ));
     }
     add(graph, build_df(cols), SOURCE, "id", "path")
 }
@@ -829,14 +871,15 @@ fn add_tracks(
     }
 
     // Helpers to project each record.
-    let tag_str = |r: &AnalysisRecord, f: fn(&crate::record::TagsDto) -> Option<&str>| -> Option<String> {
-        r.tags
-            .as_ref()
-            .and_then(|t| f(t))
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-    };
+    let tag_str =
+        |r: &AnalysisRecord, f: fn(&crate::record::TagsDto) -> Option<&str>| -> Option<String> {
+            r.tags
+                .as_ref()
+                .and_then(|t| f(t))
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+        };
 
     let unique_id: Vec<Option<String>> = sorted
         .iter()
@@ -870,26 +913,37 @@ fn add_tracks(
         .iter()
         .map(|r| album_name(r.tags.as_ref().and_then(|t| t.album.as_deref())))
         .collect();
-    let genre_tag: Vec<Option<String>> =
-        sorted.iter().map(|r| tag_str(r, |t| t.genre.as_deref())).collect();
-    let format: Vec<Option<String>> =
-        sorted.iter().map(|r| Some(r.source.format.clone())).collect();
-    let genre_model_id =
-        str_opt_col(sorted, |r| r.analysis.provenance.genre_model_id.clone());
+    let genre_tag: Vec<Option<String>> = sorted
+        .iter()
+        .map(|r| tag_str(r, |t| t.genre.as_deref()))
+        .collect();
+    let format: Vec<Option<String>> = sorted
+        .iter()
+        .map(|r| Some(r.source.format.clone()))
+        .collect();
+    let genre_model_id = str_opt_col(sorted, |r| r.analysis.provenance.genre_model_id.clone());
     let vocalness_model_id =
         str_opt_col(sorted, |r| r.analysis.provenance.vocalness_model_id.clone());
-    let aggression_model_id =
-        str_opt_col(sorted, |r| r.analysis.provenance.aggression_model_id.clone());
+    let aggression_model_id = str_opt_col(sorted, |r| {
+        r.analysis.provenance.aggression_model_id.clone()
+    });
 
     // Int columns.
-    let year = int_opt_col(sorted, |r| r.tags.as_ref().and_then(|t| t.year).map(|y| y as i64));
+    let year = int_opt_col(sorted, |r| {
+        r.tags.as_ref().and_then(|t| t.year).map(|y| y as i64)
+    });
     // sonara 0.2.4: original release year (reissue-safe), and the source of the
     // era year the Decade/FROM_DECADE mapping actually used ("original_year" |
     // "file_year" | null when no year tag at all).
-    let original_year =
-        int_opt_col(sorted, |r| r.tags.as_ref().and_then(|t| t.original_year).map(|y| y as i64));
-    let era_source =
-        str_opt_col(sorted, |r| era_year(r.tags.as_ref()).map(|(_, s)| s.to_string()));
+    let original_year = int_opt_col(sorted, |r| {
+        r.tags
+            .as_ref()
+            .and_then(|t| t.original_year)
+            .map(|y| y as i64)
+    });
+    let era_source = str_opt_col(sorted, |r| {
+        era_year(r.tags.as_ref()).map(|(_, s)| s.to_string())
+    });
     let track_no = int_opt_col(sorted, |r| {
         r.tags.as_ref().and_then(|t| t.track_no).map(|n| n as i64)
     });
@@ -898,10 +952,10 @@ fn add_tracks(
     let n_segments = int_opt_col(sorted, |r| {
         r.analysis.segments.as_ref().map(|s| s.len() as i64)
     });
-    let analysis_schema_version =
-        int_opt_col(sorted, |r| Some(r.analysis.provenance.schema_version as i64));
-    let embedding_version =
-        int_opt_col(sorted, |r| r.analysis.embedding_version.map(|v| v as i64));
+    let analysis_schema_version = int_opt_col(sorted, |r| {
+        Some(r.analysis.provenance.schema_version as i64)
+    });
+    let embedding_version = int_opt_col(sorted, |r| r.analysis.embedding_version.map(|v| v as i64));
 
     // Float columns — always-present (non-Option in the DTO) then optional.
     let duration_sec = f_col(sorted, |r| r.analysis.duration_sec);
@@ -968,8 +1022,7 @@ fn add_tracks(
     let valence_index: Vec<Option<f64>> = axes.iter().map(|a| a.valence_index).collect();
     let tension_index: Vec<Option<f64>> = axes.iter().map(|a| a.tension_index).collect();
     let recording_quality: Vec<Option<f64>> = axes.iter().map(|a| a.recording_quality).collect();
-    let quality_tier: Vec<Option<String>> =
-        axes.iter().map(|a| a.quality_tier.clone()).collect();
+    let quality_tier: Vec<Option<String>> = axes.iter().map(|a| a.quality_tier.clone()).collect();
 
     // P21b: Last.fm popularity columns are part of the Track schema even for a
     // plain build. Counts and percentile stay null without a usable match;
@@ -996,29 +1049,73 @@ fn add_tracks(
     let predominant_chord = str_opt_col(sorted, |r| r.analysis.predominant_chord.clone());
 
     let mut cols = vec![
-        ("content_hash", ColumnType::String, ColumnData::String(unique_id)),
+        (
+            "content_hash",
+            ColumnType::String,
+            ColumnData::String(unique_id),
+        ),
         ("title", ColumnType::String, ColumnData::String(title)),
         ("path", ColumnType::String, ColumnData::String(path)),
-        ("source_root", ColumnType::String, ColumnData::String(source_root)),
+        (
+            "source_root",
+            ColumnType::String,
+            ColumnData::String(source_root),
+        ),
         ("filename", ColumnType::String, ColumnData::String(filename)),
-        ("artist_name", ColumnType::String, ColumnData::String(artist_name)),
-        ("album_name", ColumnType::String, ColumnData::String(album_name_col)),
-        ("genre_tag", ColumnType::String, ColumnData::String(genre_tag)),
+        (
+            "artist_name",
+            ColumnType::String,
+            ColumnData::String(artist_name),
+        ),
+        (
+            "album_name",
+            ColumnType::String,
+            ColumnData::String(album_name_col),
+        ),
+        (
+            "genre_tag",
+            ColumnType::String,
+            ColumnData::String(genre_tag),
+        ),
         ("format", ColumnType::String, ColumnData::String(format)),
         ("year", ColumnType::Int64, ColumnData::Int64(year)),
-        ("original_year", ColumnType::Int64, ColumnData::Int64(original_year)),
-        ("era_source", ColumnType::String, ColumnData::String(era_source)),
+        (
+            "original_year",
+            ColumnType::Int64,
+            ColumnData::Int64(original_year),
+        ),
+        (
+            "era_source",
+            ColumnType::String,
+            ColumnData::String(era_source),
+        ),
         ("track_no", ColumnType::Int64, ColumnData::Int64(track_no)),
         ("file_size", ColumnType::Int64, ColumnData::Int64(file_size)),
-        ("energy_level", ColumnType::Int64, ColumnData::Int64(energy_level)),
-        ("n_segments", ColumnType::Int64, ColumnData::Int64(n_segments)),
+        (
+            "energy_level",
+            ColumnType::Int64,
+            ColumnData::Int64(energy_level),
+        ),
+        (
+            "n_segments",
+            ColumnType::Int64,
+            ColumnData::Int64(n_segments),
+        ),
         (
             "analysis_schema_version",
             ColumnType::Int64,
             ColumnData::Int64(analysis_schema_version),
         ),
-        ("embedding_version", ColumnType::Int64, ColumnData::Int64(embedding_version)),
-        ("genre_model_id", ColumnType::String, ColumnData::String(genre_model_id)),
+        (
+            "embedding_version",
+            ColumnType::Int64,
+            ColumnData::Int64(embedding_version),
+        ),
+        (
+            "genre_model_id",
+            ColumnType::String,
+            ColumnData::String(genre_model_id),
+        ),
         (
             "vocalness_model_id",
             ColumnType::String,
@@ -1029,41 +1126,161 @@ fn add_tracks(
             ColumnType::String,
             ColumnData::String(aggression_model_id),
         ),
-        ("duration_sec", ColumnType::Float64, ColumnData::Float64(duration_sec)),
+        (
+            "duration_sec",
+            ColumnType::Float64,
+            ColumnData::Float64(duration_sec),
+        ),
         ("bpm", ColumnType::Float64, ColumnData::Float64(bpm)),
         ("bpm_raw", ColumnType::Float64, ColumnData::Float64(bpm_raw)),
-        ("bpm_confidence", ColumnType::Float64, ColumnData::Float64(bpm_confidence)),
-        ("loudness_lufs", ColumnType::Float64, ColumnData::Float64(loudness_lufs)),
-        ("dynamic_range_db", ColumnType::Float64, ColumnData::Float64(dynamic_range_db)),
-        ("spectral_centroid", ColumnType::Float64, ColumnData::Float64(spectral_centroid)),
-        ("zero_crossing_rate", ColumnType::Float64, ColumnData::Float64(zero_crossing_rate)),
-        ("onset_density", ColumnType::Float64, ColumnData::Float64(onset_density)),
-        ("tempo_variability", ColumnType::Float64, ColumnData::Float64(tempo_variability)),
-        ("grid_stability", ColumnType::Float64, ColumnData::Float64(grid_stability)),
-        ("grid_offset_sec", ColumnType::Float64, ColumnData::Float64(grid_offset_sec)),
+        (
+            "bpm_confidence",
+            ColumnType::Float64,
+            ColumnData::Float64(bpm_confidence),
+        ),
+        (
+            "loudness_lufs",
+            ColumnType::Float64,
+            ColumnData::Float64(loudness_lufs),
+        ),
+        (
+            "dynamic_range_db",
+            ColumnType::Float64,
+            ColumnData::Float64(dynamic_range_db),
+        ),
+        (
+            "spectral_centroid",
+            ColumnType::Float64,
+            ColumnData::Float64(spectral_centroid),
+        ),
+        (
+            "zero_crossing_rate",
+            ColumnType::Float64,
+            ColumnData::Float64(zero_crossing_rate),
+        ),
+        (
+            "onset_density",
+            ColumnType::Float64,
+            ColumnData::Float64(onset_density),
+        ),
+        (
+            "tempo_variability",
+            ColumnType::Float64,
+            ColumnData::Float64(tempo_variability),
+        ),
+        (
+            "grid_stability",
+            ColumnType::Float64,
+            ColumnData::Float64(grid_stability),
+        ),
+        (
+            "grid_offset_sec",
+            ColumnType::Float64,
+            ColumnData::Float64(grid_offset_sec),
+        ),
         ("energy", ColumnType::Float64, ColumnData::Float64(energy)),
         ("valence", ColumnType::Float64, ColumnData::Float64(valence)),
-        ("danceability", ColumnType::Float64, ColumnData::Float64(danceability)),
-        ("acousticness", ColumnType::Float64, ColumnData::Float64(acousticness)),
-        ("vocalness", ColumnType::Float64, ColumnData::Float64(vocalness)),
-        ("dissonance", ColumnType::Float64, ColumnData::Float64(dissonance)),
-        ("mood_happy", ColumnType::Float64, ColumnData::Float64(mood_happy)),
-        ("mood_aggressive", ColumnType::Float64, ColumnData::Float64(mood_aggressive)),
-        ("mood_relaxed", ColumnType::Float64, ColumnData::Float64(mood_relaxed)),
-        ("mood_sad", ColumnType::Float64, ColumnData::Float64(mood_sad)),
-        ("instrumentalness", ColumnType::Float64, ColumnData::Float64(instrumentalness)),
-        ("key_confidence", ColumnType::Float64, ColumnData::Float64(key_confidence)),
-        ("chord_change_rate", ColumnType::Float64, ColumnData::Float64(chord_change_rate)),
-        ("loudness_range_lu", ColumnType::Float64, ColumnData::Float64(loudness_range_lu)),
-        ("true_peak_db", ColumnType::Float64, ColumnData::Float64(true_peak_db)),
-        ("replaygain_db", ColumnType::Float64, ColumnData::Float64(replaygain_db)),
-        ("intro_end_sec", ColumnType::Float64, ColumnData::Float64(intro_end_sec)),
-        ("outro_start_sec", ColumnType::Float64, ColumnData::Float64(outro_start_sec)),
-        ("leading_silence_sec", ColumnType::Float64, ColumnData::Float64(leading_silence_sec)),
-        ("trailing_silence_sec", ColumnType::Float64, ColumnData::Float64(trailing_silence_sec)),
-        ("spectral_flatness", ColumnType::Float64, ColumnData::Float64(spectral_flatness)),
+        (
+            "danceability",
+            ColumnType::Float64,
+            ColumnData::Float64(danceability),
+        ),
+        (
+            "acousticness",
+            ColumnType::Float64,
+            ColumnData::Float64(acousticness),
+        ),
+        (
+            "vocalness",
+            ColumnType::Float64,
+            ColumnData::Float64(vocalness),
+        ),
+        (
+            "dissonance",
+            ColumnType::Float64,
+            ColumnData::Float64(dissonance),
+        ),
+        (
+            "mood_happy",
+            ColumnType::Float64,
+            ColumnData::Float64(mood_happy),
+        ),
+        (
+            "mood_aggressive",
+            ColumnType::Float64,
+            ColumnData::Float64(mood_aggressive),
+        ),
+        (
+            "mood_relaxed",
+            ColumnType::Float64,
+            ColumnData::Float64(mood_relaxed),
+        ),
+        (
+            "mood_sad",
+            ColumnType::Float64,
+            ColumnData::Float64(mood_sad),
+        ),
+        (
+            "instrumentalness",
+            ColumnType::Float64,
+            ColumnData::Float64(instrumentalness),
+        ),
+        (
+            "key_confidence",
+            ColumnType::Float64,
+            ColumnData::Float64(key_confidence),
+        ),
+        (
+            "chord_change_rate",
+            ColumnType::Float64,
+            ColumnData::Float64(chord_change_rate),
+        ),
+        (
+            "loudness_range_lu",
+            ColumnType::Float64,
+            ColumnData::Float64(loudness_range_lu),
+        ),
+        (
+            "true_peak_db",
+            ColumnType::Float64,
+            ColumnData::Float64(true_peak_db),
+        ),
+        (
+            "replaygain_db",
+            ColumnType::Float64,
+            ColumnData::Float64(replaygain_db),
+        ),
+        (
+            "intro_end_sec",
+            ColumnType::Float64,
+            ColumnData::Float64(intro_end_sec),
+        ),
+        (
+            "outro_start_sec",
+            ColumnType::Float64,
+            ColumnData::Float64(outro_start_sec),
+        ),
+        (
+            "leading_silence_sec",
+            ColumnType::Float64,
+            ColumnData::Float64(leading_silence_sec),
+        ),
+        (
+            "trailing_silence_sec",
+            ColumnType::Float64,
+            ColumnData::Float64(trailing_silence_sec),
+        ),
+        (
+            "spectral_flatness",
+            ColumnType::Float64,
+            ColumnData::Float64(spectral_flatness),
+        ),
         // Sonara fused aggression rank + evidence diagnostics (graph schema v3).
-        ("aggression", ColumnType::Float64, ColumnData::Float64(aggression)),
+        (
+            "aggression",
+            ColumnType::Float64,
+            ColumnData::Float64(aggression),
+        ),
         (
             "aggression_confidence",
             ColumnType::Float64,
@@ -1090,33 +1307,121 @@ fn add_tracks(
             ColumnData::Float64(aggression_rhythm),
         ),
         // P21 Stage A: curve-derived flat features.
-        ("macro_dynamics", ColumnType::Float64, ColumnData::Float64(macro_dynamics)),
-        ("energy_arc_range", ColumnType::Float64, ColumnData::Float64(energy_arc_range)),
-        ("energy_builds_per_min", ColumnType::Float64, ColumnData::Float64(energy_builds_per_min)),
-        ("flow_smoothness", ColumnType::Float64, ColumnData::Float64(flow_smoothness)),
-        ("chord_vocab", ColumnType::Int64, ColumnData::Int64(chord_vocab)),
-        ("chord_entropy", ColumnType::Float64, ColumnData::Float64(chord_entropy)),
-        ("chord_churn", ColumnType::Float64, ColumnData::Float64(chord_churn)),
-        ("tempo_steadiness", ColumnType::Float64, ColumnData::Float64(tempo_steadiness)),
-        ("seg_density", ColumnType::Float64, ColumnData::Float64(seg_density)),
+        (
+            "macro_dynamics",
+            ColumnType::Float64,
+            ColumnData::Float64(macro_dynamics),
+        ),
+        (
+            "energy_arc_range",
+            ColumnType::Float64,
+            ColumnData::Float64(energy_arc_range),
+        ),
+        (
+            "energy_builds_per_min",
+            ColumnType::Float64,
+            ColumnData::Float64(energy_builds_per_min),
+        ),
+        (
+            "flow_smoothness",
+            ColumnType::Float64,
+            ColumnData::Float64(flow_smoothness),
+        ),
+        (
+            "chord_vocab",
+            ColumnType::Int64,
+            ColumnData::Int64(chord_vocab),
+        ),
+        (
+            "chord_entropy",
+            ColumnType::Float64,
+            ColumnData::Float64(chord_entropy),
+        ),
+        (
+            "chord_churn",
+            ColumnType::Float64,
+            ColumnData::Float64(chord_churn),
+        ),
+        (
+            "tempo_steadiness",
+            ColumnType::Float64,
+            ColumnData::Float64(tempo_steadiness),
+        ),
+        (
+            "seg_density",
+            ColumnType::Float64,
+            ColumnData::Float64(seg_density),
+        ),
         // P21 Stage B: percentile-calibrated composite axes.
-        ("is_music", ColumnType::Boolean, ColumnData::Boolean(is_music)),
-        ("arousal_index", ColumnType::Float64, ColumnData::Float64(arousal_index)),
-        ("valence_index", ColumnType::Float64, ColumnData::Float64(valence_index)),
-        ("tension_index", ColumnType::Float64, ColumnData::Float64(tension_index)),
-        ("recording_quality", ColumnType::Float64, ColumnData::Float64(recording_quality)),
-        ("quality_tier", ColumnType::String, ColumnData::String(quality_tier)),
+        (
+            "is_music",
+            ColumnType::Boolean,
+            ColumnData::Boolean(is_music),
+        ),
+        (
+            "arousal_index",
+            ColumnType::Float64,
+            ColumnData::Float64(arousal_index),
+        ),
+        (
+            "valence_index",
+            ColumnType::Float64,
+            ColumnData::Float64(valence_index),
+        ),
+        (
+            "tension_index",
+            ColumnType::Float64,
+            ColumnData::Float64(tension_index),
+        ),
+        (
+            "recording_quality",
+            ColumnType::Float64,
+            ColumnData::Float64(recording_quality),
+        ),
+        (
+            "quality_tier",
+            ColumnType::String,
+            ColumnData::String(quality_tier),
+        ),
         // P21b: recognition/popularity (always-present columns).
-        ("lastfm_listeners", ColumnType::Int64, ColumnData::Int64(lastfm_listeners)),
-        ("lastfm_playcount", ColumnType::Int64, ColumnData::Int64(lastfm_playcount)),
-        ("has_lastfm_match", ColumnType::Boolean, ColumnData::Boolean(has_lastfm_match)),
-        ("popularity", ColumnType::Float64, ColumnData::Float64(popularity_rank)),
+        (
+            "lastfm_listeners",
+            ColumnType::Int64,
+            ColumnData::Int64(lastfm_listeners),
+        ),
+        (
+            "lastfm_playcount",
+            ColumnType::Int64,
+            ColumnData::Int64(lastfm_playcount),
+        ),
+        (
+            "has_lastfm_match",
+            ColumnType::Boolean,
+            ColumnData::Boolean(has_lastfm_match),
+        ),
+        (
+            "popularity",
+            ColumnType::Float64,
+            ColumnData::Float64(popularity_rank),
+        ),
         // P21 Stage C: canonical-take flag (non-null bool).
-        ("is_canonical", ColumnType::Boolean, ColumnData::Boolean(is_canonical_col)),
-        ("time_signature", ColumnType::String, ColumnData::String(time_signature)),
+        (
+            "is_canonical",
+            ColumnType::Boolean,
+            ColumnData::Boolean(is_canonical_col),
+        ),
+        (
+            "time_signature",
+            ColumnType::String,
+            ColumnData::String(time_signature),
+        ),
         ("key", ColumnType::String, ColumnData::String(key)),
         ("camelot", ColumnType::String, ColumnData::String(camelot)),
-        ("predominant_chord", ColumnType::String, ColumnData::String(predominant_chord)),
+        (
+            "predominant_chord",
+            ColumnType::String,
+            ColumnData::String(predominant_chord),
+        ),
     ];
 
     // P12: optional enrichment metadata, joined by content_hash. The P21b
@@ -1134,8 +1439,16 @@ fn add_tracks(
         let original_album_position =
             int_opt_col(sorted, |r| get(r).and_then(|e| e.album_position));
         cols.push(("mbid", ColumnType::String, ColumnData::String(mbid)));
-        cols.push(("lastfm_url", ColumnType::String, ColumnData::String(lastfm_url)));
-        cols.push(("original_album", ColumnType::String, ColumnData::String(original_album)));
+        cols.push((
+            "lastfm_url",
+            ColumnType::String,
+            ColumnData::String(lastfm_url),
+        ));
+        cols.push((
+            "original_album",
+            ColumnType::String,
+            ColumnData::String(original_album),
+        ));
         cols.push((
             "original_album_position",
             ColumnType::Int64,
@@ -1175,7 +1488,13 @@ fn build_edges(
         if let Some(k) = &r.analysis.key {
             specs.push(edge(TRACK, hash, KEY, k, IN_KEY));
         }
-        specs.push(edge(TRACK, hash, TEMPO_BAND_TYPE, tempo_band(r.analysis.bpm), IN_TEMPO_BAND));
+        specs.push(edge(
+            TRACK,
+            hash,
+            TEMPO_BAND_TYPE,
+            tempo_band(r.analysis.bpm),
+            IN_TEMPO_BAND,
+        ));
         if let Some(el) = r.analysis.energy_level {
             specs.push(edge(TRACK, hash, ENERGY_LEVEL, &el.to_string(), AT_ENERGY));
         }
@@ -1304,7 +1623,10 @@ fn add_enrichment_edges(
             }
         }
     }
-    check_edges(add_edges_from_specs(graph, genre_specs), "folksonomy IN_GENRE")?;
+    check_edges(
+        add_edges_from_specs(graph, genre_specs),
+        "folksonomy IN_GENRE",
+    )?;
 
     // ── CROWD_SIMILAR Track→Track (weighted) ──
     let mut crowd_specs: Vec<EdgeSpec> = Vec::new();
@@ -1503,8 +1825,7 @@ mod tests {
         };
 
         let pairs = [("ab", &a, &b), ("ac", &a, &c), ("bc", &b, &c)];
-        let mut ours: Vec<(&str, f32)> =
-            pairs.iter().map(|(n, x, y)| (*n, eucl(x, y))).collect();
+        let mut ours: Vec<(&str, f32)> = pairs.iter().map(|(n, x, y)| (*n, eucl(x, y))).collect();
         let mut sonaras: Vec<(&str, f32)> = pairs
             .iter()
             .map(|(n, x, y)| (*n, sonara::similarity::distance(x, y)))

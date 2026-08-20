@@ -126,7 +126,6 @@ const PROSE_SITES: &[&str] = &[
     "docs/index.md",
 ];
 
-
 /// Workflow files that check out the kglite sibling at a release tag.
 ///
 /// These pin the engine CI actually builds against. They drifted silently
@@ -302,7 +301,7 @@ fn kglite_version_is_stated_consistently_everywhere() {
                 ));
             }
             for (line_no, v) in &refs {
-                if &v != &want {
+                if v != want {
                     failures.push(format!(
                         "{site}:{line_no}: checks {engine} out at tag v{v}, pin says {want}. \
                          CI would build against a different engine than the manifest declares."

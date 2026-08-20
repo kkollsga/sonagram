@@ -235,7 +235,10 @@ fn tempo_steadiness(tempo_curve: Option<&[f32]>) -> Option<f64> {
 
 /// Structural busyness: `segments` per minute. `None` when the field is absent or
 /// the duration is non-positive; an empty (but present) segment list is `0.0`.
-fn seg_density(segments: Option<&[crate::record::SegmentEventDto]>, duration_sec: f64) -> Option<f64> {
+fn seg_density(
+    segments: Option<&[crate::record::SegmentEventDto]>,
+    duration_sec: f64,
+) -> Option<f64> {
     let segs = segments?;
     if duration_sec <= 0.0 {
         return None;
@@ -296,7 +299,10 @@ pub(super) fn composite_axes(
     feats: &[CurveFeatures],
 ) -> Vec<CompositeAxes> {
     let n = sorted.len();
-    let hashes: Vec<&str> = sorted.iter().map(|r| r.source.content_hash.as_str()).collect();
+    let hashes: Vec<&str> = sorted
+        .iter()
+        .map(|r| r.source.content_hash.as_str())
+        .collect();
 
     // Small per-track projections used across several axes.
     let dissonance: Vec<Option<f64>> = fo(sorted, |a| a.dissonance);
@@ -307,11 +313,31 @@ pub(super) fn composite_axes(
     // danceability(+), spectral_contrast_mean(+ if present), MFCC-1(+ if present).
     let arousal = z_composite(&[
         Component::new(music_only(fo(sorted, |a| a.energy), &is_music), 1.0),
-        Component::new(music_only(f_always(sorted, |a| a.spectral_centroid_mean), &is_music), 1.0),
-        Component::new(music_only(f_always(sorted, |a| a.onset_density), &is_music), 1.0),
+        Component::new(
+            music_only(f_always(sorted, |a| a.spectral_centroid_mean), &is_music),
+            1.0,
+        ),
+        Component::new(
+            music_only(f_always(sorted, |a| a.onset_density), &is_music),
+            1.0,
+        ),
         Component::new(music_only(fo(sorted, |a| a.danceability), &is_music), 1.0),
-        Component::new(music_only(fo(sorted, |a| vec_mean(a.spectral_contrast_mean.as_deref())), &is_music), 1.0),
-        Component::new(music_only(fo(sorted, |a| a.mfcc_mean.as_ref().and_then(|m| m.first().copied())), &is_music), 1.0),
+        Component::new(
+            music_only(
+                fo(sorted, |a| vec_mean(a.spectral_contrast_mean.as_deref())),
+                &is_music,
+            ),
+            1.0,
+        ),
+        Component::new(
+            music_only(
+                fo(sorted, |a| {
+                    a.mfcc_mean.as_ref().and_then(|m| m.first().copied())
+                }),
+                &is_music,
+            ),
+            1.0,
+        ),
     ]);
 
     // valence_index (WEAK PRIOR): key_confidence(+), dissonance(−), major(+),
@@ -454,10 +480,13 @@ fn mode_indicator(sorted: &[&AnalysisRecord], mode: &str) -> Vec<Option<f64>> {
     sorted
         .iter()
         .map(|r| {
-            r.analysis
-                .key
-                .as_deref()
-                .map(|k| if k.to_lowercase().contains(mode) { 1.0 } else { 0.0 })
+            r.analysis.key.as_deref().map(|k| {
+                if k.to_lowercase().contains(mode) {
+                    1.0
+                } else {
+                    0.0
+                }
+            })
         })
         .collect()
 }
@@ -477,7 +506,10 @@ fn fo<T: Into<f64>>(
     sorted: &[&AnalysisRecord],
     f: impl Fn(&crate::record::AnalysisDto) -> Option<T>,
 ) -> Vec<Option<f64>> {
-    sorted.iter().map(|r| f(&r.analysis).map(Into::into)).collect()
+    sorted
+        .iter()
+        .map(|r| f(&r.analysis).map(Into::into))
+        .collect()
 }
 
 /// Mean of a slice, or `None` when it is empty — used for the vector-valued
@@ -594,7 +626,7 @@ mod tests {
         assert!(energy_arc_range(None).is_none());
         assert!(energy_arc_range(Some(&[0.4])).is_none()); // too short
         assert!(energy_arc_range(Some(&[0.0, 0.0, 0.0])).is_none()); // mean ~0 → null
-        // [0,1,2,3,4]: mean 2, p95 3.8, p5 0.2 → (3.6)/2 = 1.8.
+                                                                     // [0,1,2,3,4]: mean 2, p95 3.8, p5 0.2 → (3.6)/2 = 1.8.
         let r = energy_arc_range(Some(&[0.0, 1.0, 2.0, 3.0, 4.0])).unwrap();
         assert!((r - 1.8).abs() < 1e-6);
     }
@@ -605,8 +637,11 @@ mod tests {
     fn energy_builds_counts_maximal_runs_over_eight() {
         assert!(energy_builds_per_min(None, 60.0).is_none());
         assert!(energy_builds_per_min(Some(&[0.1, 0.2]), 0.0).is_none()); // no duration
-        // Short present curve → zero builds, still a valid rate.
-        assert_eq!(energy_builds_per_min(Some(&[0.1, 0.2, 0.3]), 60.0).unwrap(), 0.0);
+                                                                          // Short present curve → zero builds, still a valid rate.
+        assert_eq!(
+            energy_builds_per_min(Some(&[0.1, 0.2, 0.3]), 60.0).unwrap(),
+            0.0
+        );
         // One ascending run of 8 samples (7 rises) over one minute → exactly 1/min.
         let rising: Vec<f32> = (0..8).map(|i| i as f32).collect();
         assert_eq!(energy_builds_per_min(Some(&rising), 60.0).unwrap(), 1.0);
@@ -627,7 +662,7 @@ mod tests {
         assert!(flow_smoothness(None).is_none());
         assert!(flow_smoothness(Some(&[0.5])).is_none()); // too short
         assert!(flow_smoothness(Some(&[0.0, 0.0])).is_none()); // mean ~0 → null
-        // Constant non-zero curve: no jitter → smoothness 1.
+                                                               // Constant non-zero curve: no jitter → smoothness 1.
         assert_eq!(flow_smoothness(Some(&[0.5, 0.5, 0.5])).unwrap(), 1.0);
         // Big swings clamp at 0 rather than going negative.
         assert_eq!(flow_smoothness(Some(&[0.1, 1.0, 0.1, 1.0])).unwrap(), 0.0);
@@ -673,7 +708,7 @@ mod tests {
         assert!(tempo_steadiness(None).is_none());
         assert!(tempo_steadiness(Some(&[120.0])).is_none()); // too short
         assert_eq!(tempo_steadiness(Some(&[120.0, 120.0, 120.0])).unwrap(), 1.0); // cv 0 → 1
-        // Non-trivial cv is < 1.
+                                                                                  // Non-trivial cv is < 1.
         let s = tempo_steadiness(Some(&[118.0, 122.0])).unwrap();
         assert!(s > 0.9 && s < 1.0);
     }
@@ -681,11 +716,18 @@ mod tests {
     #[test]
     fn seg_density_is_segments_per_minute() {
         use crate::record::SegmentEventDto;
-        let seg = || SegmentEventDto { start_sec: 0.0, end_sec: 1.0, energy: 0.3 };
+        let seg = || SegmentEventDto {
+            start_sec: 0.0,
+            end_sec: 1.0,
+            energy: 0.3,
+        };
         assert!(seg_density(None, 60.0).is_none());
         assert!(seg_density(Some(&[seg()]), 0.0).is_none()); // no duration
         assert_eq!(seg_density(Some(&[]), 60.0).unwrap(), 0.0);
-        assert_eq!(seg_density(Some(&[seg(), seg(), seg()]), 60.0).unwrap(), 3.0);
+        assert_eq!(
+            seg_density(Some(&[seg(), seg(), seg()]), 60.0).unwrap(),
+            3.0
+        );
     }
 
     // ── Stage B: z_composite ──
@@ -743,9 +785,8 @@ mod tests {
 
     #[test]
     fn non_music_threshold_is_strict_and_missing_is_music() {
-        let classify = |flatness: Option<f32>| {
-            flatness.is_none_or(|v| v <= NON_MUSIC_FLATNESS_THRESHOLD)
-        };
+        let classify =
+            |flatness: Option<f32>| flatness.is_none_or(|v| v <= NON_MUSIC_FLATNESS_THRESHOLD);
         assert!(classify(None));
         assert!(classify(Some(0.10)));
         assert!(!classify(Some(0.100_001)));
@@ -790,7 +831,11 @@ mod tests {
         let hashes = vec!["h3", "h2", "h1", "h0"];
         let got = percentile_rank(&scores, &hashes);
         for (h, p) in hashes.iter().zip(&got) {
-            assert_eq!(want[*h], p.unwrap(), "hash {h} must get a stable percentile");
+            assert_eq!(
+                want[*h],
+                p.unwrap(),
+                "hash {h} must get a stable percentile"
+            );
         }
     }
 }

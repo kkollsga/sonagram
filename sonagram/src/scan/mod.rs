@@ -382,9 +382,7 @@ pub fn load_records(library_root: &Path) -> Result<Vec<AnalysisRecord>> {
     // index construction order.
     let mut indexed_hashes: BTreeMap<String, String> = BTreeMap::new();
     for (rel_path, entry) in index {
-        indexed_hashes
-            .entry(entry.content_hash)
-            .or_insert(rel_path);
+        indexed_hashes.entry(entry.content_hash).or_insert(rel_path);
     }
 
     let mut records = Vec::with_capacity(indexed_hashes.len());
@@ -571,7 +569,10 @@ pub fn migrate_cached_record(
         return false;
     }
     for required in ["chords", "embedding", "instrumentalness", "vocalness"] {
-        if expected.binary_search_by(|feature| feature.as_str().cmp(required)).is_err() {
+        if expected
+            .binary_search_by(|feature| feature.as_str().cmp(required))
+            .is_err()
+        {
             return false;
         }
     }
@@ -922,8 +923,7 @@ pub fn scan_library_with(
                         for follower in followers {
                             s.failed.push((follower.abs_path, message.clone()));
                         }
-                        s.hash_work
-                            .insert(content_hash, HashWork::Failed(message));
+                        s.hash_work.insert(content_hash, HashWork::Failed(message));
                     }
                 }
                 s.analyze_done += 1;

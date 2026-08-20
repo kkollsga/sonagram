@@ -23,12 +23,20 @@ pub fn profile_library(graph: &DirGraph) -> Result<LibraryProfile> {
         .iter()
         .map(|t| t.song_key.as_deref().unwrap_or(t.id.as_str()))
         .collect();
-    let styles: BTreeSet<&str> = tracks.iter().flat_map(|t| t.style_keys.iter().map(String::as_str)).collect();
+    let styles: BTreeSet<&str> = tracks
+        .iter()
+        .flat_map(|t| t.style_keys.iter().map(String::as_str))
+        .collect();
     let mut quality_tiers = BTreeMap::new();
     let mut aggression_models = BTreeMap::new();
     for track in &tracks {
         *quality_tiers
-            .entry(track.quality_tier.clone().unwrap_or_else(|| "unknown".into()))
+            .entry(
+                track
+                    .quality_tier
+                    .clone()
+                    .unwrap_or_else(|| "unknown".into()),
+            )
             .or_insert(0) += 1;
         if let Some(model_id) = &track.aggression.model_id {
             *aggression_models.entry(model_id.clone()).or_insert(0) += 1;
@@ -42,7 +50,10 @@ pub fn profile_library(graph: &DirGraph) -> Result<LibraryProfile> {
         ("tension_index", values(&tracks, |t| t.tension)),
         ("valence_index", values(&tracks, |t| t.valence)),
         ("vocalness", values(&tracks, |t| t.vocalness)),
-        ("aggression", values(&tracks, TrackCandidate::aggression_score)),
+        (
+            "aggression",
+            values(&tracks, TrackCandidate::aggression_score),
+        ),
         (
             "aggression_confidence",
             aggression_values(&tracks, |t| t.aggression.confidence),
@@ -64,7 +75,10 @@ pub fn profile_library(graph: &DirGraph) -> Result<LibraryProfile> {
             aggression_values(&tracks, |t| t.aggression.rhythm),
         ),
         ("flow_smoothness", values(&tracks, |t| t.flow_smoothness)),
-        ("recording_quality", values(&tracks, |t| t.recording_quality)),
+        (
+            "recording_quality",
+            values(&tracks, |t| t.recording_quality),
+        ),
         ("popularity", values(&tracks, |t| t.popularity)),
     ] {
         stats.insert(name.to_string(), summarize(values, tracks.len()));
@@ -104,7 +118,11 @@ fn aggression_values(
 }
 
 fn values(tracks: &[TrackCandidate], get: impl Fn(&TrackCandidate) -> Option<f64>) -> Vec<f64> {
-    tracks.iter().filter_map(get).filter(|v| v.is_finite()).collect()
+    tracks
+        .iter()
+        .filter_map(get)
+        .filter(|v| v.is_finite())
+        .collect()
 }
 
 fn summarize(mut values: Vec<f64>, total: usize) -> StatSummary {

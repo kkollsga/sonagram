@@ -30,7 +30,8 @@ fn load_records() -> Vec<AnalysisRecord> {
         .iter()
         .map(|p| {
             let text = std::fs::read_to_string(p).unwrap();
-            AnalysisRecord::from_json(&text).unwrap_or_else(|e| panic!("parse {}: {e}", p.display()))
+            AnalysisRecord::from_json(&text)
+                .unwrap_or_else(|e| panic!("parse {}: {e}", p.display()))
         })
         .collect()
 }
@@ -38,7 +39,10 @@ fn load_records() -> Vec<AnalysisRecord> {
 /// P17: build the fixture graph with the source root = the fake library dir, so
 /// each Track's stamped `source_root` resolves to the on-disk files this test
 /// materializes (playlist export no longer needs a library_root argument).
-fn build_with_root(records: &[AnalysisRecord], lib: &std::path::Path) -> std::sync::Arc<kglite::api::DirGraph> {
+fn build_with_root(
+    records: &[AnalysisRecord],
+    lib: &std::path::Path,
+) -> std::sync::Arc<kglite::api::DirGraph> {
     let library = LibraryInfo {
         root: lib.to_string_lossy().into_owned(),
         n_tracks: records.len(),
@@ -77,7 +81,10 @@ fn export_folder_copies_all_fixtures_with_relative_m3u8() {
     let g = build_with_root(&records, &lib);
 
     // Resolve ALL 15 tracks in fixture (sorted) order via their content hashes.
-    let ids: Vec<String> = records.iter().map(|r| r.source.content_hash.clone()).collect();
+    let ids: Vec<String> = records
+        .iter()
+        .map(|r| r.source.content_hash.clone())
+        .collect();
     let entries = playlist::entries_from_graph(g.as_ref(), &lib, &ids).unwrap();
     assert_eq!(entries.len(), 15);
 
@@ -107,8 +114,14 @@ fn export_folder_copies_all_fixtures_with_relative_m3u8() {
     assert_eq!(path_lines.len(), 15, "one path line per track");
     for (i, name) in path_lines.iter().enumerate() {
         // Relative: no separators, and the actual copied file exists.
-        assert!(!name.contains('/') && !name.contains('\\'), "relative name: {name}");
-        assert!(name.starts_with(&format!("{:02} - ", i + 1)), "position prefix: {name}");
+        assert!(
+            !name.contains('/') && !name.contains('\\'),
+            "relative name: {name}"
+        );
+        assert!(
+            name.starts_with(&format!("{:02} - ", i + 1)),
+            "position prefix: {name}"
+        );
         assert!(dest.join(name).exists(), "copied file present: {name}");
     }
 
@@ -160,10 +173,7 @@ fn export_folder_preserves_selection_order() {
     assert_eq!(report.copied, records.len());
 
     let text = std::fs::read_to_string(&report.playlist_path).unwrap();
-    let path_lines: Vec<&str> = text
-        .lines()
-        .filter(|l| !l.starts_with('#'))
-        .collect();
+    let path_lines: Vec<&str> = text.lines().filter(|l| !l.starts_with('#')).collect();
     // First path line is position 01 and corresponds to the LAST fixture record:
     // verify by byte identity of the copied file vs that record's source content.
     assert!(path_lines[0].starts_with("01 - "), "{}", path_lines[0]);

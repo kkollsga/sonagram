@@ -101,7 +101,10 @@ fn every_fixture_round_trips_and_holds_invariants() {
             );
         }
         bounded("aggression_confidence", rec.analysis.aggression_confidence);
-        bounded("aggression_forcefulness", rec.analysis.aggression_forcefulness);
+        bounded(
+            "aggression_forcefulness",
+            rec.analysis.aggression_forcefulness,
+        );
         bounded("aggression_harshness", rec.analysis.aggression_harshness);
         bounded("aggression_tension", rec.analysis.aggression_tension);
         bounded("aggression_rhythm", rec.analysis.aggression_rhythm);

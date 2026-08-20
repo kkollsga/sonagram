@@ -89,7 +89,11 @@ fn build_cache(lib: &Path, bytes: &[u8]) {
     let mut index: Index = BTreeMap::new();
     index.insert(
         "a.mp3".to_string(),
-        IndexEntry { size, mtime_unix: mtime, content_hash: "h0".to_string() },
+        IndexEntry {
+            size,
+            mtime_unix: mtime,
+            content_hash: "h0".to_string(),
+        },
     );
     cache.save_index(&index).unwrap();
 }
@@ -108,7 +112,10 @@ fn skill_show_prints_embedded_skill() {
     assert!(!text.is_empty(), "skill show is non-empty");
     assert!(text.contains("sonagram-playlist"), "names the skill");
     // The library-detection ladder (P19) rides along in the embedded copy.
-    assert!(text.contains("Library detection"), "carries the detection ladder");
+    assert!(
+        text.contains("Library detection"),
+        "carries the detection ladder"
+    );
 }
 
 #[test]
@@ -133,7 +140,10 @@ fn skill_install_writes_file_to_dir() {
         .arg(&skills)
         .output()
         .unwrap();
-    assert!(!again.status.success(), "refuses to overwrite without --force");
+    assert!(
+        !again.status.success(),
+        "refuses to overwrite without --force"
+    );
 }
 
 // ────────────────────────── status graph_stale ──────────────────────────────
@@ -146,14 +156,25 @@ fn status_json(home: &Path) -> (i32, serde_json::Value) {
         .expect("run status");
     let code = out.status.code().expect("exit code");
     let parsed = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
-        panic!("status stdout not JSON: {e}\nstdout={:?}\nstderr={:?}", out.stdout, out.stderr)
+        panic!(
+            "status stdout not JSON: {e}\nstdout={:?}\nstderr={:?}",
+            out.stdout, out.stderr
+        )
     });
     (code, parsed)
 }
 
 fn run_ok(home: &Path, args: &[&str]) {
-    let out = bin().env("SONAGRAM_HOME", home).args(args).output().expect("run");
-    assert!(out.status.success(), "{args:?} failed: {:?}", String::from_utf8_lossy(&out.stderr));
+    let out = bin()
+        .env("SONAGRAM_HOME", home)
+        .args(args)
+        .output()
+        .expect("run");
+    assert!(
+        out.status.success(),
+        "{args:?} failed: {:?}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 #[test]
@@ -168,7 +189,10 @@ fn status_reports_graph_stale_transitions() {
 
     // 1) Fresh right after build: caches fresh, graph current.
     let (code, j) = status_json(&home);
-    eprintln!("[stage 1: after build] exit={code} graph_stale={} graph_current={}", j["graph_stale"], j["sources"][0]["graph_current"]);
+    eprintln!(
+        "[stage 1: after build] exit={code} graph_stale={} graph_current={}",
+        j["graph_stale"], j["sources"][0]["graph_current"]
+    );
     assert_eq!(j["graph_present"], true);
     assert_eq!(j["graph_stale"], false, "graph is current after build: {j}");
     assert_eq!(j["sources"][0]["graph_current"], true);
@@ -205,16 +229,28 @@ fn status_reports_graph_stale_transitions() {
     build_cache(&lib, b"CHANGED-audio-bytes-longer-now");
     let (code, j) = status_json(&home);
     eprintln!("[stage 2: cache rescanned, NOT rebuilt] exit={code} needs_scan={} graph_stale={} status={}", j["needs_scan"], j["graph_stale"], j["status"]);
-    assert_eq!(j["needs_scan"], false, "cache matches disk ⇒ no scan needed: {j}");
-    assert_eq!(j["graph_stale"], true, "graph no longer reflects the cache: {j}");
+    assert_eq!(
+        j["needs_scan"], false,
+        "cache matches disk ⇒ no scan needed: {j}"
+    );
+    assert_eq!(
+        j["graph_stale"], true,
+        "graph no longer reflects the cache: {j}"
+    );
     assert_eq!(j["sources"][0]["graph_current"], false);
     assert_eq!(j["status"], "needs_build");
-    assert_eq!(code, 1, "stale graph is action-worthy even with fresh caches");
+    assert_eq!(
+        code, 1,
+        "stale graph is action-worthy even with fresh caches"
+    );
 
     // 5) Rebuild → current again.
     run_ok(&home, &["build"]);
     let (code, j) = status_json(&home);
-    eprintln!("[stage 3: after rebuild] exit={code} graph_stale={} graph_current={}", j["graph_stale"], j["sources"][0]["graph_current"]);
+    eprintln!(
+        "[stage 3: after rebuild] exit={code} graph_stale={} graph_current={}",
+        j["graph_stale"], j["sources"][0]["graph_current"]
+    );
     assert_eq!(j["graph_stale"], false, "rebuild refreshes the graph: {j}");
     assert_eq!(j["sources"][0]["graph_current"], true);
     assert_eq!(code, 0);
@@ -267,7 +303,10 @@ fn scan_fingerprint_stamped_when_present_absent_for_fixtures() {
         records: &records,
         scan_fingerprint: Some("deadbeef-fingerprint".to_string()),
     }];
-    let lib = LibraryInfo { root: "src-a".to_string(), n_tracks: records.len() };
+    let lib = LibraryInfo {
+        root: "src-a".to_string(),
+        n_tracks: records.len(),
+    };
     let g = graph::build_graph_from_sources(&with_fp, None, &lib).unwrap();
     assert_eq!(
         source_fingerprint(&g, "src-a").as_deref(),
@@ -286,7 +325,14 @@ fn scan_fingerprint_stamped_when_present_absent_for_fixtures() {
 
     // A fixture-style build (no fingerprint) → the property is ABSENT, so the
     // golden digest is byte-unchanged.
-    let g2 = graph::build_graph(&records, &LibraryInfo { root: "fixtures".to_string(), n_tracks: records.len() }).unwrap();
+    let g2 = graph::build_graph(
+        &records,
+        &LibraryInfo {
+            root: "fixtures".to_string(),
+            n_tracks: records.len(),
+        },
+    )
+    .unwrap();
     assert!(
         source_fingerprint(&g2, "fixtures").is_none(),
         "no fingerprint ⇒ no scan_fingerprint property (golden stays unchanged)"

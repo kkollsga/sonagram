@@ -32,7 +32,8 @@ fn load_records() -> Vec<AnalysisRecord> {
         .iter()
         .map(|p| {
             let text = std::fs::read_to_string(p).unwrap();
-            AnalysisRecord::from_json(&text).unwrap_or_else(|e| panic!("parse {}: {e}", p.display()))
+            AnalysisRecord::from_json(&text)
+                .unwrap_or_else(|e| panic!("parse {}: {e}", p.display()))
         })
         .collect()
 }
@@ -48,7 +49,11 @@ fn library() -> LibraryInfo {
 const BRUNO_HASH: &str = "a204cc4055d23bf27a3659c2b28da5aad9c0769e6a6c587fa749ce5ad18b4419";
 
 fn node_count(graph: &DirGraph, node_type: &str) -> usize {
-    graph.type_indices.get(node_type).map(|r| r.len()).unwrap_or(0)
+    graph
+        .type_indices
+        .get(node_type)
+        .map(|r| r.len())
+        .unwrap_or(0)
 }
 
 fn f64_prop(graph: &DirGraph, node_type: &str, hash: &str, prop: &str) -> f64 {
@@ -137,7 +142,11 @@ fn edge_counts_match_and_no_endpoint_skipped() {
     let graph = graph::build_graph(&load_records(), &library()).unwrap();
     let counts = graph.get_edge_type_counts();
     for (ty, n) in EXPECT_EDGES {
-        assert_eq!(counts.get(*ty).copied().unwrap_or(0), *n, "edge count for {ty}");
+        assert_eq!(
+            counts.get(*ty).copied().unwrap_or(0),
+            *n,
+            "edge count for {ty}"
+        );
     }
     let total: usize = counts.values().sum();
     let expected_total: usize = EXPECT_EDGES.iter().map(|(_, n)| n).sum();
@@ -160,17 +169,29 @@ fn track_property_row_spot_check() {
     assert!(f64_prop(&graph, "Track", BRUNO_HASH, "instrumentalness") > 0.0);
 
     assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "title"), "Marry You");
-    assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "artist_name"), "Bruno Mars");
+    assert_eq!(
+        str_prop(&graph, "Track", BRUNO_HASH, "artist_name"),
+        "Bruno Mars"
+    );
     assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "key"), "F major");
     assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "camelot"), "7B");
-    assert_eq!(prop(&graph, "Track", BRUNO_HASH, "is_music"), Value::Boolean(true));
+    assert_eq!(
+        prop(&graph, "Track", BRUNO_HASH, "is_music"),
+        Value::Boolean(true)
+    );
 
     // sonara 0.2.4: bpm_confidence is always present and in [0, 1].
     let bpm_conf = f64_prop(&graph, "Track", BRUNO_HASH, "bpm_confidence");
-    assert!((0.0..=1.0).contains(&bpm_conf), "bpm_confidence out of range: {bpm_conf}");
+    assert!(
+        (0.0..=1.0).contains(&bpm_conf),
+        "bpm_confidence out of range: {bpm_conf}"
+    );
     // era_source records which year fed FROM_DECADE. Marry You carries a file
     // `year` tag but no `original_year`, so the era falls back to the file year.
-    assert_eq!(str_prop(&graph, "Track", BRUNO_HASH, "era_source"), "file_year");
+    assert_eq!(
+        str_prop(&graph, "Track", BRUNO_HASH, "era_source"),
+        "file_year"
+    );
 }
 
 #[test]
@@ -214,9 +235,7 @@ fn fused_aggression_is_queryable_and_distinct_from_legacy_mood() {
         "aggression-rank-v3-sr22050"
     );
     assert!(
-        (f64_prop(&graph, "Track", BRUNO_HASH, "mood_aggressive")
-            - f64::from(legacy_mood))
-        .abs()
+        (f64_prop(&graph, "Track", BRUNO_HASH, "mood_aggressive") - f64::from(legacy_mood)).abs()
             < f64::EPSILON,
         "fused aggression must not overwrite the separate legacy mood value"
     );
@@ -270,8 +289,7 @@ fn analysis_model_ids_are_queryable_and_fingerprinted() {
         .expect("Bruno fixture present");
     let before = graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap();
     record.analysis.provenance.genre_model_id = Some("genre-test-v1".to_string());
-    record.analysis.provenance.vocalness_model_id =
-        Some("sonara-vocalness-v2".to_string());
+    record.analysis.provenance.vocalness_model_id = Some("sonara-vocalness-v2".to_string());
     let before_aggression_model =
         graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap();
     record.analysis.provenance.aggression_model_id =
@@ -282,8 +300,7 @@ fn analysis_model_ids_are_queryable_and_fingerprinted() {
         "aggression model identity alone must affect graph identity"
     );
     record.analysis.provenance.aggression_model_id = Some("aggression-rank-v3-sr22050".to_string());
-    let before_aggression =
-        graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap();
+    let before_aggression = graph::build_input_fingerprint(std::slice::from_ref(&record)).unwrap();
     record.analysis.aggression_score = Some(0.73);
     record.analysis.aggression_confidence = Some(0.81);
     record.analysis.aggression_forcefulness = Some(0.67);
@@ -330,10 +347,13 @@ fn non_music_track_nulls_only_composite_mood_axes() {
         .expect("Bruno fixture present");
     record.source.content_hash = "non-music-flatness-outlier".to_string();
     record.analysis.spectral_flatness_mean = Some(0.5);
-    let graph = graph::build_graph(&[record], &LibraryInfo {
-        root: "non-music".to_string(),
-        n_tracks: 1,
-    })
+    let graph = graph::build_graph(
+        &[record],
+        &LibraryInfo {
+            root: "non-music".to_string(),
+            n_tracks: 1,
+        },
+    )
     .unwrap();
 
     assert_eq!(
@@ -348,7 +368,12 @@ fn non_music_track_nulls_only_composite_mood_axes() {
         );
     }
     assert!(matches!(
-        prop(&graph, "Track", "non-music-flatness-outlier", "recording_quality"),
+        prop(
+            &graph,
+            "Track",
+            "non-music-flatness-outlier",
+            "recording_quality"
+        ),
         Value::Float64(_)
     ));
 }
@@ -453,7 +478,10 @@ fn save_load_round_trip_preserves_properties_embeddings_counts() {
     // A property survives.
     assert_eq!(str_prop(&loaded, "Track", BRUNO_HASH, "title"), "Marry You");
     let bpm = f64_prop(&loaded, "Track", BRUNO_HASH, "bpm");
-    assert!((bpm - 144.566).abs() < 0.1, "post-load bpm ≈ 144.57, got {bpm}");
+    assert!(
+        (bpm - 144.566).abs() < 0.1,
+        "post-load bpm ≈ 144.57, got {bpm}"
+    );
     // Embeddings survive.
     let store = loaded
         .embeddings

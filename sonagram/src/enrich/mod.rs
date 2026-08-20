@@ -79,10 +79,7 @@ pub fn api_key(library_root: &Path, override_key: Option<&str>) -> Result<String
             return Ok(k.to_string());
         }
     }
-    let mut env_paths = vec![
-        std::path::PathBuf::from(".env"),
-        library_root.join(".env"),
-    ];
+    let mut env_paths = vec![std::path::PathBuf::from(".env"), library_root.join(".env")];
     // The home `.env` is the last, session-independent fallback (where the skill
     // stores a user-provided key).
     if let Ok(home) = crate::config::sonagram_home() {
@@ -202,9 +199,7 @@ impl UreqClient {
 
     /// Build a client against a custom base URL (tests / mirrors).
     pub fn with_base(api_key: String, base: String) -> Self {
-        let agent = ureq::AgentBuilder::new()
-            .timeout(HTTP_TIMEOUT)
-            .build();
+        let agent = ureq::AgentBuilder::new().timeout(HTTP_TIMEOUT).build();
         UreqClient {
             agent,
             api_key,
@@ -321,7 +316,11 @@ fn strip_html_truncate(s: &str, max: usize) -> Option<String> {
 /// `"<artist-lower>::<title-lower>"`. Trimmed + lowercased on both sides so
 /// Last.fm's returned names match our tag strings case-insensitively.
 pub fn similar_key(artist: &str, title: &str) -> String {
-    format!("{}::{}", artist.trim().to_lowercase(), title.trim().to_lowercase())
+    format!(
+        "{}::{}",
+        artist.trim().to_lowercase(),
+        title.trim().to_lowercase()
+    )
 }
 
 // ────────────────────────────── fetch surface ───────────────────────────────
@@ -386,7 +385,10 @@ fn collect_names(node: &Json) -> Vec<String> {
         obj @ Json::Object(_) => vec![obj],
         _ => Vec::new(),
     };
-    items.iter().filter_map(|e| opt_str(e.get("name"))).collect()
+    items
+        .iter()
+        .filter_map(|e| opt_str(e.get("name")))
+        .collect()
 }
 
 /// Fetch one track: `track.getInfo` (+ `track.getSimilar`, limit 10). Mirrors
@@ -705,8 +707,7 @@ pub fn enrich_library_with(
     let store = EnrichStore::new(library_root);
 
     let mut report = EnrichReport::default();
-    let progress_file =
-        ProgressWriter::new(enrich_progress_path(library_root), PROGRESS_INTERVAL);
+    let progress_file = ProgressWriter::new(enrich_progress_path(library_root), PROGRESS_INTERVAL);
     let write_progress =
         |report: &EnrichReport, kind: &str, done: usize, total: usize, force: bool| {
             progress_file.write(
@@ -866,9 +867,7 @@ impl EnrichmentData {
                 Ok(String::new())
             }
         };
-        fn parse<T: for<'de> serde::Deserialize<'de>>(
-            text: &str,
-        ) -> Result<BTreeMap<String, T>> {
+        fn parse<T: for<'de> serde::Deserialize<'de>>(text: &str) -> Result<BTreeMap<String, T>> {
             if text.trim().is_empty() {
                 return Ok(BTreeMap::new());
             }
@@ -890,12 +889,18 @@ impl EnrichmentData {
 
     /// Count of tracks that carry a non-failed record (for the build report).
     pub fn tracks_present(&self) -> usize {
-        self.tracks.values().filter(|r| r.fetched && !r.failed).count()
+        self.tracks
+            .values()
+            .filter(|r| r.fetched && !r.failed)
+            .count()
     }
 
     /// Count of artists that carry a non-failed record (for the build report).
     pub fn artists_present(&self) -> usize {
-        self.artists.values().filter(|r| r.fetched && !r.failed).count()
+        self.artists
+            .values()
+            .filter(|r| r.fetched && !r.failed)
+            .count()
     }
 }
 
@@ -936,7 +941,9 @@ mod tests {
 
     #[test]
     fn api_key_missing_is_clear_error() {
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         // A dir with no .env, env var cleared for this process is not safe to
         // assume; instead point at a temp dir and pass an explicit empty override
         // + rely on env being unset in CI. We only assert the error *shape* when
@@ -965,7 +972,9 @@ mod tests {
 
     #[test]
     fn api_key_falls_back_to_sonagram_home_env() {
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         // Only meaningful when no real key is present in this environment.
         if std::env::var("LASTFM_API_KEY").is_ok() {
             return;
@@ -998,7 +1007,10 @@ mod tests {
         assert_eq!(strip_html_truncate(s, 500).unwrap(), "A great album.");
         // Truncation at max chars.
         let long = "x".repeat(600);
-        assert_eq!(strip_html_truncate(&long, 500).unwrap().chars().count(), 500);
+        assert_eq!(
+            strip_html_truncate(&long, 500).unwrap().chars().count(),
+            500
+        );
         // Empty after strip → None.
         assert!(strip_html_truncate("   <a>", 500).is_none());
     }

@@ -109,26 +109,44 @@ fn classifies_fresh_stale_missing_deleted() {
 
     // fresh: file present, stats match the index, record present + current-schema.
     let (size, mtime) = write_mp3(&lib, "fresh.mp3", b"fresh-bytes");
-    cache.save_record(&record("h_fresh", "fresh.mp3", None)).unwrap();
+    cache
+        .save_record(&record("h_fresh", "fresh.mp3", None))
+        .unwrap();
     index.insert(
         "fresh.mp3".to_string(),
-        IndexEntry { size, mtime_unix: mtime, content_hash: "h_fresh".to_string() },
+        IndexEntry {
+            size,
+            mtime_unix: mtime,
+            content_hash: "h_fresh".to_string(),
+        },
     );
 
     // stale (stats changed): mtime in the index no longer matches the file.
     let (size2, mtime2) = write_mp3(&lib, "stale_stat.mp3", b"stale-stat");
-    cache.save_record(&record("h_stat", "stale_stat.mp3", None)).unwrap();
+    cache
+        .save_record(&record("h_stat", "stale_stat.mp3", None))
+        .unwrap();
     index.insert(
         "stale_stat.mp3".to_string(),
-        IndexEntry { size: size2, mtime_unix: mtime2 + 5000, content_hash: "h_stat".to_string() },
+        IndexEntry {
+            size: size2,
+            mtime_unix: mtime2 + 5000,
+            content_hash: "h_stat".to_string(),
+        },
     );
 
     // stale (record stale): stats match but the record is an older schema.
     let (size3, mtime3) = write_mp3(&lib, "stale_rec.mp3", b"stale-rec");
-    cache.save_record(&record("h_rec", "stale_rec.mp3", Some(999))).unwrap();
+    cache
+        .save_record(&record("h_rec", "stale_rec.mp3", Some(999)))
+        .unwrap();
     index.insert(
         "stale_rec.mp3".to_string(),
-        IndexEntry { size: size3, mtime_unix: mtime3, content_hash: "h_rec".to_string() },
+        IndexEntry {
+            size: size3,
+            mtime_unix: mtime3,
+            content_hash: "h_rec".to_string(),
+        },
     );
 
     // missing_from_index: on disk, no index entry.
@@ -137,7 +155,11 @@ fn classifies_fresh_stale_missing_deleted() {
     // deleted_in_index: index entry with no file on disk.
     index.insert(
         "gone.mp3".to_string(),
-        IndexEntry { size: 1, mtime_unix: 1, content_hash: "h_gone".to_string() },
+        IndexEntry {
+            size: 1,
+            mtime_unix: 1,
+            content_hash: "h_gone".to_string(),
+        },
     );
 
     cache.save_index(&index).unwrap();
@@ -162,7 +184,11 @@ fn all_fresh_after_matching_index() {
         cache.save_record(&record(&hash, rel, None)).unwrap();
         index.insert(
             rel.to_string(),
-            IndexEntry { size, mtime_unix: mtime, content_hash: hash },
+            IndexEntry {
+                size,
+                mtime_unix: mtime,
+                content_hash: hash,
+            },
         );
     }
     cache.save_index(&index).unwrap();

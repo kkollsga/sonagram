@@ -30,7 +30,8 @@ fn load_records() -> Vec<AnalysisRecord> {
         .iter()
         .map(|p| {
             let text = std::fs::read_to_string(p).unwrap();
-            AnalysisRecord::from_json(&text).unwrap_or_else(|e| panic!("parse {}: {e}", p.display()))
+            AnalysisRecord::from_json(&text)
+                .unwrap_or_else(|e| panic!("parse {}: {e}", p.display()))
         })
         .collect()
 }
@@ -100,7 +101,11 @@ fn entries_from_graph_preserve_order_paths_and_cjk() {
     for (entry, title) in entries.iter().zip(titles.iter()) {
         assert_eq!(entry.title.as_deref(), Some(*title), "order preserved");
         // Paths are absolute and joined onto the library root.
-        assert!(entry.abs_path.is_absolute(), "abs path: {:?}", entry.abs_path);
+        assert!(
+            entry.abs_path.is_absolute(),
+            "abs path: {:?}",
+            entry.abs_path
+        );
         assert!(
             entry.abs_path.starts_with(root),
             "path joined onto library root: {:?}",
@@ -123,7 +128,11 @@ fn entries_from_graph_preserve_order_paths_and_cjk() {
 
     assert_eq!(lines[0], "#EXTM3U");
     // 5 EXTINF + 5 path lines after the header.
-    let extinf: Vec<&str> = lines.iter().filter(|l| l.starts_with("#EXTINF:")).copied().collect();
+    let extinf: Vec<&str> = lines
+        .iter()
+        .filter(|l| l.starts_with("#EXTINF:"))
+        .copied()
+        .collect();
     assert_eq!(extinf.len(), 5, "five EXTINF lines");
     assert_eq!(extinf[0], "#EXTINF:230,Bruno Mars - Marry You");
     // CJK title intact inside the EXTINF label (duration 212.2 → 212).
@@ -131,8 +140,14 @@ fn entries_from_graph_preserve_order_paths_and_cjk() {
     // The path line following the CJK entry is absolute + under the root.
     let cjk_line = lines.iter().position(|l| l.contains("薔薇と雨")).unwrap();
     let cjk_path = lines[cjk_line + 1];
-    assert!(cjk_path.starts_with(LIB_ROOT), "cjk path under root: {cjk_path}");
-    assert!(cjk_path.ends_with("08 薔薇と雨.mp3"), "cjk rel path joined: {cjk_path}");
+    assert!(
+        cjk_path.starts_with(LIB_ROOT),
+        "cjk path under root: {cjk_path}"
+    );
+    assert!(
+        cjk_path.ends_with("08 薔薇と雨.mp3"),
+        "cjk rel path joined: {cjk_path}"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -148,7 +163,11 @@ fn entries_from_cypher_string_column_order_matches_bpm() {
         .iter()
         .filter(|r| r.analysis.bpm > 130.0)
         .map(|r| {
-            let title = r.tags.as_ref().and_then(|t| t.title.as_deref()).unwrap_or("");
+            let title = r
+                .tags
+                .as_ref()
+                .and_then(|t| t.title.as_deref())
+                .unwrap_or("");
             (title, r.analysis.bpm)
         })
         .collect();
@@ -167,7 +186,10 @@ fn entries_from_cypher_string_column_order_matches_bpm() {
     let query = "MATCH (t:Track) WHERE t.bpm > 130 RETURN t.content_hash ORDER BY t.bpm";
     let entries = playlist::entries_from_cypher(g.as_ref(), Path::new(LIB_ROOT), query).unwrap();
 
-    let got: Vec<&str> = entries.iter().map(|e| e.title.as_deref().unwrap_or("")).collect();
+    let got: Vec<&str> = entries
+        .iter()
+        .map(|e| e.title.as_deref().unwrap_or(""))
+        .collect();
     assert_eq!(got, expected_titles, "cypher row order preserved");
     for e in &entries {
         assert!(e.abs_path.is_absolute());
@@ -183,7 +205,10 @@ fn entries_from_cypher_node_column_shape() {
     // Returning the Track NODE (not its hash) resolves to the same set/order.
     let query = "MATCH (t:Track) WHERE t.bpm > 130 RETURN t ORDER BY t.bpm";
     let entries = playlist::entries_from_cypher(g.as_ref(), Path::new(LIB_ROOT), query).unwrap();
-    let got: Vec<&str> = entries.iter().map(|e| e.title.as_deref().unwrap_or("")).collect();
+    let got: Vec<&str> = entries
+        .iter()
+        .map(|e| e.title.as_deref().unwrap_or(""))
+        .collect();
     assert_eq!(
         got,
         vec![
@@ -202,11 +227,21 @@ fn missing_ids_error_lists_all() {
     let by_title = hash_by_title(&records);
 
     let real = by_title["Marry You"].clone();
-    let ids = vec![real, "deadbeefmissing1".to_string(), "c0ffeemissing2".to_string()];
+    let ids = vec![
+        real,
+        "deadbeefmissing1".to_string(),
+        "c0ffeemissing2".to_string(),
+    ];
     let err = playlist::entries_from_graph(g.as_ref(), Path::new(LIB_ROOT), &ids).unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("deadbeefmissing1"), "lists first missing id: {msg}");
-    assert!(msg.contains("c0ffeemissing2"), "lists second missing id: {msg}");
+    assert!(
+        msg.contains("deadbeefmissing1"),
+        "lists first missing id: {msg}"
+    );
+    assert!(
+        msg.contains("c0ffeemissing2"),
+        "lists second missing id: {msg}"
+    );
 }
 
 /// A Track entry read from the graph carries the joined absolute path.
@@ -218,7 +253,8 @@ fn abs_path_is_root_join_relative() {
     let id = by_title["Marry You"].clone();
 
     let root = Path::new(LIB_ROOT);
-    let entries = playlist::entries_from_graph(g.as_ref(), root, std::slice::from_ref(&id)).unwrap();
+    let entries =
+        playlist::entries_from_graph(g.as_ref(), root, std::slice::from_ref(&id)).unwrap();
     let expected: PlaylistEntry = PlaylistEntry {
         content_hash: id.clone(),
         abs_path: root.join("04 Marry You.mp3"),

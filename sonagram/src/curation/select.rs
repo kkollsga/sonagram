@@ -24,7 +24,8 @@ pub fn curate_playlist(
     policy: &PlaylistPolicy,
 ) -> Result<CuratedPlaylist> {
     let tracks = project_tracks(graph)?;
-    let by_id: BTreeMap<&str, &TrackCandidate> = tracks.iter().map(|t| (t.id.as_str(), t)).collect();
+    let by_id: BTreeMap<&str, &TrackCandidate> =
+        tracks.iter().map(|t| (t.id.as_str(), t)).collect();
     let mut selected: Vec<&TrackCandidate> = Vec::new();
     let mut selected_ids: BTreeSet<&str> = BTreeSet::new();
     let mut seen_seed_ids: BTreeSet<&str> = BTreeSet::new();
@@ -45,19 +46,26 @@ pub fn curate_playlist(
     );
 
     if brief.target_tracks == 0 {
-        selection_issues.push(error("invalid_target", "target_tracks must be greater than zero"));
+        selection_issues.push(error(
+            "invalid_target",
+            "target_tracks must be greater than zero",
+        ));
     }
     if brief.seed_role != SeedRole::Reference && brief.seed_ids.len() > brief.target_tracks {
         selection_issues.push(error(
             "too_many_seeds",
             format!(
                 "{} seeds exceed the target of {} tracks",
-                brief.seed_ids.len(), brief.target_tracks
+                brief.seed_ids.len(),
+                brief.target_tracks
             ),
         ));
     }
     if seed_directives_active(policy)
-        && !matches!(brief.seed_role, SeedRole::Reference | SeedRole::PinnedAndReference)
+        && !matches!(
+            brief.seed_role,
+            SeedRole::Reference | SeedRole::PinnedAndReference
+        )
     {
         selection_issues.push(error(
             "seed_target_without_reference",
@@ -76,14 +84,23 @@ pub fn curate_playlist(
 
     for id in &brief.seed_ids {
         if !seen_seed_ids.insert(id) {
-            selection_issues.push(error("duplicate_seed", format!("seed {id} occurs more than once")));
+            selection_issues.push(error(
+                "duplicate_seed",
+                format!("seed {id} occurs more than once"),
+            ));
             continue;
         }
         let Some(track) = by_id.get(id.as_str()).copied() else {
-            selection_issues.push(error("missing_seed", format!("seed {id} is not in the graph")));
+            selection_issues.push(error(
+                "missing_seed",
+                format!("seed {id} is not in the graph"),
+            ));
             continue;
         };
-        if matches!(brief.seed_role, SeedRole::Reference | SeedRole::PinnedAndReference) {
+        if matches!(
+            brief.seed_role,
+            SeedRole::Reference | SeedRole::PinnedAndReference
+        ) {
             reference_seeds.push(track);
         }
         if brief.seed_role == SeedRole::Reference {
@@ -91,7 +108,10 @@ pub fn curate_playlist(
         }
         let eligibility = eligibility_issues(track, policy);
         if !eligibility.is_empty() {
-            if eligibility.iter().any(|(code, _)| *code == "aggression_unknown") {
+            if eligibility
+                .iter()
+                .any(|(code, _)| *code == "aggression_unknown")
+            {
                 selection_issues.push(error(
                     "aggression_unknown",
                     format!("seed {id}: {}", aggression_unknown_message(track)),
@@ -118,7 +138,12 @@ pub fn curate_playlist(
             ));
             continue;
         }
-        increment_counts(track, &mut artist_counts, &mut album_counts, &mut song_counts);
+        increment_counts(
+            track,
+            &mut artist_counts,
+            &mut album_counts,
+            &mut song_counts,
+        );
         selected_ids.insert(id);
         selected.push(track);
     }
@@ -128,7 +153,10 @@ pub fn curate_playlist(
     let mut eligibility_rejections: BTreeMap<&'static str, (String, usize)> = BTreeMap::new();
     let mut seed_rejections: BTreeMap<&'static str, (String, usize)> = BTreeMap::new();
     let mut eligible = Vec::new();
-    for track in tracks.iter().filter(|track| !seen_seed_ids.contains(track.id.as_str())) {
+    for track in tracks
+        .iter()
+        .filter(|track| !seen_seed_ids.contains(track.id.as_str()))
+    {
         let eligibility = eligibility_issues(track, policy);
         if !eligibility.is_empty() {
             for (code, message) in eligibility {
@@ -182,15 +210,18 @@ pub fn curate_playlist(
                     track,
                 )
             })
-            .max_by(|(a_score, a), (b_score, b)| {
-                compare_rank(*a_score, &a.id, *b_score, &b.id)
-            })
+            .max_by(|(a_score, a), (b_score, b)| compare_rank(*a_score, &a.id, *b_score, &b.id))
             .map(|(_, track)| track);
         let Some(track) = best else {
             break;
         };
         selected_ids.insert(track.id.as_str());
-        increment_counts(track, &mut artist_counts, &mut album_counts, &mut song_counts);
+        increment_counts(
+            track,
+            &mut artist_counts,
+            &mut album_counts,
+            &mut song_counts,
+        );
         selected.push(track);
     }
 
@@ -250,23 +281,21 @@ pub fn curate_playlist(
         ));
         selection_issues.extend(eligibility_rejections.into_iter().map(
             |(code, (message, count))| {
-                error(
-                    code,
-                    format!("{count} candidate(s) rejected: {message}"),
-                )
+                error(code, format!("{count} candidate(s) rejected: {message}"))
             },
         ));
-        selection_issues.extend(seed_rejections.into_iter().map(
-            |(code, (message, count))| {
-                error(
-                    code,
-                    format!("{count} candidate(s) rejected by seed intent: {message}"),
-                )
-            },
-        ));
+        selection_issues.extend(seed_rejections.into_iter().map(|(code, (message, count))| {
+            error(
+                code,
+                format!("{count} candidate(s) rejected by seed intent: {message}"),
+            )
+        }));
     }
     audit.issues.extend(selection_issues);
-    audit.passed = !audit.issues.iter().any(|issue| issue.severity == AuditSeverity::Error);
+    audit.passed = !audit
+        .issues
+        .iter()
+        .any(|issue| issue.severity == AuditSeverity::Error);
     let mut explanation = explain_playlist_for_brief(graph, &track_ids, brief, policy)?;
     explanation.summary = vec![format!(
         "{} tracks, {} artists, audit {}",
@@ -282,7 +311,8 @@ pub fn curate_playlist(
     );
     explanation.summary.push(format!(
         "deterministic constrained selection and sequencing chose {} of {} requested tracks",
-        track_ids.len(), brief.target_tracks
+        track_ids.len(),
+        brief.target_tracks
     ));
     if seed_directives_active(policy) {
         explanation.summary.push(format!(
@@ -349,13 +379,7 @@ fn duration_first_selection<'a>(
         }
         if selected_ids.contains(track.id.as_str())
             || !within_caps(
-                track,
-                artist_cap,
-                album_cap,
-                song_cap,
-                &artists,
-                &albums,
-                &songs,
+                track, artist_cap, album_cap, song_cap, &artists, &albums, &songs,
             )
         {
             continue;
@@ -385,8 +409,14 @@ fn selection_score(
     let (fit_sum, fit_count) = fits
         .into_iter()
         .flatten()
-        .fold((0.0, 0usize), |(sum, count), value| (sum + value, count + 1));
-    let relevance = if fit_count == 0 { 0.5 } else { fit_sum / fit_count as f64 };
+        .fold((0.0, 0usize), |(sum, count), value| {
+            (sum + value, count + 1)
+        });
+    let relevance = if fit_count == 0 {
+        0.5
+    } else {
+        fit_sum / fit_count as f64
+    };
     let quality = track.recording_quality.unwrap_or(0.5).clamp(0.0, 1.0);
     let popularity = track.popularity.unwrap_or(0.5).clamp(0.0, 1.0);
     let familiarity = match policy.targets.familiarity {
@@ -398,9 +428,13 @@ fn selection_score(
         1.0
     } else {
         let artist_new = !track.artist_key.is_empty()
-            && selected.iter().all(|other| other.artist_key != track.artist_key);
+            && selected
+                .iter()
+                .all(|other| other.artist_key != track.artist_key);
         let album_new = !track.album_key.is_empty()
-            && selected.iter().all(|other| other.album_key != track.album_key);
+            && selected
+                .iter()
+                .all(|other| other.album_key != track.album_key);
         let song = track.song_key.as_deref().unwrap_or(track.id.as_str());
         let song_new = selected
             .iter()
@@ -570,7 +604,10 @@ fn increment_counts(
 ) {
     increment(&track.artist_key, artists);
     increment(&track.album_key, albums);
-    increment(track.song_key.as_deref().unwrap_or(track.id.as_str()), songs);
+    increment(
+        track.song_key.as_deref().unwrap_or(track.id.as_str()),
+        songs,
+    );
 }
 
 fn increment(key: &str, counts: &mut BTreeMap<String, usize>) {
@@ -584,9 +621,7 @@ fn fit(actual: Option<f64>, target: Option<f64>) -> Option<f64> {
 }
 
 fn compare_rank(a_score: f64, a_id: &str, b_score: f64, b_id: &str) -> Ordering {
-    a_score
-        .total_cmp(&b_score)
-        .then_with(|| b_id.cmp(a_id))
+    a_score.total_cmp(&b_score).then_with(|| b_id.cmp(a_id))
 }
 
 fn error(code: impl Into<String>, message: impl Into<String>) -> AuditIssue {

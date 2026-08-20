@@ -126,7 +126,7 @@ mod tests {
         h.push(4); // version major
         h.push(0); // version minor
         h.push(0); // flags (no footer)
-        // syncsafe size (7 bits/byte)
+                   // syncsafe size (7 bits/byte)
         h.push(((body_len >> 21) & 0x7f) as u8);
         h.push(((body_len >> 14) & 0x7f) as u8);
         h.push(((body_len >> 7) & 0x7f) as u8);
@@ -149,11 +149,8 @@ mod tests {
     }
 
     fn write_tmp(name: &str, bytes: &[u8]) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "sonagram-hash-{}-{}",
-            std::process::id(),
-            name
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("sonagram-hash-{}-{}", std::process::id(), name));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join(name);
         let mut f = std::fs::File::create(&p).unwrap();
@@ -169,8 +166,15 @@ mod tests {
     fn same_audio_different_tags_hash_equal() {
         let audio = b"THE-SAME-AUDIO-FRAMES-0123456789";
         let a = write_tmp("a.mp3", &synthetic_mp3(b"tagsA", audio, false));
-        let b = write_tmp("b.mp3", &synthetic_mp3(b"a-much-longer-tag-payload", audio, true));
-        assert_eq!(hash_of(&a), hash_of(&b), "tag content must not affect the hash");
+        let b = write_tmp(
+            "b.mp3",
+            &synthetic_mp3(b"a-much-longer-tag-payload", audio, true),
+        );
+        assert_eq!(
+            hash_of(&a),
+            hash_of(&b),
+            "tag content must not affect the hash"
+        );
     }
 
     #[test]
@@ -214,7 +218,11 @@ mod tests {
         let plain = synthetic_mp3(b"", audio, false);
         let a = write_tmp("h.mp3", &with_ext);
         let b = write_tmp("i.mp3", &plain);
-        assert_eq!(hash_of(&a), hash_of(&b), "TAG+ enhanced block must be stripped");
+        assert_eq!(
+            hash_of(&a),
+            hash_of(&b),
+            "TAG+ enhanced block must be stripped"
+        );
     }
 
     #[test]

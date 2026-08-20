@@ -386,7 +386,10 @@ mod tests {
         store.save_albums(&BTreeMap::new()).unwrap();
         for entry in std::fs::read_dir(store.dir()).unwrap() {
             let name = entry.unwrap().file_name();
-            assert!(!name.to_string_lossy().contains(".tmp."), "temp left: {name:?}");
+            assert!(
+                !name.to_string_lossy().contains(".tmp."),
+                "temp left: {name:?}"
+            );
         }
     }
 }

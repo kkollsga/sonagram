@@ -44,7 +44,9 @@ pub(crate) fn sequence_tracks<'a>(
                 let transition = state
                     .path
                     .last()
-                    .map(|previous| transition_score(tracks[*previous], track, position, policy).total)
+                    .map(|previous| {
+                        transition_score(tracks[*previous], track, position, policy).total
+                    })
                     .unwrap_or(0.5);
                 let gap_violation = violates_artist_gap(&state.path, next, tracks, policy);
                 let mut path = state.path.clone();
@@ -57,16 +59,13 @@ pub(crate) fn sequence_tracks<'a>(
                 };
                 expanded.push(BeamState {
                     path,
-                    score: state.score
-                        + transition_weight * transition
-                        + arc_weight * arc_fit,
+                    score: state.score + transition_weight * transition + arc_weight * arc_fit,
                     worst_transition: if state.path.is_empty() {
                         state.worst_transition
                     } else {
                         state.worst_transition.min(transition)
                     },
-                    artist_gap_violations: state.artist_gap_violations
-                        + usize::from(gap_violation),
+                    artist_gap_violations: state.artist_gap_violations + usize::from(gap_violation),
                 });
             }
         }
@@ -236,11 +235,7 @@ fn violates_artist_gap(
     })
 }
 
-fn compare_states(
-    a: &BeamState,
-    b: &BeamState,
-    tracks: &[&TrackCandidate],
-) -> Ordering {
+fn compare_states(a: &BeamState, b: &BeamState, tracks: &[&TrackCandidate]) -> Ordering {
     a.artist_gap_violations
         .cmp(&b.artist_gap_violations)
         .then_with(|| b.worst_transition.total_cmp(&a.worst_transition))
@@ -272,6 +267,11 @@ mod tests {
             worst_transition: 1.0,
             artist_gap_violations: 1,
         };
-        assert_eq!(better.artist_gap_violations.cmp(&worse.artist_gap_violations), Ordering::Less);
+        assert_eq!(
+            better
+                .artist_gap_violations
+                .cmp(&worse.artist_gap_violations),
+            Ordering::Less
+        );
     }
 }

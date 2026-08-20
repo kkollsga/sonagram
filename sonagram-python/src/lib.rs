@@ -35,9 +35,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 
 use kglite::api::DirGraph;
-use sonagram::curation::{
-    self as core_curation, PlaylistBrief, PlaylistPolicy, PlaylistPreset,
-};
+use sonagram::curation::{self as core_curation, PlaylistBrief, PlaylistPolicy, PlaylistPreset};
 use sonagram::enrich::{self, EnrichOptions, EnrichReport, EnrichmentData};
 use sonagram::graph::{self, LibraryInfo, SourceInput};
 use sonagram::pipeline;
@@ -85,9 +83,9 @@ fn validate_export_selection(
     track_ids: Option<&[String]>,
 ) -> std::result::Result<Selection, String> {
     match (cypher, track_ids) {
-        (Some(_), Some(_)) => Err(
-            "export_m3u(): pass exactly one of `cypher=` or `track_ids=`, not both".to_string(),
-        ),
+        (Some(_), Some(_)) => {
+            Err("export_m3u(): pass exactly one of `cypher=` or `track_ids=`, not both".to_string())
+        }
         (None, None) => {
             Err("export_m3u(): pass exactly one of `cypher=` or `track_ids=`".to_string())
         }
@@ -126,11 +124,7 @@ fn to_pyerr(err: SonagramError) -> PyErr {
 /// Run a library scan with the GIL released, re-attaching only to fire the
 /// optional Python progress callback (`progress(stage: str, done: int,
 /// total: int)`).
-fn run_scan(
-    py: Python<'_>,
-    root: &Path,
-    progress: Option<Py<PyAny>>,
-) -> PyResult<ScanReport> {
+fn run_scan(py: Python<'_>, root: &Path, progress: Option<Py<PyAny>>) -> PyResult<ScanReport> {
     if let Some(cb) = &progress {
         if !cb.bind(py).is_callable() {
             return Err(PyValueError::new_err(
@@ -154,7 +148,8 @@ fn run_scan(
 
     // Scan (walk + hash + sonara analysis) is CPU/IO-heavy pure Rust — release
     // the GIL so other Python threads run and the callback can re-attach.
-    py.detach(|| core_scan::scan_library(root, &opts)).map_err(to_pyerr)
+    py.detach(|| core_scan::scan_library(root, &opts))
+        .map_err(to_pyerr)
 }
 
 /// Load the cached records for `root` and build the graph, GIL released.
@@ -319,17 +314,17 @@ fn from_python_json<T: DeserializeOwned>(
     value: &Bound<'_, PyAny>,
     label: &str,
 ) -> PyResult<T> {
-    let raw: String = py.import("json")?.call_method1("dumps", (value,))?.extract()?;
+    let raw: String = py
+        .import("json")?
+        .call_method1("dumps", (value,))?
+        .extract()?;
     decode_json(&raw, label)
 }
 
 fn to_python_json<T: Serialize>(py: Python<'_>, value: &T) -> PyResult<Py<PyAny>> {
     let raw = serde_json::to_string(value)
         .map_err(|error| PyRuntimeError::new_err(format!("serialize result: {error}")))?;
-    Ok(py
-        .import("json")?
-        .call_method1("loads", (raw,))?
-        .unbind())
+    Ok(py.import("json")?.call_method1("loads", (raw,))?.unbind())
 }
 
 fn load_saved_graph(path: &Path) -> std::result::Result<Arc<DirGraph>, SonagramError> {
@@ -472,11 +467,7 @@ fn enrich_(py: Python<'_>, library_root: PathBuf, api_key: Option<String>) -> Py
 /// the round-trip cost.
 #[pyfunction]
 #[pyo3(signature = (library_root, out_path=None))]
-fn build(
-    py: Python<'_>,
-    library_root: PathBuf,
-    out_path: Option<PathBuf>,
-) -> PyResult<Py<PyAny>> {
+fn build(py: Python<'_>, library_root: PathBuf, out_path: Option<PathBuf>) -> PyResult<Py<PyAny>> {
     let graph = build_graph_from_lib(py, &library_root)?;
     handoff_via_kgl(py, graph, out_path)
 }
@@ -544,7 +535,9 @@ fn export_m3u(
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| "playlist".to_string());
             let report = playlist::export_folder(&entries, dir, &name)?;
-            return Ok::<String, SonagramError>(report.playlist_path.to_string_lossy().into_owned());
+            return Ok::<String, SonagramError>(
+                report.playlist_path.to_string_lossy().into_owned(),
+            );
         }
         Ok::<String, SonagramError>(out_path.to_string_lossy().into_owned())
     })
@@ -613,11 +606,10 @@ fn audit_playlist(
         None => None,
     };
     let policy = match (policy, brief.as_ref()) {
-        (Some(value), Some(brief)) => resolve_curation_policy(
-            brief,
-            Some(from_python_json(py, value.bind(py), "policy")?),
-        )
-        .map_err(PyValueError::new_err)?,
+        (Some(value), Some(brief)) => {
+            resolve_curation_policy(brief, Some(from_python_json(py, value.bind(py), "policy")?))
+                .map_err(PyValueError::new_err)?
+        }
         (Some(value), None) => from_python_json(py, value.bind(py), "policy")?,
         (None, Some(brief)) => PlaylistPolicy::for_preset(brief.preset),
         (None, None) => PlaylistPolicy::default(),
@@ -652,11 +644,10 @@ fn explain_playlist(
         None => None,
     };
     let policy = match (policy, brief.as_ref()) {
-        (Some(value), Some(brief)) => resolve_curation_policy(
-            brief,
-            Some(from_python_json(py, value.bind(py), "policy")?),
-        )
-        .map_err(PyValueError::new_err)?,
+        (Some(value), Some(brief)) => {
+            resolve_curation_policy(brief, Some(from_python_json(py, value.bind(py), "policy")?))
+                .map_err(PyValueError::new_err)?
+        }
         (Some(value), None) => from_python_json(py, value.bind(py), "policy")?,
         (None, Some(brief)) => PlaylistPolicy::for_preset(brief.preset),
         (None, None) => PlaylistPolicy::default(),
@@ -665,9 +656,9 @@ fn explain_playlist(
         .detach(move || {
             let graph = load_saved_graph(&kgl_path)?;
             match brief {
-                Some(brief) => core_curation::explain_playlist_for_brief(
-                    &graph, &track_ids, &brief, &policy,
-                ),
+                Some(brief) => {
+                    core_curation::explain_playlist_for_brief(&graph, &track_ids, &brief, &policy)
+                }
                 None => core_curation::explain_playlist(&graph, &track_ids, &policy),
             }
         })
@@ -761,7 +752,10 @@ mod tests {
             "original error text dropped: {msg}"
         );
         // …and the two things that make it actionable.
-        assert!(msg.contains("0.15.3"), "installed wheel version missing: {msg}");
+        assert!(
+            msg.contains("0.15.3"),
+            "installed wheel version missing: {msg}"
+        );
         assert!(
             msg.contains("pip install -U 'kglite>=0.16.5'"),
             "upgrade command missing: {msg}"
@@ -845,9 +839,29 @@ mod tests {
 
             let output = to_python_json(py, &brief).unwrap();
             let output = output.bind(py).cast::<PyDict>().unwrap();
-            assert_eq!(output.get_item("preset").unwrap().unwrap().extract::<String>().unwrap(), "chill");
-            assert_eq!(output.get_item("target_tracks").unwrap().unwrap().extract::<usize>().unwrap(), 7);
-            assert!(output.get_item("target_duration_sec").unwrap().unwrap().is_none());
+            assert_eq!(
+                output
+                    .get_item("preset")
+                    .unwrap()
+                    .unwrap()
+                    .extract::<String>()
+                    .unwrap(),
+                "chill"
+            );
+            assert_eq!(
+                output
+                    .get_item("target_tracks")
+                    .unwrap()
+                    .unwrap()
+                    .extract::<usize>()
+                    .unwrap(),
+                7
+            );
+            assert!(output
+                .get_item("target_duration_sec")
+                .unwrap()
+                .unwrap()
+                .is_none());
         });
     }
 }

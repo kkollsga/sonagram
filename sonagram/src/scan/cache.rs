@@ -176,7 +176,10 @@ impl Cache {
     pub fn save_record(&self, record: &AnalysisRecord) -> Result<()> {
         self.ensure_dirs()?;
         let json = record.to_json_pretty()?;
-        atomic_write(&self.record_path(&record.source.content_hash), json.as_bytes())
+        atomic_write(
+            &self.record_path(&record.source.content_hash),
+            json.as_bytes(),
+        )
     }
 }
 
@@ -184,9 +187,9 @@ impl Cache {
 /// rename over the target. Rename is atomic within a filesystem, so a reader
 /// sees either the old file or the fully-written new one, never a partial write.
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
-    let dir = path.parent().ok_or_else(|| {
-        SonagramError::Cache(format!("no parent dir for {}", path.display()))
-    })?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| SonagramError::Cache(format!("no parent dir for {}", path.display())))?;
     let file_name = path
         .file_name()
         .and_then(|n| n.to_str())
@@ -336,11 +339,19 @@ mod tests {
         let mut index = Index::new();
         index.insert(
             "z.mp3".to_string(),
-            IndexEntry { size: 2, mtime_unix: 20, content_hash: "bb".to_string() },
+            IndexEntry {
+                size: 2,
+                mtime_unix: 20,
+                content_hash: "bb".to_string(),
+            },
         );
         index.insert(
             "a.mp3".to_string(),
-            IndexEntry { size: 1, mtime_unix: 10, content_hash: "aa".to_string() },
+            IndexEntry {
+                size: 1,
+                mtime_unix: 10,
+                content_hash: "aa".to_string(),
+            },
         );
         cache.save_index(&index).unwrap();
         let back = cache.load_index().unwrap();
@@ -362,7 +373,11 @@ mod tests {
     }
 
     fn entry(size: u64, mtime: i64, hash: &str) -> IndexEntry {
-        IndexEntry { size, mtime_unix: mtime, content_hash: hash.to_string() }
+        IndexEntry {
+            size,
+            mtime_unix: mtime,
+            content_hash: hash.to_string(),
+        }
     }
 
     #[test]
@@ -374,22 +389,38 @@ mod tests {
         let mut b = Index::new();
         b.insert("y.mp3".to_string(), entry(20, 200, "hZ")); // content_hash is NOT part of it
         b.insert("x.mp3".to_string(), entry(10, 100, "hZ"));
-        assert_eq!(scan_fingerprint(&a), scan_fingerprint(&b), "order + content_hash irrelevant");
+        assert_eq!(
+            scan_fingerprint(&a),
+            scan_fingerprint(&b),
+            "order + content_hash irrelevant"
+        );
 
         // Changing a size moves the fingerprint.
         let mut c = a.clone();
         c.insert("x.mp3".to_string(), entry(11, 100, "h1"));
-        assert_ne!(scan_fingerprint(&a), scan_fingerprint(&c), "size change ⇒ new fingerprint");
+        assert_ne!(
+            scan_fingerprint(&a),
+            scan_fingerprint(&c),
+            "size change ⇒ new fingerprint"
+        );
 
         // Changing an mtime moves the fingerprint.
         let mut d = a.clone();
         d.insert("x.mp3".to_string(), entry(10, 101, "h1"));
-        assert_ne!(scan_fingerprint(&a), scan_fingerprint(&d), "mtime change ⇒ new fingerprint");
+        assert_ne!(
+            scan_fingerprint(&a),
+            scan_fingerprint(&d),
+            "mtime change ⇒ new fingerprint"
+        );
 
         // Adding a file moves the fingerprint.
         let mut e = a.clone();
         e.insert("z.mp3".to_string(), entry(1, 1, "h3"));
-        assert_ne!(scan_fingerprint(&a), scan_fingerprint(&e), "added file ⇒ new fingerprint");
+        assert_ne!(
+            scan_fingerprint(&a),
+            scan_fingerprint(&e),
+            "added file ⇒ new fingerprint"
+        );
     }
 
     #[test]
@@ -422,7 +453,10 @@ mod tests {
         let idx = cache.load_index().unwrap();
         assert_eq!(idx.len(), 1);
         assert_eq!(idx["a.mp3"], entry(5, 42, "cafe"));
-        assert!(cache.load_scan_fingerprint().unwrap().is_none(), "no fingerprint in a legacy cache");
+        assert!(
+            cache.load_scan_fingerprint().unwrap().is_none(),
+            "no fingerprint in a legacy cache"
+        );
     }
 
     #[test]
@@ -434,7 +468,10 @@ mod tests {
         // No stray ".tmp" siblings remain after atomic writes.
         for entry in std::fs::read_dir(cache.analysis_dir()).unwrap() {
             let name = entry.unwrap().file_name();
-            assert!(!name.to_string_lossy().contains(".tmp."), "temp left: {name:?}");
+            assert!(
+                !name.to_string_lossy().contains(".tmp."),
+                "temp left: {name:?}"
+            );
         }
     }
 
@@ -477,7 +514,10 @@ mod tests {
             .into_iter()
             .flat_map(|handle| handle.join().expect("writer thread panicked"))
             .collect();
-        assert!(errors.is_empty(), "concurrent atomic writes failed: {errors:?}");
+        assert!(
+            errors.is_empty(),
+            "concurrent atomic writes failed: {errors:?}"
+        );
 
         // Once every final-round rename has completed, the target must be one
         // whole writer payload rather than an interleaving or partial write.
@@ -498,6 +538,9 @@ mod tests {
             .map(|entry| entry.file_name())
             .filter(|name| name.to_string_lossy().starts_with(temp_prefix))
             .collect();
-        assert!(leftovers.is_empty(), "temporary files left behind: {leftovers:?}");
+        assert!(
+            leftovers.is_empty(),
+            "temporary files left behind: {leftovers:?}"
+        );
     }
 }

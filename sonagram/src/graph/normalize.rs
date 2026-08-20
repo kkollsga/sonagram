@@ -90,7 +90,9 @@ pub fn decade_id(year: u32) -> String {
 /// this function.
 pub fn normalized_title(title: &str) -> String {
     // 1. Lowercase + apostrophe fold.
-    let lowered = title.to_lowercase().replace(['\u{2019}', '\u{2018}', '\u{02bc}'], "'");
+    let lowered = title
+        .to_lowercase()
+        .replace(['\u{2019}', '\u{2018}', '\u{02bc}'], "'");
     // 2. Strip bracketed/parenthesized groups.
     let debracketed = strip_bracket_groups(&lowered);
     let collapsed = collapse_ws(&debracketed);
@@ -390,12 +392,19 @@ mod tests {
         // Punctuation left after stripping is trimmed off the ends.
         assert_eq!(normalized_title("Song."), "song");
         assert_eq!(normalized_title("_Intro_"), "intro");
-        assert_eq!(normalized_title("(Live)"), "", "all-decoration title collapses");
+        assert_eq!(
+            normalized_title("(Live)"),
+            "",
+            "all-decoration title collapses"
+        );
     }
 
     #[test]
     fn filename_strips_directories() {
-        assert_eq!(filename_from_path("a/b/10 Jive Talkin'.mp3"), "10 Jive Talkin'.mp3");
+        assert_eq!(
+            filename_from_path("a/b/10 Jive Talkin'.mp3"),
+            "10 Jive Talkin'.mp3"
+        );
         assert_eq!(filename_from_path("track.mp3"), "track.mp3");
     }
 
@@ -413,7 +422,11 @@ mod tests {
         assert_eq!(tempo_band(70.0), "downtempo");
         assert_eq!(tempo_band(90.0), "mid");
         assert_eq!(tempo_band(110.0), "house");
-        assert_eq!(tempo_band(125.0), "upbeat", "125 BPM must be upbeat, not house");
+        assert_eq!(
+            tempo_band(125.0),
+            "upbeat",
+            "125 BPM must be upbeat, not house"
+        );
         assert_eq!(tempo_band(140.0), "fast");
         assert_eq!(tempo_band(160.0), "frantic");
     }

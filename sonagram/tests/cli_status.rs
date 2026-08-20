@@ -105,7 +105,11 @@ fn status_fresh_exits_zero() {
     let mut index: BTreeMap<String, IndexEntry> = BTreeMap::new();
     index.insert(
         "a.mp3".to_string(),
-        IndexEntry { size, mtime_unix: mtime, content_hash: "h0".to_string() },
+        IndexEntry {
+            size,
+            mtime_unix: mtime,
+            content_hash: "h0".to_string(),
+        },
     );
     cache.save_index(&index).unwrap();
 
@@ -128,7 +132,11 @@ fn status_needs_scan_exits_one() {
     let mut index: BTreeMap<String, IndexEntry> = BTreeMap::new();
     index.insert(
         "a.mp3".to_string(),
-        IndexEntry { size, mtime_unix: mtime, content_hash: "h0".to_string() },
+        IndexEntry {
+            size,
+            mtime_unix: mtime,
+            content_hash: "h0".to_string(),
+        },
     );
     cache.save_index(&index).unwrap();
     // An unindexed file forces "needs scan".

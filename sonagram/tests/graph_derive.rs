@@ -45,10 +45,7 @@ fn library() -> LibraryInfo {
 
 /// All edges of `edge_type` as `(source_id, target_id, props)`, read through the
 /// stable-digraph view the golden gate uses.
-fn edges_of(
-    graph: &DirGraph,
-    edge_type: &str,
-) -> Vec<(String, String, HashMap<String, Value>)> {
+fn edges_of(graph: &DirGraph, edge_type: &str) -> Vec<(String, String, HashMap<String, Value>)> {
     let sg = graph.graph.as_stable_digraph();
     let mut out = Vec::new();
     for e in sg.edge_indices() {
@@ -73,7 +70,11 @@ fn id_string(v: Cow<Value>) -> String {
 }
 
 fn node_count(graph: &DirGraph, node_type: &str) -> usize {
-    graph.type_indices.get(node_type).map(|r| r.len()).unwrap_or(0)
+    graph
+        .type_indices
+        .get(node_type)
+        .map(|r| r.len())
+        .unwrap_or(0)
 }
 
 // ──────────────────────────────── SIMILAR_TO ────────────────────────────────
@@ -102,7 +103,10 @@ fn similar_to_is_dense_directed_and_self_loop_free() {
     }
     assert_eq!(out_deg.len(), 15, "every track is a SIMILAR_TO source");
     for (src, deg) in &out_deg {
-        assert_eq!(*deg, 10, "track {src} must have exactly 10 SIMILAR_TO edges");
+        assert_eq!(
+            *deg, 10,
+            "track {src} must have exactly 10 SIMILAR_TO edges"
+        );
     }
 }
 
@@ -112,7 +116,10 @@ fn similar_to_neighbours_are_distinct_per_source() {
     let graph = graph::build_graph(&load_records(), &library()).unwrap();
     let mut seen: std::collections::BTreeSet<(String, String)> = Default::default();
     for (src, tgt, _) in edges_of(&graph, "SIMILAR_TO") {
-        assert!(seen.insert((src.clone(), tgt.clone())), "dup SIMILAR_TO {src}->{tgt}");
+        assert!(
+            seen.insert((src.clone(), tgt.clone())),
+            "dup SIMILAR_TO {src}->{tgt}"
+        );
     }
 }
 
@@ -156,9 +163,18 @@ fn camelot_8a_neighbours_are_correct() {
         .collect();
 
     assert_eq!(neighbours.len(), 3, "A minor has 3 wheel neighbours");
-    assert_eq!(neighbours.get("D minor").map(String::as_str), Some("energy_down"));
-    assert_eq!(neighbours.get("E minor").map(String::as_str), Some("energy_up"));
-    assert_eq!(neighbours.get("C major").map(String::as_str), Some("mode_switch"));
+    assert_eq!(
+        neighbours.get("D minor").map(String::as_str),
+        Some("energy_down")
+    );
+    assert_eq!(
+        neighbours.get("E minor").map(String::as_str),
+        Some("energy_up")
+    );
+    assert_eq!(
+        neighbours.get("C major").map(String::as_str),
+        Some("mode_switch")
+    );
 }
 
 // ─────────────────────────────── Style nodes ────────────────────────────────
@@ -183,7 +199,11 @@ fn styles_are_two_on_fixtures_under_adaptive_threshold() {
     // recalibration shifted embedding dim 37 on all 15 fixtures, perturbing the
     // mutual-kNN communities so they re-formed from three to two.
     let graph = graph::build_graph(&load_records(), &library()).unwrap();
-    assert_eq!(node_count(&graph, "Style"), 2, "2 communities at the adaptive threshold");
+    assert_eq!(
+        node_count(&graph, "Style"),
+        2,
+        "2 communities at the adaptive threshold"
+    );
     assert_eq!(style_ids(&graph), vec!["style-000", "style-001"]);
 
     // IN_STYLE membership = 1.0 (v1 hard assignment); 8 members (5 + 3).
@@ -198,11 +218,15 @@ fn styles_are_two_on_fixtures_under_adaptive_threshold() {
     let lib = graph
         .lookup_by_id_readonly("Library", &Value::String("fixtures".to_string()))
         .expect("Library node present");
-    let thr = match resolve_node_property(graph.node_view(lib).unwrap(), "style_threshold", &graph) {
+    let thr = match resolve_node_property(graph.node_view(lib).unwrap(), "style_threshold", &graph)
+    {
         Value::Float64(v) => v,
         other => panic!("style_threshold not Float64: {other:?}"),
     };
-    assert!(thr > 0.55 && thr <= 1.0, "stamped style_threshold in (0.55, 1.0]: {thr}");
+    assert!(
+        thr > 0.55 && thr <= 1.0,
+        "stamped style_threshold in (0.55, 1.0]: {thr}"
+    );
 }
 
 #[test]
@@ -214,7 +238,11 @@ fn style_ids_stable_across_input_reordering() {
     reversed.reverse();
     let b = graph::build_graph(&reversed, &library()).unwrap();
 
-    assert_eq!(style_ids(&a), style_ids(&b), "Style ids stable across reorder");
+    assert_eq!(
+        style_ids(&a),
+        style_ids(&b),
+        "Style ids stable across reorder"
+    );
 }
 
 // ────────────────────── P10b: style community tuning ────────────────────────
@@ -227,7 +255,10 @@ struct Uf {
 }
 impl Uf {
     fn new(n: usize) -> Self {
-        Uf { parent: (0..n).collect(), size: vec![1; n] }
+        Uf {
+            parent: (0..n).collect(),
+            size: vec![1; n],
+        }
     }
     fn find(&mut self, mut x: usize) -> usize {
         while self.parent[x] != x {
@@ -241,7 +272,11 @@ impl Uf {
         if ra == rb {
             return;
         }
-        let (big, small) = if self.size[ra] >= self.size[rb] { (ra, rb) } else { (rb, ra) };
+        let (big, small) = if self.size[ra] >= self.size[rb] {
+            (ra, rb)
+        } else {
+            (rb, ra)
+        };
         self.parent[small] = big;
         self.size[big] += self.size[small];
     }
@@ -266,7 +301,11 @@ fn sweep(
     for i in 0..n {
         *groups.entry(uf.find(i)).or_default() += 1;
     }
-    let comps: Vec<usize> = groups.values().copied().filter(|&c| c >= min_size).collect();
+    let comps: Vec<usize> = groups
+        .values()
+        .copied()
+        .filter(|&c| c >= min_size)
+        .collect();
     let n_styles = comps.len();
     let largest = comps.iter().copied().max().unwrap_or(0);
     let coverage: usize = comps.iter().sum();
@@ -286,7 +325,8 @@ fn sweep(
 #[ignore = "maintainer-only 456-track subset diagnostic, not a gate"]
 fn style_threshold_tuning() {
     let dir = std::env::var("SONAGRAM_SUBSET_DIR").unwrap_or_else(|_| {
-        "/Volumes/EksternalHome/KristianEX/tmp-sonagram-p10/subset500/.sonagram/analysis".to_string()
+        "/Volumes/EksternalHome/KristianEX/tmp-sonagram-p10/subset500/.sonagram/analysis"
+            .to_string()
     });
     let dir = PathBuf::from(dir);
     if !dir.is_dir() {
@@ -305,20 +345,32 @@ fn style_threshold_tuning() {
         .collect();
     records.sort_by(|a, b| a.source.content_hash.cmp(&b.source.content_hash));
     let n = records.len();
-    let lib = LibraryInfo { root: "subset".to_string(), n_tracks: n };
+    let lib = LibraryInfo {
+        root: "subset".to_string(),
+        n_tracks: n,
+    };
     let graph = graph::build_graph(&records, &lib).unwrap();
     let n_tracks = node_count(&graph, "Track");
 
     // Dense index over content hashes (union-find domain).
-    let mut hashes: Vec<String> = records.iter().map(|r| r.source.content_hash.clone()).collect();
+    let mut hashes: Vec<String> = records
+        .iter()
+        .map(|r| r.source.content_hash.clone())
+        .collect();
     hashes.sort();
-    let index_of: BTreeMap<String, usize> =
-        hashes.iter().cloned().enumerate().map(|(i, h)| (h, i)).collect();
+    let index_of: BTreeMap<String, usize> = hashes
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(i, h)| (h, i))
+        .collect();
 
     // Read directed SIMILAR_TO (src, tgt, score) back from the built graph.
     let mut directed: BTreeMap<(usize, usize), f64> = BTreeMap::new();
     for (src, tgt, props) in edges_of(&graph, "SIMILAR_TO") {
-        let (Some(&a), Some(&b)) = (index_of.get(&src), index_of.get(&tgt)) else { continue };
+        let (Some(&a), Some(&b)) = (index_of.get(&src), index_of.get(&tgt)) else {
+            continue;
+        };
         let s = match props.get("score") {
             Some(Value::Float64(v)) => *v,
             _ => continue,
@@ -343,8 +395,18 @@ fn style_threshold_tuning() {
     let pct = |x: usize| 100.0 * x as f64 / n_tracks as f64;
     let mut out = String::new();
     use std::fmt::Write as _;
-    writeln!(out, "P10b style-community tuning — subset n_tracks={n_tracks}").unwrap();
-    writeln!(out, "directed SIMILAR_TO edges={}, mutual pairs={}", directed.len(), mutual.len()).unwrap();
+    writeln!(
+        out,
+        "P10b style-community tuning — subset n_tracks={n_tracks}"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "directed SIMILAR_TO edges={}, mutual pairs={}",
+        directed.len(),
+        mutual.len()
+    )
+    .unwrap();
     for (label, edges) in [("single-linkage", &single), ("mutual-kNN", &mutual)] {
         writeln!(out, "\n[{label}]").unwrap();
         writeln!(out, "  thr  min  n_styles  largest(%)   coverage(%)").unwrap();
@@ -377,7 +439,8 @@ fn style_threshold_tuning() {
 #[ignore = "maintainer-only style-table diagnostic, not a gate"]
 fn style_table_dump() {
     let dir = std::env::var("SONAGRAM_SUBSET_DIR").unwrap_or_else(|_| {
-        "/Volumes/EksternalHome/KristianEX/tmp-sonagram-p10/subset500/.sonagram/analysis".to_string()
+        "/Volumes/EksternalHome/KristianEX/tmp-sonagram-p10/subset500/.sonagram/analysis"
+            .to_string()
     });
     let dir = PathBuf::from(dir);
     if !dir.is_dir() {
@@ -396,7 +459,10 @@ fn style_table_dump() {
         .collect();
     records.sort_by(|a, b| a.source.content_hash.cmp(&b.source.content_hash));
     let n = records.len();
-    let lib = LibraryInfo { root: "subset".to_string(), n_tracks: n };
+    let lib = LibraryInfo {
+        root: "subset".to_string(),
+        n_tracks: n,
+    };
     let graph = graph::build_graph(&records, &lib).unwrap();
 
     let mut rows: Vec<(i64, String, f64, String)> = graph
@@ -438,9 +504,11 @@ fn style_table_dump() {
     // The adaptive threshold this build chose, stamped on the Library root.
     let chosen = graph
         .lookup_by_id_readonly("Library", &Value::String("subset".to_string()))
-        .and_then(|ni| match resolve_node_property(graph.node_view(ni).unwrap(), "style_threshold", &graph) {
-            Value::Float64(v) => Some(v),
-            _ => None,
+        .and_then(|ni| {
+            match resolve_node_property(graph.node_view(ni).unwrap(), "style_threshold", &graph) {
+                Value::Float64(v) => Some(v),
+                _ => None,
+            }
         })
         .unwrap_or(f64::NAN);
 
@@ -452,7 +520,12 @@ fn style_table_dump() {
         100.0 * coverage as f64 / n as f64).unwrap();
     writeln!(out, "  rank  n   mean_bpm  name  [top_genres]").unwrap();
     for (i, (nt, name, bpm, genres)) in rows.iter().take(15).enumerate() {
-        writeln!(out, "  {:>4}  {nt:>2}  {bpm:>7.1}  {name}  [{genres}]", i + 1).unwrap();
+        writeln!(
+            out,
+            "  {:>4}  {nt:>2}  {bpm:>7.1}  {name}  [{genres}]",
+            i + 1
+        )
+        .unwrap();
     }
     eprint!("{out}");
     if let Ok(scratch) = std::env::var("SONAGRAM_SCRATCH") {
@@ -481,7 +554,10 @@ fn style_profiles_are_shaped_and_deterministic() {
             other => panic!("style name not String: {other:?}"),
         };
         let segs = name.split('-').count();
-        assert!((2..=3).contains(&segs), "style name has 2–3 template segments: {name}");
+        assert!(
+            (2..=3).contains(&segs),
+            "style name has 2–3 template segments: {name}"
+        );
 
         // exemplar_titles: a non-empty list, at most 5, deterministic across builds.
         let ex_a = resolve_node_property(node_a, "exemplar_titles", &a);
@@ -489,7 +565,10 @@ fn style_profiles_are_shaped_and_deterministic() {
             Value::List(v) => v.len(),
             other => panic!("exemplar_titles not List: {other:?}"),
         };
-        assert!((1..=5).contains(&ex_len), "exemplar_titles len in [1,5]: {ex_len}");
+        assert!(
+            (1..=5).contains(&ex_len),
+            "exemplar_titles len in [1,5]: {ex_len}"
+        );
 
         let ni_b = b
             .lookup_by_id_readonly("Style", &Value::String(id.to_string()))

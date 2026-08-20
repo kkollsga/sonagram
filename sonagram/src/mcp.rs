@@ -81,7 +81,9 @@ pub struct InstallReport {
 
 impl InstallReport {
     pub fn launch_command(&self) -> Option<String> {
-        self.server_binary.as_ref().map(|binary| launch_command(binary, &self.graph_path))
+        self.server_binary
+            .as_ref()
+            .map(|binary| launch_command(binary, &self.graph_path))
     }
 }
 
@@ -107,7 +109,10 @@ fn install_for_graph(graph_path: &Path, force: bool) -> Result<InstallReport> {
         ))
     })?;
     let parent = graph_path.parent().ok_or_else(|| {
-        SonagramError::Config(format!("configured graph {} has no parent", graph_path.display()))
+        SonagramError::Config(format!(
+            "configured graph {} has no parent",
+            graph_path.display()
+        ))
     })?;
     let stem = graph_path
         .file_stem()
@@ -209,7 +214,10 @@ fn validate_public_source_dir(path: &Path) -> Result<()> {
         )));
     }
     let mut entries = std::fs::read_dir(path).map_err(|error| {
-        SonagramError::Config(format!("read MCP source sandbox {}: {error}", path.display()))
+        SonagramError::Config(format!(
+            "read MCP source sandbox {}: {error}",
+            path.display()
+        ))
     })?;
     if entries.next().is_some() {
         return Err(SonagramError::Config(format!(
@@ -225,10 +233,9 @@ const SERVER_BINARY_ENV: &str = "SONAGRAM_MCP_SERVER";
 fn resolve_server_binary() -> Option<PathBuf> {
     let executable = format!("sonagram-mcp-server{}", std::env::consts::EXE_SUFFIX);
     let explicit = std::env::var_os(SERVER_BINARY_ENV).map(PathBuf::from);
-    let sibling = std::env::current_exe().ok().and_then(|path| {
-        path.parent()
-            .map(|parent| parent.join(executable.as_str()))
-    });
+    let sibling = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join(executable.as_str())));
     let on_path = std::env::var_os("PATH").and_then(|path| {
         std::env::split_paths(&path)
             .map(|directory| directory.join(executable.as_str()))
@@ -277,9 +284,12 @@ fn write_transaction(assets: &[(PathBuf, &[u8])]) -> Result<()> {
         let parent = path.parent().ok_or_else(|| {
             SonagramError::Config(format!("MCP asset {} has no parent", path.display()))
         })?;
-        let file_name = path.file_name().and_then(|value| value.to_str()).ok_or_else(|| {
-            SonagramError::Config(format!("bad MCP asset path {}", path.display()))
-        })?;
+        let file_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| {
+                SonagramError::Config(format!("bad MCP asset path {}", path.display()))
+            })?;
         let temp = parent.join(format!(".{file_name}.tmp.{suffix}"));
         if let Err(error) = std::fs::write(&temp, bytes) {
             for (_, staged_temp, _) in &staged {
@@ -474,11 +484,20 @@ mod tests {
         assert!(first.manifest_path.exists());
         assert!(first.skills_dir.join("music_curation_policy.md").exists());
         assert!(first.public_source_dir.is_dir());
-        assert_eq!(std::fs::read_dir(&first.public_source_dir).unwrap().count(), 0);
+        assert_eq!(
+            std::fs::read_dir(&first.public_source_dir).unwrap().count(),
+            0
+        );
 
         assert!(first.env_created);
-        assert_eq!(first.env_path, first.manifest_path.parent().unwrap().join(ENV_FILE_NAME));
-        assert_eq!(std::fs::read_to_string(&first.env_path).unwrap(), ENV_FILE_TEMPLATE);
+        assert_eq!(
+            first.env_path,
+            first.manifest_path.parent().unwrap().join(ENV_FILE_NAME)
+        );
+        assert_eq!(
+            std::fs::read_to_string(&first.env_path).unwrap(),
+            ENV_FILE_TEMPLATE
+        );
 
         let second = install_for_graph(&graph, false).unwrap();
         assert_eq!(second.written, 0);
@@ -492,16 +511,28 @@ mod tests {
         assert!(!third.env_created);
         assert_eq!(third.written, 0);
         assert_eq!(third.unchanged, 1 + SKILL_ASSETS.len());
-        assert_eq!(std::fs::read(&first.env_path).unwrap(), b"LASTFM_API_KEY=secret\n");
+        assert_eq!(
+            std::fs::read(&first.env_path).unwrap(),
+            b"LASTFM_API_KEY=secret\n"
+        );
 
         std::fs::write(&first.manifest_path, b"operator edit").unwrap();
         assert!(install_for_graph(&graph, false).is_err());
-        assert_eq!(std::fs::read(&first.manifest_path).unwrap(), b"operator edit");
+        assert_eq!(
+            std::fs::read(&first.manifest_path).unwrap(),
+            b"operator edit"
+        );
         let forced = install_for_graph(&graph, true).unwrap();
         assert_eq!(forced.written, 1);
         assert!(!forced.env_created);
-        assert_eq!(std::fs::read_to_string(&first.manifest_path).unwrap(), MANIFEST_YAML);
-        assert_eq!(std::fs::read(&first.env_path).unwrap(), b"LASTFM_API_KEY=secret\n");
+        assert_eq!(
+            std::fs::read_to_string(&first.manifest_path).unwrap(),
+            MANIFEST_YAML
+        );
+        assert_eq!(
+            std::fs::read(&first.env_path).unwrap(),
+            b"LASTFM_API_KEY=secret\n"
+        );
     }
 
     #[cfg(unix)]
@@ -571,11 +602,7 @@ mod tests {
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         assert_eq!(
-            resolve_server_binary_from([
-                Some(explicit.clone()),
-                Some(fallback),
-                None,
-            ]),
+            resolve_server_binary_from([Some(explicit.clone()), Some(fallback), None,]),
             Some(std::fs::canonicalize(explicit).unwrap())
         );
     }

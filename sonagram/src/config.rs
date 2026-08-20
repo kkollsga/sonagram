@@ -126,9 +126,8 @@ impl Config {
     /// sibling then rename, so a reader never sees a half-written config.
     pub fn save_to(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                SonagramError::Config(format!("create {}: {e}", parent.display()))
-            })?;
+            std::fs::create_dir_all(parent)
+                .map_err(|e| SonagramError::Config(format!("create {}: {e}", parent.display())))?;
         }
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| SonagramError::Config(format!("serialize config: {e}")))?;
@@ -225,7 +224,9 @@ mod tests {
 
     #[test]
     fn round_trip_and_defaults() {
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let home = tmp_home("roundtrip");
         let path = home.join("config.json");
 

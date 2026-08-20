@@ -36,7 +36,12 @@ pub fn audit_playlist(
         match candidates.get(id) {
             Some(track) => {
                 for (code, message) in eligibility_issues(track, policy) {
-                    issues.push(issue(AuditSeverity::Error, code, message, vec![position + 1]));
+                    issues.push(issue(
+                        AuditSeverity::Error,
+                        code,
+                        message,
+                        vec![position + 1],
+                    ));
                 }
                 selected.push(track);
             }
@@ -135,10 +140,7 @@ pub fn audit_playlist(
             Vec::new(),
         ));
     }
-    let effective_artist_share = policy
-        .audit
-        .max_artist_share
-        .max(1.0 / denominator);
+    let effective_artist_share = policy.audit.max_artist_share.max(1.0 / denominator);
     if max_artist_share > effective_artist_share + f64::EPSILON {
         issues.push(issue(
             AuditSeverity::Error,
@@ -150,10 +152,7 @@ pub fn audit_playlist(
             Vec::new(),
         ));
     }
-    let effective_album_share = policy
-        .audit
-        .max_album_share
-        .max(1.0 / denominator);
+    let effective_album_share = policy.audit.max_album_share.max(1.0 / denominator);
     if max_album_share > effective_album_share + f64::EPSILON {
         issues.push(issue(
             AuditSeverity::Error,
@@ -304,7 +303,8 @@ pub fn audit_playlist_for_brief(
             "target_track_count",
             format!(
                 "playlist has {} IDs but the brief requires {}",
-                track_ids.len(), brief.target_tracks
+                track_ids.len(),
+                brief.target_tracks
             ),
             Vec::new(),
         ));
@@ -376,7 +376,10 @@ pub fn audit_playlist_for_brief(
             }
             _ => {}
         }
-        if matches!(brief.seed_role, SeedRole::Reference | SeedRole::PinnedAndReference) {
+        if matches!(
+            brief.seed_role,
+            SeedRole::Reference | SeedRole::PinnedAndReference
+        ) {
             if policy.targets.relative_aggression != RelativeDirection::Any
                 && seed.aggression_score().is_none()
             {
@@ -441,7 +444,10 @@ pub fn audit_playlist_for_brief(
             }
         }
     }
-    audit.passed = !audit.issues.iter().any(|item| item.severity == AuditSeverity::Error);
+    audit.passed = !audit
+        .issues
+        .iter()
+        .any(|item| item.severity == AuditSeverity::Error);
     Ok(audit)
 }
 
@@ -472,7 +478,12 @@ pub fn explain_playlist(
         audit.unique_artists,
         if audit.passed { "passed" } else { "failed" }
     )];
-    summary.extend(audit.issues.iter().map(|issue| format!("{}: {}", issue.code, issue.message)));
+    summary.extend(
+        audit
+            .issues
+            .iter()
+            .map(|issue| format!("{}: {}", issue.code, issue.message)),
+    );
     Ok(PlaylistExplanation {
         tracks,
         transitions: audit.transitions,
@@ -577,9 +588,12 @@ pub fn explain_playlist_for_brief(
         audit.unique_artists,
         if audit.passed { "passed" } else { "failed" }
     )];
-    explanation
-        .summary
-        .extend(audit.issues.iter().map(|item| format!("{}: {}", item.code, item.message)));
+    explanation.summary.extend(
+        audit
+            .issues
+            .iter()
+            .map(|item| format!("{}: {}", item.code, item.message)),
+    );
     Ok(explanation)
 }
 
@@ -593,14 +607,35 @@ pub(crate) fn eligibility_issues(
         issues.push(("non_music", "track is not classified as music".into()));
     }
     if e.require_canonical && !track.is_canonical {
-        issues.push(("non_canonical", "track is not the canonical recording".into()));
+        issues.push((
+            "non_canonical",
+            "track is not the canonical recording".into(),
+        ));
     }
     if !e.allow_low_quality && track.quality_tier.as_deref() == Some("low") {
         issues.push(("low_quality", "track is in the low quality tier".into()));
     }
-    check_min(&mut issues, "duration_too_short", "duration", track.duration_sec, e.min_duration_sec);
-    check_max(&mut issues, "duration_too_long", "duration", track.duration_sec, e.max_duration_sec);
-    check_max(&mut issues, "too_vocal", "vocalness", track.vocalness, e.max_vocalness);
+    check_min(
+        &mut issues,
+        "duration_too_short",
+        "duration",
+        track.duration_sec,
+        e.min_duration_sec,
+    );
+    check_max(
+        &mut issues,
+        "duration_too_long",
+        "duration",
+        track.duration_sec,
+        e.max_duration_sec,
+    );
+    check_max(
+        &mut issues,
+        "too_vocal",
+        "vocalness",
+        track.vocalness,
+        e.max_vocalness,
+    );
     if absolute_aggression_directive_active(policy) {
         match track.aggression_score() {
             Some(score) => {
@@ -622,12 +657,48 @@ pub(crate) fn eligibility_issues(
             None => issues.push(("aggression_unknown", aggression_unknown_message(track))),
         }
     }
-    check_min(&mut issues, "energy_too_low", "energy", track.energy, e.min_energy);
-    check_max(&mut issues, "energy_too_high", "energy", track.energy, e.max_energy);
-    check_min(&mut issues, "arousal_too_low", "arousal", track.arousal, e.min_arousal);
-    check_max(&mut issues, "arousal_too_high", "arousal", track.arousal, e.max_arousal);
-    check_min(&mut issues, "tension_too_low", "tension", track.tension, e.min_tension);
-    check_max(&mut issues, "tension_too_high", "tension", track.tension, e.max_tension);
+    check_min(
+        &mut issues,
+        "energy_too_low",
+        "energy",
+        track.energy,
+        e.min_energy,
+    );
+    check_max(
+        &mut issues,
+        "energy_too_high",
+        "energy",
+        track.energy,
+        e.max_energy,
+    );
+    check_min(
+        &mut issues,
+        "arousal_too_low",
+        "arousal",
+        track.arousal,
+        e.min_arousal,
+    );
+    check_max(
+        &mut issues,
+        "arousal_too_high",
+        "arousal",
+        track.arousal,
+        e.max_arousal,
+    );
+    check_min(
+        &mut issues,
+        "tension_too_low",
+        "tension",
+        track.tension,
+        e.min_tension,
+    );
+    check_max(
+        &mut issues,
+        "tension_too_high",
+        "tension",
+        track.tension,
+        e.max_tension,
+    );
     // Artist filters are user-facing names. `artist_key` is the identity used
     // for diversity and spacing, and may be an opaque MusicBrainz id.
     let artist_name_key = group_key(track.artist.as_deref());
@@ -646,7 +717,11 @@ pub(crate) fn eligibility_issues(
         "genre_not_included",
         "genre_excluded",
         "genre",
-        &track.genre_keys.iter().map(String::as_str).collect::<Vec<_>>(),
+        &track
+            .genre_keys
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
         &e.include_genres,
         &e.exclude_genres,
     );
@@ -655,7 +730,11 @@ pub(crate) fn eligibility_issues(
         "style_not_included",
         "style_excluded",
         "style",
-        &track.style_keys.iter().map(String::as_str).collect::<Vec<_>>(),
+        &track
+            .style_keys
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
         &e.include_styles,
         &e.exclude_styles,
     );
@@ -664,21 +743,31 @@ pub(crate) fn eligibility_issues(
         "decade_not_included",
         "decade_excluded",
         "decade",
-        &track.decade_keys.iter().map(String::as_str).collect::<Vec<_>>(),
+        &track
+            .decade_keys
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
         &e.include_decades,
         &e.exclude_decades,
     );
     match track.year {
         Some(year) => {
             if e.min_year.is_some_and(|min| year < min) {
-                issues.push(("year_too_early", format!("year {year} is before the minimum")));
+                issues.push((
+                    "year_too_early",
+                    format!("year {year} is before the minimum"),
+                ));
             }
             if e.max_year.is_some_and(|max| year > max) {
                 issues.push(("year_too_late", format!("year {year} is after the maximum")));
             }
         }
         None if e.min_year.is_some() || e.max_year.is_some() => {
-            issues.push(("year_missing", "track has no usable original/file year".into()));
+            issues.push((
+                "year_missing",
+                "track has no usable original/file year".into(),
+            ));
         }
         None => {}
     }
@@ -903,9 +992,10 @@ fn check_relative(
                     "seed_relative_not_lower",
                     value > reference - margin + f64::EPSILON,
                 ),
-                RelativeDirection::Higher if margin <= f64::EPSILON => {
-                    ("seed_relative_not_higher", value <= reference + f64::EPSILON)
-                }
+                RelativeDirection::Higher if margin <= f64::EPSILON => (
+                    "seed_relative_not_higher",
+                    value <= reference + f64::EPSILON,
+                ),
                 RelativeDirection::Higher => (
                     "seed_relative_not_higher",
                     value + f64::EPSILON < reference + margin,
@@ -949,14 +1039,23 @@ fn check_categories(
     include: &[String],
     exclude: &[String],
 ) {
-    let track_values: BTreeSet<String> =
-        track_values.iter().map(|value| group_key(Some(*value))).collect();
-    let include: BTreeSet<String> =
-        include.iter().map(|value| group_key(Some(value.as_str()))).collect();
-    let exclude: BTreeSet<String> =
-        exclude.iter().map(|value| group_key(Some(value.as_str()))).collect();
+    let track_values: BTreeSet<String> = track_values
+        .iter()
+        .map(|value| group_key(Some(*value)))
+        .collect();
+    let include: BTreeSet<String> = include
+        .iter()
+        .map(|value| group_key(Some(value.as_str())))
+        .collect();
+    let exclude: BTreeSet<String> = exclude
+        .iter()
+        .map(|value| group_key(Some(value.as_str())))
+        .collect();
     if !include.is_empty() && track_values.is_disjoint(&include) {
-        issues.push((include_code, format!("track does not match an included {label}")));
+        issues.push((
+            include_code,
+            format!("track does not match an included {label}"),
+        ));
     }
     if !exclude.is_empty() && !track_values.is_disjoint(&exclude) {
         issues.push((exclude_code, format!("track matches an excluded {label}")));
@@ -993,12 +1092,20 @@ pub(crate) fn transition_score(
     ];
     let denominator: f64 = weighted.iter().filter_map(|(v, w)| v.map(|_| *w)).sum();
     let base = if denominator > 0.0 {
-        weighted.iter().filter_map(|(v, w)| v.map(|x| x * *w)).sum::<f64>() / denominator
+        weighted
+            .iter()
+            .filter_map(|(v, w)| v.map(|x| x * *w))
+            .sum::<f64>()
+            / denominator
     } else {
         0.0
     };
     let same_artist = !a.artist_key.is_empty() && a.artist_key == b.artist_key;
-    let penalty = if same_artist { policy.transition.same_artist_penalty } else { 0.0 };
+    let penalty = if same_artist {
+        policy.transition.same_artist_penalty
+    } else {
+        0.0
+    };
     TransitionScore {
         from_position,
         to_position: from_position + 1,
@@ -1023,7 +1130,9 @@ pub(crate) fn arc_target(policy: &PlaylistPolicy, position: usize, len: usize) -
         PlaylistArc::None | PlaylistArc::Flat => base,
         PlaylistArc::Rise => (base - 0.18 + 0.36 * x).clamp(0.0, 1.0),
         PlaylistArc::Fall => (base + 0.18 - 0.36 * x).clamp(0.0, 1.0),
-        PlaylistArc::RiseAndFall => (base - 0.16 + 0.32 * (1.0 - (2.0 * x - 1.0).abs())).clamp(0.0, 1.0),
+        PlaylistArc::RiseAndFall => {
+            (base - 0.16 + 0.32 * (1.0 - (2.0 * x - 1.0).abs())).clamp(0.0, 1.0)
+        }
     }
 }
 
@@ -1039,7 +1148,11 @@ fn track_contributions(
         ("arousal_fit", track.arousal, policy.targets.arousal),
         ("tension_fit", track.tension, policy.targets.tension),
         ("vocalness_fit", track.vocalness, policy.targets.vocalness),
-        ("aggression_fit", track.aggression_score(), policy.targets.aggression),
+        (
+            "aggression_fit",
+            track.aggression_score(),
+            policy.targets.aggression,
+        ),
     ] {
         if let (Some(actual), Some(target)) = (actual, target) {
             out.push(ScoreContribution {
@@ -1049,7 +1162,10 @@ fn track_contributions(
         }
     }
     if let Some(quality) = track.recording_quality {
-        out.push(ScoreContribution { component: "recording_quality".into(), value: quality });
+        out.push(ScoreContribution {
+            component: "recording_quality".into(),
+            value: quality,
+        });
     }
     if policy.transition.arc != PlaylistArc::None {
         if let Some(energy) = track.energy {
@@ -1088,7 +1204,9 @@ fn key_similarity(a: Option<&str>, b: Option<&str>) -> Option<f64> {
 
 fn parse_camelot(value: &str) -> Option<(i32, char)> {
     let mode = value.chars().last()?;
-    let number = value[..value.len().saturating_sub(mode.len_utf8())].parse().ok()?;
+    let number = value[..value.len().saturating_sub(mode.len_utf8())]
+        .parse()
+        .ok()?;
     (matches!(mode, 'A' | 'B') && (1..=12).contains(&number)).then_some((number, mode))
 }
 
@@ -1130,7 +1248,9 @@ fn check_max(
 }
 
 fn mean(values: impl Iterator<Item = f64>) -> Option<f64> {
-    let (sum, count) = values.fold((0.0, 0usize), |(sum, count), value| (sum + value, count + 1));
+    let (sum, count) = values.fold((0.0, 0usize), |(sum, count), value| {
+        (sum + value, count + 1)
+    });
     (count > 0).then_some(sum / count as f64)
 }
 
@@ -1140,7 +1260,12 @@ fn issue(
     message: String,
     positions: Vec<usize>,
 ) -> AuditIssue {
-    AuditIssue { severity, code: code.into(), message, positions }
+    AuditIssue {
+        severity,
+        code: code.into(),
+        message,
+        positions,
+    }
 }
 
 #[cfg(test)]

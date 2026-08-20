@@ -212,7 +212,10 @@ fn build_library(name: &str) -> PathBuf {
 fn build_duplicate_library(name: &str) -> PathBuf {
     let lib = tmp_library(name);
     write_file(&lib.join("a.mp3"), &make_mp3(b"first-tag", b"SHARED-AUDIO"));
-    write_file(&lib.join("b.mp3"), &make_mp3(b"second-longer-tag", b"SHARED-AUDIO"));
+    write_file(
+        &lib.join("b.mp3"),
+        &make_mp3(b"second-longer-tag", b"SHARED-AUDIO"),
+    );
     lib
 }
 
@@ -407,8 +410,7 @@ fn schema_four_v1_cache_migrates_to_v2_without_audio() {
     let features = without_aggression(&mut expected);
     let mut v1 = expected.clone();
     v1.analysis.provenance.schema_version = 4;
-    v1.analysis.provenance.vocalness_model_id =
-        Some("sonara-vocalness-v1".to_string());
+    v1.analysis.provenance.vocalness_model_id = Some("sonara-vocalness-v1".to_string());
     v1.analysis.vocalness = Some(0.0);
     v1.analysis.instrumentalness = Some(1.0);
 
@@ -436,7 +438,10 @@ fn schema_five_cache_without_aggression_migrates_to_six_without_audio() {
         schema_five.analysis.provenance.schema_version,
         sonara::analyze::ANALYSIS_SCHEMA_VERSION
     );
-    assert_eq!(schema_five.analysis.provenance, expected.analysis.provenance);
+    assert_eq!(
+        schema_five.analysis.provenance,
+        expected.analysis.provenance
+    );
     assert!(record_is_fresh_for_features(&schema_five, &features));
 }
 
@@ -444,8 +449,7 @@ fn schema_five_cache_without_aggression_migrates_to_six_without_audio() {
 fn schema_five_v2_aggression_cache_requires_audio_reanalysis() {
     let mut schema_five = load_a_fixture();
     schema_five.analysis.provenance.schema_version = 5;
-    schema_five.analysis.provenance.aggression_model_id =
-        Some("aggression-rank-v2".to_string());
+    schema_five.analysis.provenance.aggression_model_id = Some("aggression-rank-v2".to_string());
 
     assert!(!record_is_fresh(&schema_five));
     let model = sonara::vocal_model::bundled().unwrap();
@@ -481,8 +485,10 @@ fn cache_migration_rejects_incomplete_or_foreign_inputs() {
     ));
 
     let mut stray_aggression_model = legacy.clone();
-    stray_aggression_model.analysis.provenance.aggression_model_id =
-        Some(AGGRESSION_MODEL_ID.to_string());
+    stray_aggression_model
+        .analysis
+        .provenance
+        .aggression_model_id = Some(AGGRESSION_MODEL_ID.to_string());
     assert!(
         !migrate_cached_record(&mut stray_aggression_model, &features, &model),
         "a no-aggression migration must reject hidden model provenance"
@@ -498,11 +504,7 @@ fn cache_migration_rejects_incomplete_or_foreign_inputs() {
     let mut hidden_genre = legacy;
     hidden_genre.analysis.genre = Some("rock".to_string());
     hidden_genre.analysis.genre_confidence = Some(0.9);
-    assert!(!migrate_cached_record(
-        &mut hidden_genre,
-        &features,
-        &model
-    ));
+    assert!(!migrate_cached_record(&mut hidden_genre, &features, &model));
 }
 
 #[test]
@@ -523,8 +525,7 @@ fn production_scan_reanalyzes_schema_five_v2_aggression_cache_from_audio() {
     legacy.source.path = "a.mp3".to_string();
     legacy.source.file_size = metadata.len();
     legacy.analysis.provenance.schema_version = 5;
-    legacy.analysis.provenance.aggression_model_id =
-        Some("aggression-rank-v2".to_string());
+    legacy.analysis.provenance.aggression_model_id = Some("aggression-rank-v2".to_string());
 
     let cache = Cache::new(&lib);
     cache.save_record(&legacy).unwrap();
@@ -559,9 +560,19 @@ fn duplicate_hash_is_analyzed_once_and_fanned_out_deterministically() {
 
     let first = scan_library_with(&lib, &opts(), &analyzer).unwrap();
     assert_eq!(first.total_files, 2);
-    assert_eq!(first.analyzed, 1, "analysis work is counted per unique hash");
-    assert_eq!(first.reused_hash_match, 1, "the alias follows the canonical result");
-    assert_eq!(analyzer.count(), 1, "same-hash paths must never race into two analyses");
+    assert_eq!(
+        first.analyzed, 1,
+        "analysis work is counted per unique hash"
+    );
+    assert_eq!(
+        first.reused_hash_match, 1,
+        "the alias follows the canonical result"
+    );
+    assert_eq!(
+        analyzer.count(),
+        1,
+        "same-hash paths must never race into two analyses"
+    );
     assert!(first.failed.is_empty());
 
     let cache = Cache::new(&lib);
@@ -570,7 +581,10 @@ fn duplicate_hash_is_analyzed_once_and_fanned_out_deterministically() {
     assert_eq!(index["a.mp3"].content_hash, index["b.mp3"].content_hash);
     let records = load_records(&lib).unwrap();
     assert_eq!(records.len(), 1, "one content hash persists one record");
-    assert_eq!(records[0].source.path, "a.mp3", "first sorted path is canonical");
+    assert_eq!(
+        records[0].source.path, "a.mp3",
+        "first sorted path is canonical"
+    );
 
     let progress = sonagram::scan::load_scan_progress(&lib).unwrap();
     assert_eq!(progress.analyze_total, 1);
@@ -610,13 +624,24 @@ fn duplicate_hash_failure_fans_out_and_retries_once() {
         .iter()
         .map(|(path, _)| path.file_name().unwrap().to_str().unwrap())
         .collect();
-    assert_eq!(failed_paths, ["a.mp3", "b.mp3"], "failures stay path-sorted");
-    assert!(first.failed.iter().all(|(_, message)| message == "cache error: mock failure"));
+    assert_eq!(
+        failed_paths,
+        ["a.mp3", "b.mp3"],
+        "failures stay path-sorted"
+    );
+    assert!(first
+        .failed
+        .iter()
+        .all(|(_, message)| message == "cache error: mock failure"));
     assert!(Cache::new(&lib).load_index().unwrap().is_empty());
 
     let recovering = CountingAnalyzer::new();
     let second = scan_library_with(&lib, &opts(), &recovering).unwrap();
-    assert_eq!(recovering.count(), 1, "retry still analyzes the unique hash once");
+    assert_eq!(
+        recovering.count(),
+        1,
+        "retry still analyzes the unique hash once"
+    );
     assert_eq!(second.analyzed, 1);
     assert_eq!(second.reused_hash_match, 1);
     assert!(second.failed.is_empty());
@@ -639,7 +664,11 @@ fn first_scan_analyzes_all_then_noop_analyzes_zero() {
     assert_eq!(r2.analyzed, 0, "no-op rescan must analyze nothing");
     assert_eq!(r2.reused_stat_match, 3);
     assert_eq!(r2.reused_hash_match, 0);
-    assert_eq!(analyzer.count(), 3, "analyzer call count unchanged on no-op");
+    assert_eq!(
+        analyzer.count(),
+        3,
+        "analyzer call count unchanged on no-op"
+    );
 }
 
 #[test]
@@ -657,8 +686,14 @@ fn touch_mtime_rehashes_but_zero_analyses() {
 
     let r = scan_library_with(&lib, &opts(), &analyzer).unwrap();
     assert_eq!(r.analyzed, 0);
-    assert_eq!(r.reused_hash_match, 1, "the touched file re-hashed and reused");
-    assert_eq!(r.reused_stat_match, 2, "the other two hit the stat fast-path");
+    assert_eq!(
+        r.reused_hash_match, 1,
+        "the touched file re-hashed and reused"
+    );
+    assert_eq!(
+        r.reused_stat_match, 2,
+        "the other two hit the stat fast-path"
+    );
     assert_eq!(analyzer.count(), 3, "no new analyses from a touch");
 }
 
@@ -671,7 +706,10 @@ fn tag_edit_is_hash_invariant_zero_analyses() {
 
     // Rewrite a.mp3 with a *different, longer* tag payload but identical audio.
     // Size and mtime change (fast-path misses) but the ID3-stripped hash is equal.
-    write_file(&lib.join("a.mp3"), &make_mp3(b"a-much-longer-tag-payload-xyz", b"AUDIO-AAAA"));
+    write_file(
+        &lib.join("a.mp3"),
+        &make_mp3(b"a-much-longer-tag-payload-xyz", b"AUDIO-AAAA"),
+    );
 
     let r = scan_library_with(&lib, &opts(), &analyzer).unwrap();
     assert_eq!(r.analyzed, 0, "retag must not trigger analysis");
@@ -684,7 +722,10 @@ fn tag_edit_is_hash_invariant_zero_analyses() {
         .iter()
         .find(|r| r.source.path == "a.mp3")
         .expect("a.mp3 record present");
-    assert_eq!(a_rec.source.file_size as usize, make_mp3(b"a-much-longer-tag-payload-xyz", b"AUDIO-AAAA").len());
+    assert_eq!(
+        a_rec.source.file_size as usize,
+        make_mp3(b"a-much-longer-tag-payload-xyz", b"AUDIO-AAAA").len()
+    );
 }
 
 #[test]
@@ -905,9 +946,16 @@ fn stale_records_reanalyzed_fresh_untouched() {
     // Re-analysis rewrote current-schema records → a further rescan is a true
     // no-op: all fresh, zero analyses.
     let r2 = scan_library_with(&lib, &opts(), &analyzer).unwrap();
-    assert_eq!(r2.analyzed, 0, "all records fresh again → no-op analyzes nothing");
+    assert_eq!(
+        r2.analyzed, 0,
+        "all records fresh again → no-op analyzes nothing"
+    );
     assert_eq!(r2.reused_stat_match, 3);
-    assert_eq!(analyzer.count(), 5, "no further analyses on the no-op rescan");
+    assert_eq!(
+        analyzer.count(),
+        5,
+        "no further analyses on the no-op rescan"
+    );
 }
 
 /// P20 streaming persistence: results that completed before a failure are on
@@ -930,7 +978,10 @@ fn partial_scan_resumes_only_missing_work() {
     // missing one is analyzed.
     let analyzer2 = CountingAnalyzer::new();
     let r2 = scan_library_with(&lib, &opts(), &analyzer2).unwrap();
-    assert_eq!(r2.analyzed, 1, "only the previously failed file re-analyzes");
+    assert_eq!(
+        r2.analyzed, 1,
+        "only the previously failed file re-analyzes"
+    );
     assert_eq!(r2.reused_stat_match, 2);
     assert_eq!(analyzer2.count(), 1);
     assert_eq!(load_records(&lib).unwrap().len(), 3);

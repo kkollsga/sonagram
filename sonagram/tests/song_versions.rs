@@ -66,7 +66,12 @@ fn rec(hash: &str, artist: &str, title: &str, q: f32) -> AnalysisRecord {
 fn records() -> Vec<AnalysisRecord> {
     vec![
         rec(MASTER_HASH, "The Beatles", "Yesterday", 1.0),
-        rec(LIVE_HASH, "The Beatles", "Yesterday - Live at Shea Stadium", 0.5),
+        rec(
+            LIVE_HASH,
+            "The Beatles",
+            "Yesterday - Live at Shea Stadium",
+            0.5,
+        ),
         rec(DEMO_HASH, "The Beatles", "Yesterday (Demo)", 0.0),
         rec(SINGLETON_HASH, "The Beatles", "Let It Be", 0.4),
     ]
@@ -80,7 +85,11 @@ fn library() -> LibraryInfo {
 }
 
 fn node_count(graph: &DirGraph, node_type: &str) -> usize {
-    graph.type_indices.get(node_type).map(|r| r.len()).unwrap_or(0)
+    graph
+        .type_indices
+        .get(node_type)
+        .map(|r| r.len())
+        .unwrap_or(0)
 }
 
 fn str_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> String {
@@ -156,7 +165,11 @@ fn song_layer_groups_versions_and_flags_canonical() {
     let graph = graph::build_graph(&records(), &library()).unwrap();
 
     // Exactly one Song node — the 3-version group; the singleton has none.
-    assert_eq!(node_count(&graph, "Song"), 1, "one Song for the ≥2-version group");
+    assert_eq!(
+        node_count(&graph, "Song"),
+        1,
+        "one Song for the ≥2-version group"
+    );
 
     let song_id = "The Beatles|yesterday";
     assert_eq!(str_prop(&graph, "Song", song_id, "title"), "yesterday");
@@ -218,7 +231,8 @@ fn recognized_release_beats_higher_quality_unmatched_take() {
             ..TrackEnrich::default()
         },
     );
-    let graph = graph::build_graph_with_enrichment(&records, Some(&enrichment), &library()).unwrap();
+    let graph =
+        graph::build_graph_with_enrichment(&records, Some(&enrichment), &library()).unwrap();
     assert_eq!(
         str_prop(&graph, "Song", "The Beatles|yesterday", "canonical_hash"),
         LIVE_HASH
@@ -255,7 +269,10 @@ fn audio_refinement_preserves_track_properties_and_round_trips() {
         "junk singleton attaches but the known-artist cover does not"
     );
     assert_eq!(str_prop(&graph, "Track", "junk", "title"), "Focus");
-    assert_eq!(str_prop(&graph, "Track", "junk", "artist_name"), "Unknown Artist");
+    assert_eq!(
+        str_prop(&graph, "Track", "junk", "artist_name"),
+        "Unknown Artist"
+    );
     assert_eq!(float_prop(&graph, "Track", "junk", "bpm"), 120.0);
     assert!(bool_prop(&graph, "Track", "junk", "is_canonical"));
     assert!(bool_prop(&graph, "Track", "cover", "is_canonical"));

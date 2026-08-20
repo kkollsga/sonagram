@@ -209,7 +209,11 @@ pub fn export_folder(
     let body = m3u8_body(entries, &filenames);
     let pl_name = {
         let s = sanitize_component(playlist_name);
-        if s.is_empty() { "playlist".to_string() } else { s }
+        if s.is_empty() {
+            "playlist".to_string()
+        } else {
+            s
+        }
     };
     let playlist_path = dest_dir.join(format!("{pl_name}.m3u8"));
     fs::write(&playlist_path, body)?;
@@ -237,8 +241,16 @@ fn copy_filename(entry: &PlaylistEntry, position: usize) -> String {
         .filter(|s| s.len() > 1)
         .unwrap_or_default();
 
-    let artist = entry.artist.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let title = entry.title.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let artist = entry
+        .artist
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let title = entry
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let stem = match (artist, title) {
         (Some(a), Some(t)) => format!("{} - {}", sanitize_component(a), sanitize_component(t)),
         (None, Some(t)) => sanitize_component(t),
@@ -250,7 +262,11 @@ fn copy_filename(entry: &PlaylistEntry, position: usize) -> String {
             .filter(|s| !s.is_empty())
             .unwrap_or_default(),
     };
-    let stem = if stem.is_empty() { "track".to_string() } else { stem };
+    let stem = if stem.is_empty() {
+        "track".to_string()
+    } else {
+        stem
+    };
 
     // Cap the whole filename at MAX_FILENAME_BYTES, truncating the stem on a
     // UTF-8 boundary and preserving the NN prefix + extension.
@@ -328,8 +344,16 @@ fn extinf_line(entry: &PlaylistEntry) -> String {
 /// The human-readable label for an entry: `Artist - Title`, else `Title`, else
 /// the file name. Blank artist/title are treated as absent.
 fn label(entry: &PlaylistEntry) -> String {
-    let artist = entry.artist.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let title = entry.title.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let artist = entry
+        .artist
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let title = entry
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     match (artist, title) {
         (Some(a), Some(t)) => format!("{a} - {t}"),
         (None, Some(t)) => t.to_string(),
@@ -454,11 +478,7 @@ fn choose_id_column(graph: &DirGraph, columns: &[String], rows: &[Vec<Value>]) -
     // 1. A column explicitly named for the id, in bare or qualified form.
     for (i, name) in columns.iter().enumerate() {
         let n = name.to_ascii_lowercase();
-        if n == ID_PROP
-            || n == "id"
-            || n.ends_with(&format!(".{ID_PROP}"))
-            || n.ends_with(".id")
-        {
+        if n == ID_PROP || n == "id" || n.ends_with(&format!(".{ID_PROP}")) || n.ends_with(".id") {
             return Ok(i);
         }
     }
@@ -641,7 +661,10 @@ pub fn save_curated_playlist(
             "refusing to store a curated playlist that failed its library audit".into(),
         ));
     }
-    let entry_ids: Vec<&str> = entries.iter().map(|entry| entry.content_hash.as_str()).collect();
+    let entry_ids: Vec<&str> = entries
+        .iter()
+        .map(|entry| entry.content_hash.as_str())
+        .collect();
     let curated_ids: Vec<&str> = curated.track_ids.iter().map(String::as_str).collect();
     if entry_ids != curated_ids {
         return Err(SonagramError::Playlist(
@@ -779,7 +802,10 @@ pub fn load_playlist_meta(dir: &Path, slug: &str) -> Result<PlaylistMeta> {
     validate_slug(slug)?;
     let path = dir.join(format!("{slug}.meta.json"));
     let text = fs::read_to_string(&path).map_err(|e| {
-        SonagramError::Playlist(format!("no stored playlist '{slug}' in {}: {e}", dir.display()))
+        SonagramError::Playlist(format!(
+            "no stored playlist '{slug}' in {}: {e}",
+            dir.display()
+        ))
     })?;
     serde_json::from_str(&text)
         .map_err(|e| SonagramError::Playlist(format!("parse {}: {e}", path.display())))
@@ -863,7 +889,9 @@ pub fn slugify(name: &str) -> String {
 /// Return a slug not colliding with an existing `<slug>.m3u8` / `<slug>.meta.json`
 /// in `dir`, appending `-2`, `-3`, … until free.
 fn unique_slug(dir: &Path, base: &str) -> String {
-    let taken = |s: &str| dir.join(format!("{s}.m3u8")).exists() || dir.join(format!("{s}.meta.json")).exists();
+    let taken = |s: &str| {
+        dir.join(format!("{s}.m3u8")).exists() || dir.join(format!("{s}.meta.json")).exists()
+    };
     if !taken(base) {
         return base.to_string();
     }
@@ -910,7 +938,12 @@ fn iso8601_utc(secs: i64) -> String {
 mod tests {
     use super::*;
 
-    fn entry(dur: Option<f32>, artist: Option<&str>, title: Option<&str>, path: &str) -> PlaylistEntry {
+    fn entry(
+        dur: Option<f32>,
+        artist: Option<&str>,
+        title: Option<&str>,
+        path: &str,
+    ) -> PlaylistEntry {
         PlaylistEntry {
             content_hash: "h".to_string(),
             abs_path: PathBuf::from(path),
@@ -942,7 +975,12 @@ mod tests {
         let e = entry(Some(100.0), None, Some("Just the Title"), "/m/song.mp3");
         assert_eq!(extinf_line(&e), "#EXTINF:100,Just the Title");
         // A blank artist counts as absent.
-        let e = entry(Some(100.0), Some("   "), Some("Just the Title"), "/m/song.mp3");
+        let e = entry(
+            Some(100.0),
+            Some("   "),
+            Some("Just the Title"),
+            "/m/song.mp3",
+        );
         assert_eq!(extinf_line(&e), "#EXTINF:100,Just the Title");
     }
 
@@ -951,7 +989,12 @@ mod tests {
         let e = entry(Some(100.0), None, None, "/music/library/song file.mp3");
         assert_eq!(extinf_line(&e), "#EXTINF:100,song file.mp3");
         // Blank title with an artist still falls back to the file name.
-        let e = entry(Some(100.0), Some("Some Artist"), Some(""), "/music/x/only.mp3");
+        let e = entry(
+            Some(100.0),
+            Some("Some Artist"),
+            Some(""),
+            "/music/x/only.mp3",
+        );
         assert_eq!(extinf_line(&e), "#EXTINF:100,only.mp3");
     }
 
@@ -960,7 +1003,10 @@ mod tests {
     #[test]
     fn sanitize_replaces_forbidden_and_control_chars() {
         assert_eq!(sanitize_component("AC/DC"), "AC_DC");
-        assert_eq!(sanitize_component(r#"a:b*c?"d<e>f|g\h"#), "a_b_c__d_e_f_g_h");
+        assert_eq!(
+            sanitize_component(r#"a:b*c?"d<e>f|g\h"#),
+            "a_b_c__d_e_f_g_h"
+        );
         // Control chars (tab, newline) become underscores.
         assert_eq!(sanitize_component("a\tb\nc"), "a_b_c");
         // Leading/trailing dots and spaces are trimmed; interior kept.
@@ -992,19 +1038,34 @@ mod tests {
 
     #[test]
     fn copy_filename_position_artist_title_ext() {
-        let e = entry(Some(230.0), Some("Bruno Mars"), Some("Marry You"), "/lib/04 Marry You.mp3");
+        let e = entry(
+            Some(230.0),
+            Some("Bruno Mars"),
+            Some("Marry You"),
+            "/lib/04 Marry You.mp3",
+        );
         assert_eq!(copy_filename(&e, 4), "04 - Bruno Mars - Marry You.mp3");
     }
 
     #[test]
     fn copy_filename_cjk_intact() {
-        let e = entry(Some(212.0), Some("布袋寅泰"), Some("薔薇と雨"), "/lib/08 薔薇と雨.mp3");
+        let e = entry(
+            Some(212.0),
+            Some("布袋寅泰"),
+            Some("薔薇と雨"),
+            "/lib/08 薔薇と雨.mp3",
+        );
         assert_eq!(copy_filename(&e, 2), "02 - 布袋寅泰 - 薔薇と雨.mp3");
     }
 
     #[test]
     fn copy_filename_sanitizes_slashes() {
-        let e = entry(Some(200.0), Some("AC/DC"), Some("Back in Black"), "/lib/x.mp3");
+        let e = entry(
+            Some(200.0),
+            Some("AC/DC"),
+            Some("Back in Black"),
+            "/lib/x.mp3",
+        );
         assert_eq!(copy_filename(&e, 1), "01 - AC_DC - Back in Black.mp3");
     }
 
@@ -1029,7 +1090,11 @@ mod tests {
             title: Some(long_title),
         };
         let name = copy_filename(&e, 1);
-        assert!(name.len() <= MAX_FILENAME_BYTES, "capped: {} bytes", name.len());
+        assert!(
+            name.len() <= MAX_FILENAME_BYTES,
+            "capped: {} bytes",
+            name.len()
+        );
         assert!(name.starts_with("01 - "));
         assert!(name.ends_with(".mp3"));
         // The stem is valid UTF-8 (no split code point) and non-empty.
@@ -1041,10 +1106,19 @@ mod tests {
         let mut used = BTreeSet::new();
         assert_eq!(dedupe_name("01 - A - T.mp3", &mut used), "01 - A - T.mp3");
         // Same base again → " (2)" before the extension.
-        assert_eq!(dedupe_name("01 - A - T.mp3", &mut used), "01 - A - T (2).mp3");
-        assert_eq!(dedupe_name("01 - A - T.mp3", &mut used), "01 - A - T (3).mp3");
+        assert_eq!(
+            dedupe_name("01 - A - T.mp3", &mut used),
+            "01 - A - T (2).mp3"
+        );
+        assert_eq!(
+            dedupe_name("01 - A - T.mp3", &mut used),
+            "01 - A - T (3).mp3"
+        );
         // Case-insensitive collision (macOS/Windows) also dedupes.
-        assert_eq!(dedupe_name("01 - a - t.MP3", &mut used), "01 - a - t (4).MP3");
+        assert_eq!(
+            dedupe_name("01 - a - t.MP3", &mut used),
+            "01 - a - t (4).MP3"
+        );
         // No extension → suffix appended at the end.
         let mut used2 = BTreeSet::new();
         assert_eq!(dedupe_name("noext", &mut used2), "noext");
@@ -1136,7 +1210,10 @@ mod tests {
         )];
         let err = export_folder(&entries, &dest, "x").unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("does-not-exist.mp3"), "names the failing source: {msg}");
+        assert!(
+            msg.contains("does-not-exist.mp3"),
+            "names the failing source: {msg}"
+        );
         assert!(msg.contains("failed to copy"), "{msg}");
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1163,7 +1240,12 @@ mod tests {
         assert!(!dir.exists(), "parent must not exist yet");
 
         let entries = vec![
-            entry(Some(210.5), Some("America"), Some("Tin Man"), "/music/tin man.mp3"),
+            entry(
+                Some(210.5),
+                Some("America"),
+                Some("Tin Man"),
+                "/music/tin man.mp3",
+            ),
             entry(None, None, None, "/music/mystery.mp3"),
         ];
         write_m3u8(&entries, &out).unwrap();
@@ -1188,7 +1270,10 @@ mod tests {
     #[test]
     fn slugify_kebabs_and_defaults() {
         assert_eq!(slugify("My Focus Mix!"), "my-focus-mix");
-        assert_eq!(slugify("  Songs like X (but calmer)  "), "songs-like-x-but-calmer");
+        assert_eq!(
+            slugify("  Songs like X (but calmer)  "),
+            "songs-like-x-but-calmer"
+        );
         assert_eq!(slugify("薔薇と雨"), "薔薇と雨"); // CJK is alphanumeric, kept
         assert_eq!(slugify("***"), "playlist"); // nothing left → default
     }
@@ -1240,15 +1325,28 @@ mod tests {
         assert_eq!(m.total_duration_sec, 300, "200 + round(100.4)");
         assert_eq!(m.request.as_deref(), Some("deep work session"));
         assert!(m.cypher.is_none());
-        assert_eq!(m.ids.as_deref(), Some(&["h1".to_string(), "h2".to_string()][..]));
+        assert_eq!(
+            m.ids.as_deref(),
+            Some(&["h1".to_string(), "h2".to_string()][..])
+        );
         assert_eq!(m.tracks.len(), 2);
         assert_eq!(m.tracks[0].position, 1);
         assert_eq!(m.tracks[0].title.as_deref(), Some("T1"));
-        assert!(m.curation.is_none(), "legacy/manual metadata stays compatible");
+        assert!(
+            m.curation.is_none(),
+            "legacy/manual metadata stays compatible"
+        );
 
         // A second playlist of the same name collides → `-2` slug.
         let s2 = save_playlist(
-            &dir, "My Focus Mix!", None, None, Some(&ids), &entries, Path::new("/g.kgl"), None,
+            &dir,
+            "My Focus Mix!",
+            None,
+            None,
+            Some(&ids),
+            &entries,
+            Path::new("/g.kgl"),
+            None,
         )
         .unwrap();
         assert_eq!(s2.slug, "my-focus-mix-2");
@@ -1258,7 +1356,17 @@ mod tests {
         assert_eq!(list.len(), 2, "both stored playlists listed");
 
         // An empty selection is rejected.
-        assert!(save_playlist(&dir, "x", None, None, Some(&[]), &[], Path::new("/g.kgl"), None).is_err());
+        assert!(save_playlist(
+            &dir,
+            "x",
+            None,
+            None,
+            Some(&[]),
+            &[],
+            Path::new("/g.kgl"),
+            None
+        )
+        .is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1288,7 +1396,10 @@ mod tests {
         let parent = std::env::temp_dir().join(format!(
             "sonagram-store-crud-{}-{}",
             std::process::id(),
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         let dir = parent.join("store");
         let entries = vec![entry(Some(120.0), Some("A"), Some("T"), "/m/a.mp3")];

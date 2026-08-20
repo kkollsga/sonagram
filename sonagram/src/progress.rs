@@ -134,12 +134,30 @@ mod tests {
     fn throttle_skips_but_force_writes() {
         let path = tmp_path("throttle");
         let w = ProgressWriter::new(path.clone(), Duration::from_secs(3600));
-        w.write(&Snap { stage: "a".into(), done: 1 }, false);
+        w.write(
+            &Snap {
+                stage: "a".into(),
+                done: 1,
+            },
+            false,
+        );
         // Throttled: the second unforced write is dropped.
-        w.write(&Snap { stage: "a".into(), done: 2 }, false);
+        w.write(
+            &Snap {
+                stage: "a".into(),
+                done: 2,
+            },
+            false,
+        );
         assert_eq!(load_progress::<Snap>(&path).unwrap().done, 1);
         // Forced: lands regardless of the throttle window.
-        w.write(&Snap { stage: "a".into(), done: 3 }, true);
+        w.write(
+            &Snap {
+                stage: "a".into(),
+                done: 3,
+            },
+            true,
+        );
         assert_eq!(load_progress::<Snap>(&path).unwrap().done, 3);
         std::fs::remove_file(&path).ok();
     }

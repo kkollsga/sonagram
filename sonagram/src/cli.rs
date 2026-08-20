@@ -394,7 +394,10 @@ fn cmd_build(args: &[String]) -> Result<()> {
     match positionals.len() {
         // Explicit `build <library_root> <out.kgl>` — single-source (P17 stamps a
         // Source node id = the absolute root + `Track.source_root`).
-        2 => cmd_build_single(&PathBuf::from(positionals[0]), &PathBuf::from(positionals[1])),
+        2 => cmd_build_single(
+            &PathBuf::from(positionals[0]),
+            &PathBuf::from(positionals[1]),
+        ),
         // Config-driven `build` — multi-source over every configured source → the
         // configured graph path.
         0 => cmd_build_multi(),
@@ -433,7 +436,11 @@ fn cmd_build_single(root: &Path, out: &Path) -> Result<()> {
     };
     let mut g = graph::build_graph_from_sources(&sources, enrichment.as_ref(), &library)?;
     graph::save(&mut g, out)?;
-    println!("built graph from {} tracks → {}", records.len(), out.display());
+    println!(
+        "built graph from {} tracks → {}",
+        records.len(),
+        out.display()
+    );
     Ok(())
 }
 
@@ -509,11 +516,7 @@ fn cmd_build_multi() -> Result<()> {
     };
     let mut g = graph::build_graph_from_sources(&source_inputs, enr, &library)?;
     graph::save(&mut g, &out)?;
-    let n = g
-        .type_indices
-        .get("Track")
-        .map(|r| r.len())
-        .unwrap_or(0);
+    let n = g.type_indices.get("Track").map(|r| r.len()).unwrap_or(0);
     println!(
         "built multi-source graph from {} source(s), {} tracks → {}",
         sources.len(),
@@ -653,7 +656,9 @@ fn cmd_curate(args: &[String]) -> Result<()> {
             "--tracks" => {
                 let value = flag_value(args, &mut i, "--tracks")?;
                 target_tracks = Some(value.parse::<usize>().map_err(|_| {
-                    SonagramError::Playlist(format!("curate: --tracks expects an integer, got {value}"))
+                    SonagramError::Playlist(format!(
+                        "curate: --tracks expects an integer, got {value}"
+                    ))
                 })?);
             }
             "--duration-sec" => {
@@ -683,15 +688,18 @@ fn cmd_curate(args: &[String]) -> Result<()> {
     }
     let brief_from_json = brief_json.is_some();
     let mut brief = if let Some(raw) = brief_json {
-        if preset.is_some() || target_tracks.is_some() || target_duration_sec.is_some() || seed_ids.is_some() {
+        if preset.is_some()
+            || target_tracks.is_some()
+            || target_duration_sec.is_some()
+            || seed_ids.is_some()
+        {
             return Err(SonagramError::Playlist(
                 "curate: --brief-json cannot be combined with --preset/--tracks/--duration-sec/--seed-ids"
                     .into(),
             ));
         }
-        serde_json::from_str::<PlaylistBrief>(&raw).map_err(|e| {
-            SonagramError::Playlist(format!("curate: invalid --brief-json: {e}"))
-        })?
+        serde_json::from_str::<PlaylistBrief>(&raw)
+            .map_err(|e| SonagramError::Playlist(format!("curate: invalid --brief-json: {e}")))?
     } else {
         let mut brief = PlaylistBrief {
             preset: preset.unwrap_or_default(),
@@ -753,7 +761,11 @@ fn emit_curate_result(
         println!(
             "curated {} tracks; audit {}; mean transition {}; arc error {}",
             result.track_ids.len(),
-            if result.audit.passed { "passed" } else { "failed" },
+            if result.audit.passed {
+                "passed"
+            } else {
+                "failed"
+            },
             result
                 .audit
                 .mean_transition_score
@@ -874,9 +886,9 @@ fn parse_order_policy_args(
         })
         .transpose()?;
     if preset.is_some_and(|value| brief.as_ref().is_some_and(|brief| brief.preset != value)) {
-        return Err(SonagramError::Playlist(
-            format!("{command}: --preset does not match --brief-json"),
-        ));
+        return Err(SonagramError::Playlist(format!(
+            "{command}: --preset does not match --brief-json"
+        )));
     }
     let expected_preset = brief.as_ref().map(|brief| brief.preset).or(preset);
     let policy = parse_policy(policy_json.as_deref(), expected_preset, command)?;
@@ -969,19 +981,15 @@ fn cmd_playlist(args: &[String]) -> Result<()> {
     // Leading positionals (up to the first `--flag`): explicit form takes two
     // (`<library_root> <graph.kgl>`), config-driven form takes none.
     let n_pos = args.iter().take_while(|a| !a.starts_with("--")).count();
-    let (root_arg, graph_arg) = match n_pos {
-        2 => (
-            Some(PathBuf::from(&args[0])),
-            Some(PathBuf::from(&args[1])),
-        ),
-        0 => (None, None),
-        _ => {
-            return Err(SonagramError::Playlist(
+    let (root_arg, graph_arg) =
+        match n_pos {
+            2 => (Some(PathBuf::from(&args[0])), Some(PathBuf::from(&args[1]))),
+            0 => (None, None),
+            _ => return Err(SonagramError::Playlist(
                 "playlist: pass `<library_root> <graph.kgl>` (explicit) or neither (config-driven)"
                     .into(),
-            ))
-        }
-    };
+            )),
+        };
 
     let mut cypher: Option<String> = None;
     let mut ids: Option<String> = None;
@@ -1126,7 +1134,11 @@ fn cmd_playlists(args: &[String]) -> Result<()> {
             }
             println!("stored playlists in {} (newest first):", dir.display());
             for m in &metas {
-                let dur = format!("{}m{:02}s", m.total_duration_sec / 60, m.total_duration_sec % 60);
+                let dur = format!(
+                    "{}m{:02}s",
+                    m.total_duration_sec / 60,
+                    m.total_duration_sec % 60
+                );
                 println!(
                     "  {}  [{} tracks, {}, {}]",
                     m.slug, m.n_tracks, dur, m.created_at
@@ -1139,9 +1151,8 @@ fn cmd_playlists(args: &[String]) -> Result<()> {
             Ok(())
         }
         Some("show") => {
-            let slug = optional_positional(&args[1..], 0).ok_or_else(|| {
-                SonagramError::Playlist("playlists show: missing <slug>".into())
-            })?;
+            let slug = optional_positional(&args[1..], 0)
+                .ok_or_else(|| SonagramError::Playlist("playlists show: missing <slug>".into()))?;
             let m = playlist::load_playlist_meta(&dir, slug)?;
             println!("playlist: {} ({})", m.name, m.slug);
             println!("  created:  {}", m.created_at);
@@ -1165,7 +1176,11 @@ fn cmd_playlists(args: &[String]) -> Result<()> {
                 println!("  preset:   {:?}", curation.policy.preset);
                 println!(
                     "  audit:    {} ({} repair attempt(s))",
-                    if curation.audit.passed { "passed" } else { "failed" },
+                    if curation.audit.passed {
+                        "passed"
+                    } else {
+                        "failed"
+                    },
                     curation.repair_attempts
                 );
             }
@@ -1300,7 +1315,11 @@ fn cmd_config(args: &[String]) -> Result<()> {
                 "graph:         {} ({}){}",
                 graph.display(),
                 exists_note(&graph),
-                if cfg.graph.is_none() { " [default]" } else { "" }
+                if cfg.graph.is_none() {
+                    " [default]"
+                } else {
+                    ""
+                }
             );
             println!(
                 "playlists_dir: {} ({}){}",
@@ -1320,8 +1339,9 @@ fn cmd_config(args: &[String]) -> Result<()> {
             Ok(())
         }
         Some("set") => {
-            let key = optional_positional(&args[1..], 0)
-                .ok_or_else(|| SonagramError::Config("config set: missing <key> (graph|playlists_dir)".into()))?;
+            let key = optional_positional(&args[1..], 0).ok_or_else(|| {
+                SonagramError::Config("config set: missing <key> (graph|playlists_dir)".into())
+            })?;
             let val = optional_positional(&args[1..], 1)
                 .ok_or_else(|| SonagramError::Config("config set: missing <path>".into()))?;
             let mut cfg = Config::load()?;
@@ -1425,7 +1445,11 @@ fn cmd_mcp(args: &[String]) -> Result<()> {
             println!(
                 "  env:       {} ({})",
                 report.env_path.display(),
-                if report.env_created { "created" } else { "kept" }
+                if report.env_created {
+                    "created"
+                } else {
+                    "kept"
+                }
             );
             if let Some(binary) = &report.server_binary {
                 println!("  server:    {}", binary.display());
@@ -1468,7 +1492,9 @@ fn cmd_status(args: &[String]) -> i32 {
                     Some("json") => as_json = true,
                     Some("human") => as_json = false,
                     Some(other) => {
-                        eprintln!("error: status: --format expects 'json' or 'human', got '{other}'");
+                        eprintln!(
+                            "error: status: --format expects 'json' or 'human', got '{other}'"
+                        );
                         return 1;
                     }
                     None => {
@@ -1619,7 +1645,9 @@ fn cmd_status(args: &[String]) -> i32 {
                     print_status_human(root, report, *has_enr, *code);
                     match graph_current {
                         Some(true) => println!("  graph:              current"),
-                        Some(false) => println!("  graph:              STALE — run `sonagram build`"),
+                        Some(false) => {
+                            println!("  graph:              STALE — run `sonagram build`")
+                        }
                         None => {}
                     }
                 }
@@ -1910,7 +1938,12 @@ fn cmd_progress(args: &[String]) -> Result<()> {
 
 /// `(pct, rate/sec, eta_sec)` for a counter that started at `started_unix` and
 /// was last updated at `updated_unix`. Rate/ETA are `None` until measurable.
-fn derive_rate(done: usize, total: usize, started_unix: i64, updated_unix: i64) -> (f64, Option<f64>, Option<i64>) {
+fn derive_rate(
+    done: usize,
+    total: usize,
+    started_unix: i64,
+    updated_unix: i64,
+) -> (f64, Option<f64>, Option<i64>) {
     let pct = if total > 0 {
         100.0 * done as f64 / total as f64
     } else {
@@ -1958,7 +1991,12 @@ fn scan_progress_human(p: &scan::ScanProgressSnapshot, now: i64) -> String {
     // ETA from the analysis counters — the dominant cost. While hashing is
     // still discovering (`stage == "hash"`), analyze_total is a lower bound,
     // so the ETA is one too; say so.
-    let (pct, rate, eta) = derive_rate(p.analyze_done, p.analyze_total, p.started_unix, p.updated_unix);
+    let (pct, rate, eta) = derive_rate(
+        p.analyze_done,
+        p.analyze_total,
+        p.started_unix,
+        p.updated_unix,
+    );
     let discovering = p.stage == "hash";
     let mut line = format!(
         "{} — {}/{} files decided; analysis {}/{}{} ({:.0}%)",
@@ -1985,7 +2023,12 @@ fn scan_progress_human(p: &scan::ScanProgressSnapshot, now: i64) -> String {
 }
 
 fn scan_progress_json(p: &scan::ScanProgressSnapshot, now: i64) -> serde_json::Value {
-    let (pct, rate, eta) = derive_rate(p.analyze_done, p.analyze_total, p.started_unix, p.updated_unix);
+    let (pct, rate, eta) = derive_rate(
+        p.analyze_done,
+        p.analyze_total,
+        p.started_unix,
+        p.updated_unix,
+    );
     let mut obj = serde_json::to_value(p).expect("snapshot serializes");
     obj["analyze_pct"] = json!(pct);
     obj["analyze_per_sec"] = json!(rate);
@@ -2149,7 +2192,10 @@ mod tests {
             line.contains("exists but this build cannot read it"),
             "unreadable graph must not read as missing: {line}"
         );
-        assert!(line.contains(&err), "the load error must reach the user: {line}");
+        assert!(
+            line.contains(&err),
+            "the load error must reach the user: {line}"
+        );
         assert!(
             !line.contains("not built yet"),
             "unreadable is not missing: {line}"

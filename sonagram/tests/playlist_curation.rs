@@ -10,9 +10,9 @@ use std::collections::BTreeMap;
 use kglite::api::cypher::resolve_node_property;
 use kglite::api::Value;
 use sonagram::curation::{
-    audit_playlist, audit_playlist_for_brief, curate_playlist, explain_playlist,
-    profile_library, AggressionStatus, PlaylistArc, PlaylistBrief, PlaylistPolicy,
-    PlaylistPreset, RelativeDirection, SeedRole, SeedSimilarityPreference,
+    audit_playlist, audit_playlist_for_brief, curate_playlist, explain_playlist, profile_library,
+    AggressionStatus, PlaylistArc, PlaylistBrief, PlaylistPolicy, PlaylistPreset,
+    RelativeDirection, SeedRole, SeedSimilarityPreference,
 };
 use sonagram::enrich::{ArtistEnrich, EnrichmentData};
 use sonagram::graph::{self, LibraryInfo};
@@ -44,14 +44,16 @@ fn records() -> Vec<AnalysisRecord> {
             let tags = record.tags.as_mut().unwrap();
             tags.artist = Some(artists[i].to_string());
             tags.title = Some(format!("Anonymous Piece {i:02}"));
-            tags.album = Some(if i < 6 {
-                "Collected Alpha"
-            } else if i < 9 {
-                "Collected Beta"
-            } else {
-                "Independent Works"
-            }
-            .to_string());
+            tags.album = Some(
+                if i < 6 {
+                    "Collected Alpha"
+                } else if i < 9 {
+                    "Collected Beta"
+                } else {
+                    "Independent Works"
+                }
+                .to_string(),
+            );
             record.analysis.embedding = Some(vec![if i % 2 == 0 { 0.0 } else { 1.0 }; 48]);
             record.analysis.energy = Some(i as f32 / (artists.len() - 1) as f32);
             record.analysis.duration_sec = 90.0 + i as f32 * 20.0;
@@ -240,7 +242,10 @@ fn caller_owned_legacy_order_fails_diversity_and_transition_audit() {
 
     assert!(!audit.passed);
     assert_eq!(audit.track_count, 12);
-    assert_eq!(audit.unique_artists, 5, "case variants are one artist family");
+    assert_eq!(
+        audit.unique_artists, 5,
+        "case variants are one artist family"
+    );
     assert!((audit.max_artist_share - 0.5).abs() < 1e-9);
     assert!((audit.max_album_share - 0.5).abs() < 1e-9);
     let codes: Vec<&str> = audit.issues.iter().map(|i| i.code.as_str()).collect();
@@ -264,7 +269,10 @@ fn profile_and_explanation_are_deterministic_and_structured() {
     assert_eq!(first, second);
     assert_eq!(first.tracks.len(), 12);
     assert_eq!(first.transitions.len(), 11);
-    assert!(first.summary.iter().any(|line| line.contains("audit failed")));
+    assert!(first
+        .summary
+        .iter()
+        .any(|line| line.contains("audit failed")));
 }
 
 #[test]
@@ -353,7 +361,11 @@ fn infeasible_hard_caps_return_no_exportable_playlist() {
     policy.diversity.max_per_album = 1;
     let result = curate_playlist(&graph, &brief, &policy).unwrap();
     assert!(!result.exportable);
-    assert!(result.audit.issues.iter().any(|issue| issue.code == "infeasible_selection"));
+    assert!(result
+        .audit
+        .issues
+        .iter()
+        .any(|issue| issue.code == "infeasible_selection"));
 }
 
 #[test]
@@ -366,7 +378,12 @@ fn mismatched_preset_and_excess_seeds_are_structured_failures() {
         ..PlaylistBrief::default()
     };
     let result = curate_playlist(&graph, &brief, &PlaylistPolicy::default()).unwrap();
-    let codes: Vec<&str> = result.audit.issues.iter().map(|issue| issue.code.as_str()).collect();
+    let codes: Vec<&str> = result
+        .audit
+        .issues
+        .iter()
+        .map(|issue| issue.code.as_str())
+        .collect();
     assert!(!result.exportable);
     assert!(codes.contains(&"too_many_seeds"));
     assert!(codes.contains(&"preset_mismatch"));
@@ -383,7 +400,11 @@ fn independent_audit_enforces_hard_artist_and_album_caps() {
     policy.audit.min_worst_transition_score = 0.0;
     policy.audit.max_mean_arc_error = 1.0;
     let audit = audit_playlist(&graph, &ids()[..6], &policy).unwrap();
-    let codes: Vec<&str> = audit.issues.iter().map(|issue| issue.code.as_str()).collect();
+    let codes: Vec<&str> = audit
+        .issues
+        .iter()
+        .map(|issue| issue.code.as_str())
+        .collect();
     assert!(!audit.passed);
     assert!(codes.contains(&"artist_cap"));
     assert!(codes.contains(&"album_cap"));
@@ -406,7 +427,10 @@ fn shared_artist_mbid_groups_name_aliases_for_selection_caps_and_audit() {
     policy.audit.max_mean_arc_error = 1.0;
 
     let audit = audit_playlist(&graph, &selected, &policy).unwrap();
-    assert_eq!(audit.unique_artists, 1, "shared MBID must define artist identity");
+    assert_eq!(
+        audit.unique_artists, 1,
+        "shared MBID must define artist identity"
+    );
     assert!(audit.issues.iter().any(|issue| issue.code == "artist_cap"));
 
     let result = curate_playlist(
@@ -419,12 +443,19 @@ fn shared_artist_mbid_groups_name_aliases_for_selection_caps_and_audit() {
     )
     .unwrap();
     assert!(!result.exportable);
-    assert!(result.audit.issues.iter().any(|issue| issue.code == "infeasible_selection"));
+    assert!(result
+        .audit
+        .issues
+        .iter()
+        .any(|issue| issue.code == "infeasible_selection"));
 
     let mut reversed = records;
     reversed.reverse();
     let reversed_graph = alias_graph(reversed);
-    assert_eq!(audit, audit_playlist(&reversed_graph, &selected, &policy).unwrap());
+    assert_eq!(
+        audit,
+        audit_playlist(&reversed_graph, &selected, &policy).unwrap()
+    );
     assert_eq!(
         result,
         curate_playlist(
@@ -498,7 +529,11 @@ fn sequencing_improves_weak_hash_order_and_holds_artist_spacing() {
         first.audit.mean_arc_error
     );
     assert!(first.audit.mean_arc_error.unwrap() <= policy.audit.max_mean_arc_error);
-    assert!(!first.audit.issues.iter().any(|issue| issue.code == "artist_gap"));
+    assert!(!first
+        .audit
+        .issues
+        .iter()
+        .any(|issue| issue.code == "artist_gap"));
 
     let mut hash_order = first.track_ids.clone();
     hash_order.sort();
@@ -530,12 +565,20 @@ fn rise_and_fall_arcs_order_the_same_pool_differently() {
     assert!(rising.exportable, "{:?}", rising.audit.issues);
     assert!(falling.exportable, "{:?}", falling.audit.issues);
     assert_eq!(
-        rising.track_ids.iter().cloned().collect::<std::collections::BTreeSet<_>>(),
+        rising
+            .track_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
         falling.track_ids.iter().cloned().collect()
     );
     assert_ne!(rising.track_ids, falling.track_ids);
-    assert!(id_index(rising.track_ids.first().unwrap()) < id_index(rising.track_ids.last().unwrap()));
-    assert!(id_index(falling.track_ids.first().unwrap()) > id_index(falling.track_ids.last().unwrap()));
+    assert!(
+        id_index(rising.track_ids.first().unwrap()) < id_index(rising.track_ids.last().unwrap())
+    );
+    assert!(
+        id_index(falling.track_ids.first().unwrap()) > id_index(falling.track_ids.last().unwrap())
+    );
     assert!(rising.audit.mean_arc_error.unwrap() <= rise.audit.max_mean_arc_error);
     assert!(falling.audit.mean_arc_error.unwrap() <= fall.audit.max_mean_arc_error);
     assert!(rising.explanation.tracks.iter().all(|track| {
@@ -617,7 +660,9 @@ fn reference_seed_prefers_a_similar_but_calmer_track() {
         .iter()
         .any(|line| line.contains("typed seed-relative policy")));
     let contributions = &result.explanation.tracks[0].contributions;
-    assert!(contributions.iter().any(|item| item.component == "seed_similarity"));
+    assert!(contributions
+        .iter()
+        .any(|item| item.component == "seed_similarity"));
     assert!(contributions
         .iter()
         .any(|item| item.component == "seed_energy_baseline"));
@@ -667,7 +712,11 @@ fn categorical_policy_is_enforced_by_selection_and_independent_audit() {
     let result = curate_playlist(&graph, &brief, &policy).unwrap();
     assert!(result.exportable, "{:?}", result.audit.issues);
     assert_eq!(
-        result.track_ids.iter().cloned().collect::<std::collections::BTreeSet<_>>(),
+        result
+            .track_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
         [format!("{:064x}", 0), format!("{:064x}", 1)]
             .into_iter()
             .collect()
@@ -679,7 +728,11 @@ fn categorical_policy_is_enforced_by_selection_and_independent_audit() {
         format!("{:064x}", 4),
     ];
     let audit = audit_playlist(&graph, &violating, &policy).unwrap();
-    let codes: Vec<&str> = audit.issues.iter().map(|issue| issue.code.as_str()).collect();
+    let codes: Vec<&str> = audit
+        .issues
+        .iter()
+        .map(|issue| issue.code.as_str())
+        .collect();
     assert!(codes.contains(&"genre_not_included"), "{codes:?}");
     assert!(codes.contains(&"decade_not_included"), "{codes:?}");
     assert!(codes.contains(&"artist_excluded"), "{codes:?}");
@@ -730,7 +783,10 @@ fn old_policy_and_brief_json_default_new_intent_fields() {
         targets.remove(field);
     }
     let policy: PlaylistPolicy = serde_json::from_value(policy).unwrap();
-    assert_eq!(policy.targets.seed_similarity, SeedSimilarityPreference::Neutral);
+    assert_eq!(
+        policy.targets.seed_similarity,
+        SeedSimilarityPreference::Neutral
+    );
     assert_eq!(policy.targets.aggression, None);
     assert_eq!(policy.targets.relative_aggression, RelativeDirection::Any);
     assert_eq!(policy.eligibility.min_aggression, None);
@@ -793,7 +849,10 @@ fn direct_aggression_uses_current_rank_not_mood_and_profiles_complete_evidence()
     assert_eq!(profile.stats["aggression"].present, 3);
     assert_eq!(profile.stats["aggression_confidence"].present, 3);
     assert_eq!(profile.stats["aggression_forcefulness"].present, 3);
-    assert_eq!(profile.aggression_models[sonara::aggression::AGGRESSION_MODEL_ID], 3);
+    assert_eq!(
+        profile.aggression_models[sonara::aggression::AGGRESSION_MODEL_ID],
+        3
+    );
 
     let brief = PlaylistBrief {
         target_tracks: 1,
@@ -814,14 +873,21 @@ fn direct_aggression_uses_current_rank_not_mood_and_profiles_complete_evidence()
 
     policy.eligibility.min_aggression = Some(0.8);
     let audit = audit_playlist(&graph, &[format!("{:064x}", 0)], &policy).unwrap();
-    assert!(audit.issues.iter().any(|issue| issue.code == "aggression_too_low"));
+    assert!(audit
+        .issues
+        .iter()
+        .any(|issue| issue.code == "aggression_too_low"));
 }
 
 #[test]
 fn neutral_policy_selection_and_transitions_ignore_aggression() {
     let source = records()[..6].to_vec();
-    let low_to_high = graph_with_aggression(source.clone(), aggression_map(&[0.0, 0.2, 0.4, 0.6, 0.8, 1.0]));
-    let high_to_low = graph_with_aggression(source, aggression_map(&[1.0, 0.8, 0.6, 0.4, 0.2, 0.0]));
+    let low_to_high = graph_with_aggression(
+        source.clone(),
+        aggression_map(&[0.0, 0.2, 0.4, 0.6, 0.8, 1.0]),
+    );
+    let high_to_low =
+        graph_with_aggression(source, aggression_map(&[1.0, 0.8, 0.6, 0.4, 0.2, 0.0]));
     let brief = PlaylistBrief {
         target_tracks: 3,
         ..PlaylistBrief::default()
@@ -834,7 +900,11 @@ fn neutral_policy_selection_and_transitions_ignore_aggression() {
     let second = curate_playlist(&high_to_low, &brief, &policy).unwrap();
     assert_eq!(first.track_ids, second.track_ids);
     assert_eq!(first.audit.transitions, second.audit.transitions);
-    assert!(first.explanation.tracks.iter().all(|track| track.aggression.is_none()));
+    assert!(first
+        .explanation
+        .tracks
+        .iter()
+        .all(|track| track.aggression.is_none()));
 }
 
 #[test]
@@ -870,9 +940,15 @@ fn explicit_aggression_fails_closed_for_every_unusable_state() {
     {
         let ids = vec![format!("{index:064x}")];
         let audit = audit_playlist(&graph, &ids, &policy).unwrap();
-        assert!(audit.issues.iter().any(|issue| issue.code == "aggression_unknown"));
+        assert!(audit
+            .issues
+            .iter()
+            .any(|issue| issue.code == "aggression_unknown"));
         let explanation = explain_playlist(&graph, &ids, &policy).unwrap();
-        assert_eq!(explanation.tracks[0].aggression.as_ref().unwrap().status, status);
+        assert_eq!(
+            explanation.tracks[0].aggression.as_ref().unwrap().status,
+            status
+        );
     }
     let result = curate_playlist(
         &graph,
@@ -884,7 +960,11 @@ fn explicit_aggression_fails_closed_for_every_unusable_state() {
     )
     .unwrap();
     assert!(!result.exportable);
-    assert!(result.audit.issues.iter().any(|issue| issue.code == "aggression_unknown"));
+    assert!(result
+        .audit
+        .issues
+        .iter()
+        .any(|issue| issue.code == "aggression_unknown"));
 }
 
 #[test]
@@ -914,11 +994,16 @@ fn relative_aggression_is_seed_owned_and_unknown_is_structured() {
     let unknown_graph = graph_with_aggression(source, evidence);
     let unknown = curate_playlist(&unknown_graph, &brief, &policy).unwrap();
     assert!(!unknown.exportable);
-    assert!(unknown.audit.issues.iter().any(|issue| issue.code == "aggression_unknown"));
+    assert!(unknown
+        .audit
+        .issues
+        .iter()
+        .any(|issue| issue.code == "aggression_unknown"));
 
     let mut candidate_evidence = aggression_map(&[0.8, 0.2, 0.9]);
     candidate_evidence.insert(format!("{:064x}", 1), AggressionFixture::abstained());
-    let candidate_unknown_graph = graph_with_aggression(records()[..3].to_vec(), candidate_evidence);
+    let candidate_unknown_graph =
+        graph_with_aggression(records()[..3].to_vec(), candidate_evidence);
     let candidate_unknown = curate_playlist(&candidate_unknown_graph, &brief, &policy).unwrap();
     assert!(!candidate_unknown.exportable);
     assert!(candidate_unknown
@@ -1007,7 +1092,12 @@ fn unusable_seed_measurements_are_structured_infeasibility() {
     policy.audit.min_unique_artist_ratio = 0.0;
 
     let result = curate_playlist(&graph, &brief, &policy).unwrap();
-    let codes: Vec<&str> = result.audit.issues.iter().map(|item| item.code.as_str()).collect();
+    let codes: Vec<&str> = result
+        .audit
+        .issues
+        .iter()
+        .map(|item| item.code.as_str())
+        .collect();
     assert!(!result.exportable);
     assert!(codes.contains(&"seed_similarity_missing"), "{codes:?}");
     assert!(codes.contains(&"seed_relative_missing"), "{codes:?}");
@@ -1023,7 +1113,11 @@ fn unsupported_or_unknown_intent_never_falls_through_to_agent_guesswork() {
     };
     let result = curate_playlist(&graph, &brief, &PlaylistPolicy::default()).unwrap();
     assert!(!result.exportable);
-    assert!(result.audit.issues.iter().any(|issue| issue.code == "unsupported_intent"));
+    assert!(result
+        .audit
+        .issues
+        .iter()
+        .any(|issue| issue.code == "unsupported_intent"));
 
     let unknown = r#"{"preset":"focus","target_tracks":1,"lyrical_theme":"hopeful"}"#;
     let error = serde_json::from_str::<PlaylistBrief>(unknown).unwrap_err();
@@ -1043,8 +1137,8 @@ fn curated_store_persists_provenance_and_rejects_failed_audits() {
         curated.build_input_fingerprint.is_some(),
         "library-built graphs expose immutable analysis provenance"
     );
-    let entries = playlist::entries_from_graph(&graph, std::path::Path::new(""), &curated.track_ids)
-        .unwrap();
+    let entries =
+        playlist::entries_from_graph(&graph, std::path::Path::new(""), &curated.track_ids).unwrap();
     let store = std::env::temp_dir().join(format!(
         "sonagram-curated-store-{}-{}",
         std::process::id(),
@@ -1073,8 +1167,14 @@ fn curated_store_persists_provenance_and_rejects_failed_audits() {
     assert_eq!(provenance.policy, curated.policy);
     assert_eq!(provenance.audit.passed, curated.audit.passed);
     assert_eq!(provenance.audit.track_count, curated.audit.track_count);
-    assert_eq!(provenance.audit.transitions.len(), curated.audit.transitions.len());
-    assert_eq!(provenance.explanation.tracks.len(), curated.explanation.tracks.len());
+    assert_eq!(
+        provenance.audit.transitions.len(),
+        curated.audit.transitions.len()
+    );
+    assert_eq!(
+        provenance.explanation.tracks.len(),
+        curated.explanation.tracks.len()
+    );
 
     let mut legacy: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&saved.meta_path).unwrap()).unwrap();
@@ -1082,7 +1182,11 @@ fn curated_store_persists_provenance_and_rejects_failed_audits() {
         .as_object_mut()
         .unwrap()
         .remove("build_input_fingerprint");
-    std::fs::write(&saved.meta_path, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
+    std::fs::write(
+        &saved.meta_path,
+        serde_json::to_string_pretty(&legacy).unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         playlist::load_playlist_meta(&store, &saved.slug)
             .unwrap()

@@ -151,7 +151,10 @@ fn group_songs_by_keys(
     has_lastfm_match: &[bool],
     keys: Vec<String>,
 ) -> SongGrouping {
-    let hashes: Vec<&str> = sorted.iter().map(|r| r.source.content_hash.as_str()).collect();
+    let hashes: Vec<&str> = sorted
+        .iter()
+        .map(|r| r.source.content_hash.as_str())
+        .collect();
 
     // Version key → member indices (kept in the caller's sorted order).
     let mut groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
@@ -198,11 +201,18 @@ fn group_songs_by_keys(
         });
     }
 
-    SongGrouping { songs, is_canonical }
+    SongGrouping {
+        songs,
+        is_canonical,
+    }
 }
 
 fn ordered_pair<'a>(a: &'a str, b: &'a str) -> (&'a str, &'a str) {
-    if a <= b { (a, b) } else { (b, a) }
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
 }
 
 /// Whether an artist tag is one of the empirically observed placeholders.
@@ -213,9 +223,7 @@ fn is_junk_artist(artist: &str) -> bool {
         return true;
     }
     let bytes = artist.as_bytes();
-    bytes.len() > 3
-        && bytes[..3].eq_ignore_ascii_case(b"TJT")
-        && bytes[3].is_ascii_digit()
+    bytes.len() > 3 && bytes[..3].eq_ignore_ascii_case(b"TJT") && bytes[3].is_ascii_digit()
 }
 
 /// The version key `"<artist_id>|<normalized_title>"` for a record. Title is the
@@ -284,15 +292,25 @@ pub(super) fn add_songs(graph: &mut DirGraph, grouping: &SongGrouping) -> Result
     let titles: Vec<Option<String>> = songs.iter().map(|s| Some(s.title.clone())).collect();
     let artists: Vec<Option<String>> = songs.iter().map(|s| Some(s.artist.clone())).collect();
     let n_versions: Vec<Option<i64>> = songs.iter().map(|s| Some(s.members.len() as i64)).collect();
-    let canonical_hash: Vec<Option<String>> =
-        songs.iter().map(|s| Some(s.canonical_hash.clone())).collect();
+    let canonical_hash: Vec<Option<String>> = songs
+        .iter()
+        .map(|s| Some(s.canonical_hash.clone()))
+        .collect();
 
     let df = build_df(vec![
         ("id", ColumnType::String, ColumnData::String(ids)),
         ("title", ColumnType::String, ColumnData::String(titles)),
         ("artist", ColumnType::String, ColumnData::String(artists)),
-        ("n_versions", ColumnType::Int64, ColumnData::Int64(n_versions)),
-        ("canonical_hash", ColumnType::String, ColumnData::String(canonical_hash)),
+        (
+            "n_versions",
+            ColumnType::Int64,
+            ColumnData::Int64(n_versions),
+        ),
+        (
+            "canonical_hash",
+            ColumnType::String,
+            ColumnData::String(canonical_hash),
+        ),
     ]);
     add(graph, df, SONG, "id", "title")?;
 
@@ -495,7 +513,11 @@ mod tests {
         let recs = vec![
             rec("h1", Some("The Beatles"), Some("Yesterday")),
             rec("h2", Some("The Beatles"), Some("Yesterday - Live")),
-            rec("h3", Some("The Beatles"), Some("Yesterday (Remastered 2009)")),
+            rec(
+                "h3",
+                Some("The Beatles"),
+                Some("Yesterday (Remastered 2009)"),
+            ),
         ];
         let g = group(&recs, &[Some(0.2), Some(0.9), Some(0.5)]);
         assert_eq!(g.songs.len(), 1);
@@ -559,8 +581,7 @@ mod tests {
         let mut rq: Vec<Option<f64>> = quality.to_vec();
         rq.reverse();
         // Re-sort by content_hash as the builder does, carrying quality along.
-        let mut paired: Vec<(AnalysisRecord, Option<f64>)> =
-            rev.into_iter().zip(rq).collect();
+        let mut paired: Vec<(AnalysisRecord, Option<f64>)> = rev.into_iter().zip(rq).collect();
         paired.sort_by(|a, b| a.0.source.content_hash.cmp(&b.0.source.content_hash));
         let (rr, rrq): (Vec<_>, Vec<_>) = paired.into_iter().unzip();
         let other = group(&rr, &rrq);
@@ -578,11 +599,7 @@ mod tests {
         }
     }
 
-    fn refine(
-        recs: &[AnalysisRecord],
-        quality: &[Option<f64>],
-        edges: &[SimEdge],
-    ) -> SongGrouping {
+    fn refine(recs: &[AnalysisRecord], quality: &[Option<f64>], edges: &[SimEdge]) -> SongGrouping {
         let refs: Vec<&AnalysisRecord> = recs.iter().collect();
         let matches = vec![false; recs.len()];
         let primary = group_songs(&refs, quality, &matches);
@@ -611,8 +628,14 @@ mod tests {
         let target = song(&grouping, "Known|focus").unwrap();
         assert_eq!(target.members, vec!["k1", "k2", "u1", "u2"]);
         assert!(song(&grouping, "Cover Artist|focus").is_none());
-        assert!(grouping.is_canonical[4], "known cover stays a canonical singleton");
-        assert!(grouping.is_canonical[5], "junk candidate without an edge stays singleton");
+        assert!(
+            grouping.is_canonical[4],
+            "known cover stays a canonical singleton"
+        );
+        assert!(
+            grouping.is_canonical[5],
+            "junk candidate without an edge stays singleton"
+        );
     }
 
     #[test]
@@ -632,7 +655,10 @@ mod tests {
             &[Some(0.5); 8],
             &[sim("amb", "a1"), sim("tjt", "t1")],
         );
-        assert!(grouping.is_canonical[4], "two non-junk Songs make the title ambiguous");
+        assert!(
+            grouping.is_canonical[4],
+            "two non-junk Songs make the title ambiguous"
+        );
         assert_eq!(
             song(&grouping, "Artist A|unique").unwrap().members,
             vec!["t1", "t2", "tjt"]
@@ -651,18 +677,31 @@ mod tests {
         ];
         let grouping = refine(
             &recs,
-            &[Some(0.1), Some(0.2), Some(0.3), Some(0.9), Some(0.4), Some(0.5)],
+            &[
+                Some(0.1),
+                Some(0.2),
+                Some(0.3),
+                Some(0.9),
+                Some(0.4),
+                Some(0.5),
+            ],
             &[sim("j1", "k1"), sim("k2", "j2"), sim("j3", "j1")],
         );
         let target = song(&grouping, "Known|song").unwrap();
         assert_eq!(target.members, vec!["k1", "k2", "j1", "j2"]);
-        assert_eq!(target.canonical_hash, "j2", "assigned member participates in repick");
+        assert_eq!(
+            target.canonical_hash, "j2",
+            "assigned member participates in repick"
+        );
         assert_eq!(
             song(&grouping, "Unknown Artist|song").unwrap().members,
             vec!["j3", "j4"],
             "edge to a reassigned candidate must not cascade"
         );
-        assert_eq!(grouping.is_canonical, vec![false, false, false, true, false, true]);
+        assert_eq!(
+            grouping.is_canonical,
+            vec![false, false, false, true, false, true]
+        );
 
         let collapsed = refine(
             &recs[..5],
@@ -670,7 +709,10 @@ mod tests {
             &[sim("j1", "k1"), sim("k2", "j2")],
         );
         assert!(song(&collapsed, "Unknown Artist|song").is_none());
-        assert!(collapsed.is_canonical[4], "one residual member collapses to singleton");
+        assert!(
+            collapsed.is_canonical[4],
+            "one residual member collapses to singleton"
+        );
     }
 
     #[test]
@@ -681,10 +723,18 @@ mod tests {
             rec("k1", Some("Known"), Some("Song")),
         ];
         recs.sort_by(|a, b| a.source.content_hash.cmp(&b.source.content_hash));
-        let base = refine(&recs, &[Some(0.2), Some(0.3), Some(0.1)], &[sim("u1", "k1")]);
+        let base = refine(
+            &recs,
+            &[Some(0.2), Some(0.3), Some(0.1)],
+            &[sim("u1", "k1")],
+        );
         recs.reverse();
         recs.sort_by(|a, b| a.source.content_hash.cmp(&b.source.content_hash));
-        let other = refine(&recs, &[Some(0.2), Some(0.3), Some(0.1)], &[sim("u1", "k1")]);
+        let other = refine(
+            &recs,
+            &[Some(0.2), Some(0.3), Some(0.1)],
+            &[sim("u1", "k1")],
+        );
         assert_eq!(base.songs[0].members, other.songs[0].members);
         assert_eq!(base.songs[0].canonical_hash, other.songs[0].canonical_hash);
         assert_eq!(base.is_canonical, other.is_canonical);

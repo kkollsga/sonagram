@@ -62,7 +62,8 @@ fn load_records() -> Vec<AnalysisRecord> {
         .iter()
         .map(|p| {
             let text = std::fs::read_to_string(p).unwrap();
-            AnalysisRecord::from_json(&text).unwrap_or_else(|e| panic!("parse {}: {e}", p.display()))
+            AnalysisRecord::from_json(&text)
+                .unwrap_or_else(|e| panic!("parse {}: {e}", p.display()))
         })
         .collect();
     records.sort_by(|a, b| a.source.content_hash.cmp(&b.source.content_hash));
@@ -138,8 +139,11 @@ fn canonical_graph_string(g: &kglite::api::DirGraph) -> String {
     }
 
     // ── Edge-type counts (via get_edge_type_counts) ─────────────────────────
-    let edge_counts: BTreeMap<String, usize> =
-        g.get_edge_type_counts().iter().map(|(ty, n)| (ty.clone(), *n)).collect();
+    let edge_counts: BTreeMap<String, usize> = g
+        .get_edge_type_counts()
+        .iter()
+        .map(|(ty, n)| (ty.clone(), *n))
+        .collect();
     s.push_str("## edge_type_counts\n");
     for (ty, n) in &edge_counts {
         s.push_str(&format!("{ty}\t{n}\n"));
@@ -287,10 +291,7 @@ fn golden_graph() {
 fn first_diff(committed: &str, live: &str) -> String {
     for (i, (a, b)) in committed.lines().zip(live.lines()).enumerate() {
         if a != b {
-            return format!(
-                "  line {}:\n    committed: {a}\n    live:      {b}",
-                i + 1
-            );
+            return format!("  line {}:\n    committed: {a}\n    live:      {b}", i + 1);
         }
     }
     let (nc, nl) = (committed.lines().count(), live.lines().count());
@@ -363,7 +364,10 @@ fn determinism() {
 
     // Same input, second build.
     let d1 = graph_digest(&graph::build_graph(&records, &library()).unwrap());
-    assert_eq!(d0, d1, "two builds of the same records must be byte-identical");
+    assert_eq!(
+        d0, d1,
+        "two builds of the same records must be byte-identical"
+    );
 
     // Reversed input order.
     let mut reversed = records.clone();
@@ -380,7 +384,10 @@ fn determinism() {
         shuffled.swap(i, j);
     }
     let ds = graph_digest(&graph::build_graph(&shuffled, &library()).unwrap());
-    assert_eq!(d0, ds, "deterministically shuffled input must yield the same digest");
+    assert_eq!(
+        d0, ds,
+        "deterministically shuffled input must yield the same digest"
+    );
 }
 
 // ──────────────────────────── part 3: contract ──────────────────────────────
@@ -570,7 +577,10 @@ fn contract_sonara() {
     // WHY: the embedding store is built at exactly this width; a mismatch means
     // `preweight` and `EmbeddingStore::with_metric(EMBEDDING_DIM, ..)` would
     // store vectors of the wrong dimension and vector search would be corrupt.
-    assert_eq!(EMBEDDING_DIM, 48, "sonara EMBEDDING_DIM changed — remap the embedding store width");
+    assert_eq!(
+        EMBEDDING_DIM, 48,
+        "sonara EMBEDDING_DIM changed — remap the embedding store width"
+    );
     assert_eq!(
         WEIGHTS.len(),
         48,
@@ -790,7 +800,10 @@ fn contract_kglite() {
         .get("Probe")
         .and_then(|nodes| nodes.to_vec().into_iter().next())
         .expect("kglite add_nodes registered no Probe index");
-    let probe_id = probe.node_view(probe_idx).expect("no NodeView for a just-added node").id();
+    let probe_id = probe
+        .node_view(probe_idx)
+        .expect("no NodeView for a just-added node")
+        .id();
     assert_ne!(
         *probe_id,
         Value::Null,
@@ -833,7 +846,10 @@ fn capture_goldens() {
 
     let bytes = canonical.len();
     eprintln!("captured library golden -> {digest}");
-    eprintln!("canonical snapshot: {bytes} bytes ({} lines)", canonical.lines().count());
+    eprintln!(
+        "canonical snapshot: {bytes} bytes ({} lines)",
+        canonical.lines().count()
+    );
     assert!(
         bytes < 2 * 1024 * 1024,
         "canonical snapshot exceeded 2MB ({bytes} bytes) — store counts+ids only instead"

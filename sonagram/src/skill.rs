@@ -173,8 +173,8 @@ mod tests {
         assert!(SKILL_MD.contains(PLACEHOLDER_LIBRARY_ROOT));
         // The library-detection ladder (P19) is embedded.
         assert!(SKILL_MD.contains("Library detection"));
-        let repo_copy = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../skills/sonagram-playlist/SKILL.md");
+        let repo_copy =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills/sonagram-playlist/SKILL.md");
         if repo_copy.is_file() {
             assert_eq!(std::fs::read_to_string(repo_copy).unwrap(), SKILL_MD);
         }
@@ -182,7 +182,9 @@ mod tests {
 
     #[test]
     fn install_writes_file_and_refuses_overwrite() {
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         // Hermetic home with NO config, so no library-root substitution happens.
         let home = tmp_dir("home-none");
         std::env::set_var("SONAGRAM_HOME", &home);
@@ -190,7 +192,10 @@ mod tests {
 
         let report = install(Some(&skills), false).unwrap();
         assert!(report.path.exists());
-        assert_eq!(report.path, skills.join("sonagram-playlist").join("SKILL.md"));
+        assert_eq!(
+            report.path,
+            skills.join("sonagram-playlist").join("SKILL.md")
+        );
         let body = std::fs::read_to_string(&report.path).unwrap();
         assert!(body.contains("name: sonagram-playlist"));
         // No config → the library placeholder is left intact.
@@ -209,7 +214,9 @@ mod tests {
 
     #[test]
     fn install_substitutes_library_root_from_config() {
-        let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let home = tmp_dir("home-cfg");
         std::env::set_var("SONAGRAM_HOME", &home);
         // A real, existing source dir so add_source's canonicalize succeeds.
@@ -222,7 +229,10 @@ mod tests {
         let report = install(Some(&skills), false).unwrap();
         let body = std::fs::read_to_string(&report.path).unwrap();
 
-        let expected = std::fs::canonicalize(&lib).unwrap().to_string_lossy().into_owned();
+        let expected = std::fs::canonicalize(&lib)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
         assert_eq!(report.library_root.as_deref(), Some(expected.as_str()));
         // The placeholder is gone, replaced by the real configured root.
         assert!(!body.contains(PLACEHOLDER_LIBRARY_ROOT));

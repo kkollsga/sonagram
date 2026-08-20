@@ -41,7 +41,11 @@ fn unique_temp(tag: &str) -> PathBuf {
 }
 
 fn node_count(graph: &DirGraph, node_type: &str) -> usize {
-    graph.type_indices.get(node_type).map(|r| r.len()).unwrap_or(0)
+    graph
+        .type_indices
+        .get(node_type)
+        .map(|r| r.len())
+        .unwrap_or(0)
 }
 
 fn str_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> Option<String> {
@@ -131,8 +135,16 @@ fn dedup_from_source_and_source_root_resolution() {
 
     // Unique tracks = distinct content hashes across both sources.
     let unique: BTreeSet<&str> = all.iter().map(|r| r.source.content_hash.as_str()).collect();
-    assert_eq!(node_count(&graph, "Track"), unique.len(), "one Track per hash");
-    assert_eq!(node_count(&graph, "Source"), 2, "one Source node per source");
+    assert_eq!(
+        node_count(&graph, "Track"),
+        unique.len(),
+        "one Track per hash"
+    );
+    assert_eq!(
+        node_count(&graph, "Source"),
+        2,
+        "one Source node per source"
+    );
 
     // Library node is labelled multi-source with an n_sources property.
     assert_eq!(
@@ -148,7 +160,10 @@ fn dedup_from_source_and_source_root_resolution() {
         .iter()
         .find(|(h, _)| *h == shared_hash)
         .expect("shared track has a FROM_SOURCE edge");
-    assert_eq!(shared_edge.1, winner_root, "shared track wins the first source");
+    assert_eq!(
+        shared_edge.1, winner_root,
+        "shared track wins the first source"
+    );
 
     // The shared Track keeps the WINNING source's path + source_root.
     assert_eq!(
@@ -177,8 +192,16 @@ fn dedup_from_source_and_source_root_resolution() {
     let entries = playlist::entries_from_graph(&graph, Path::new(""), &ids).unwrap();
     assert_eq!(entries.len(), ids.len());
     for e in &entries {
-        assert!(e.abs_path.is_absolute(), "abs path off source_root: {:?}", e.abs_path);
-        assert!(e.abs_path.exists(), "resolved file exists: {:?}", e.abs_path);
+        assert!(
+            e.abs_path.is_absolute(),
+            "abs path off source_root: {:?}",
+            e.abs_path
+        );
+        assert!(
+            e.abs_path.exists(),
+            "resolved file exists: {:?}",
+            e.abs_path
+        );
         assert!(
             e.abs_path.starts_with(&dir_a) || e.abs_path.starts_with(&dir_b),
             "path under a configured source: {:?}",
@@ -186,7 +209,10 @@ fn dedup_from_source_and_source_root_resolution() {
         );
     }
     // The shared track resolves under the winning source.
-    let shared_entry = entries.iter().find(|e| e.content_hash == shared_hash).unwrap();
+    let shared_entry = entries
+        .iter()
+        .find(|e| e.content_hash == shared_hash)
+        .unwrap();
     assert!(shared_entry.abs_path.starts_with(&winner_root));
 
     let _ = std::fs::remove_dir_all(&base);

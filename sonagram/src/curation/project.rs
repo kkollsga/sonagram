@@ -10,7 +10,12 @@ use crate::{Result, SonagramError};
 pub(crate) const TRACK: &str = "Track";
 
 pub(crate) fn graph_build_input_fingerprint(graph: &DirGraph) -> Option<String> {
-    let index = graph.type_indices.get("Library")?.to_vec().into_iter().next()?;
+    let index = graph
+        .type_indices
+        .get("Library")?
+        .to_vec()
+        .into_iter()
+        .next()?;
     let node = graph.node_view(index)?;
     prop_string(node, "build_input_fingerprint", graph)
 }
@@ -95,7 +100,11 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
                         // A malformed graph may contain more than one BY_ARTIST edge.
                         // Keep the lexicographically first MBID so projection remains
                         // deterministic regardless of edge insertion order.
-                        if entry.artist_mbid.as_ref().is_none_or(|current| mbid < *current) {
+                        if entry
+                            .artist_mbid
+                            .as_ref()
+                            .is_none_or(|current| mbid < *current)
+                        {
                             entry.artist_mbid = Some(mbid);
                         }
                     }
@@ -136,7 +145,9 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
         out.push(TrackCandidate {
             id,
             title: prop_string(node, "title", graph),
-            artist_key: relations.artist_mbid.unwrap_or_else(|| group_key(artist.as_deref())),
+            artist_key: relations
+                .artist_mbid
+                .unwrap_or_else(|| group_key(artist.as_deref())),
             artist,
             album_key: group_key(album.as_deref()),
             album,
@@ -261,7 +272,10 @@ struct TrackRelations {
 }
 
 pub(crate) fn candidate_map(graph: &DirGraph) -> Result<BTreeMap<String, TrackCandidate>> {
-    Ok(project_tracks(graph)?.into_iter().map(|t| (t.id.clone(), t)).collect())
+    Ok(project_tracks(graph)?
+        .into_iter()
+        .map(|t| (t.id.clone(), t))
+        .collect())
 }
 
 pub(crate) fn embedding_similarity(a: &[f32], b: &[f32]) -> Option<f64> {
@@ -285,7 +299,11 @@ pub(crate) fn embedding_similarity(a: &[f32], b: &[f32]) -> Option<f64> {
 }
 
 pub(crate) fn group_key(value: Option<&str>) -> String {
-    value.map(str::trim).filter(|s| !s.is_empty()).map(str::to_lowercase).unwrap_or_default()
+    value
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_lowercase)
+        .unwrap_or_default()
 }
 
 fn prop_string(node: NodeView<'_>, name: &str, graph: &DirGraph) -> Option<String> {
@@ -327,13 +345,18 @@ mod tests {
 
     #[test]
     fn persisted_preweighted_similarity_matches_sonara_metric() {
-        let a: Vec<f32> = (0..WEIGHTS.len()).map(|i| i as f32 / WEIGHTS.len() as f32).collect();
+        let a: Vec<f32> = (0..WEIGHTS.len())
+            .map(|i| i as f32 / WEIGHTS.len() as f32)
+            .collect();
         let b: Vec<f32> = a.iter().rev().copied().collect();
         let pre_a = crate::graph::preweight(&a);
         let pre_b = crate::graph::preweight(&b);
         let expected = sonara::similarity::similarity(&a, &b) as f64;
         let actual = embedding_similarity(&pre_a, &pre_b).unwrap();
-        assert!((actual - expected).abs() < 1e-6, "actual={actual} expected={expected}");
+        assert!(
+            (actual - expected).abs() < 1e-6,
+            "actual={actual} expected={expected}"
+        );
     }
 
     fn fixture_records() -> Vec<crate::record::AnalysisRecord> {
@@ -355,7 +378,10 @@ mod tests {
     }
 
     fn fixture_library(n_tracks: usize) -> crate::graph::LibraryInfo {
-        crate::graph::LibraryInfo { root: "projection-guard-fixtures".into(), n_tracks }
+        crate::graph::LibraryInfo {
+            root: "projection-guard-fixtures".into(),
+            n_tracks,
+        }
     }
 
     /// The curation guard for the kglite 0.16.0 identity change.
@@ -380,7 +406,11 @@ mod tests {
         let records = fixture_records();
         let graph = crate::graph::build_graph(&records, &fixture_library(records.len())).unwrap();
         let tracks = project_tracks(&graph).unwrap();
-        assert_eq!(tracks.len(), 15, "frozen fixture set no longer has 15 tracks");
+        assert_eq!(
+            tracks.len(),
+            15,
+            "frozen fixture set no longer has 15 tracks"
+        );
 
         let with_styles = tracks.iter().filter(|t| !t.style_keys.is_empty()).count();
         let with_genres = tracks.iter().filter(|t| !t.genre_keys.is_empty()).count();

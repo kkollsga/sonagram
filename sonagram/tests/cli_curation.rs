@@ -13,7 +13,10 @@ fn temp_home() -> PathBuf {
     let path = std::env::temp_dir().join(format!(
         "sonagram-cli-curation-{}-{}",
         std::process::id(),
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     ));
     std::fs::create_dir_all(&path).unwrap();
     path
@@ -29,9 +32,7 @@ fn records() -> Vec<AnalysisRecord> {
     paths.sort();
     paths
         .iter()
-        .map(|path| {
-            AnalysisRecord::from_json(&std::fs::read_to_string(path).unwrap()).unwrap()
-        })
+        .map(|path| AnalysisRecord::from_json(&std::fs::read_to_string(path).unwrap()).unwrap())
         .collect()
 }
 
@@ -88,7 +89,11 @@ fn profile_curate_audit_explain_and_failed_save_contracts() {
     let policy = permissive_policy_json();
 
     let profile = run(&home, &["profile", "--format", "json"]);
-    assert!(profile.status.success(), "{}", String::from_utf8_lossy(&profile.stderr));
+    assert!(
+        profile.status.success(),
+        "{}",
+        String::from_utf8_lossy(&profile.stderr)
+    );
     let profile_json = json_output(&profile);
     assert!(profile_json["tracks"].as_u64().unwrap() > 3);
     assert!(profile_json["stats"].get("aggression").is_some());
@@ -103,8 +108,14 @@ fn profile_curate_audit_explain_and_failed_save_contracts() {
     assert_eq!(resolved["targets"]["aggression"], serde_json::Value::Null);
     assert_eq!(resolved["targets"]["relative_aggression"], "any");
     assert_eq!(resolved["targets"]["relative_aggression_margin"], 0.0);
-    assert_eq!(resolved["eligibility"]["min_aggression"], serde_json::Value::Null);
-    assert_eq!(resolved["eligibility"]["max_aggression"], serde_json::Value::Null);
+    assert_eq!(
+        resolved["eligibility"]["min_aggression"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        resolved["eligibility"]["max_aggression"],
+        serde_json::Value::Null
+    );
 
     let curated = run(
         &home,
@@ -122,10 +133,20 @@ fn profile_curate_audit_explain_and_failed_save_contracts() {
             "json",
         ],
     );
-    assert!(curated.status.success(), "{}", String::from_utf8_lossy(&curated.stderr));
+    assert!(
+        curated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&curated.stderr)
+    );
     let curated_json = json_output(&curated);
     assert_eq!(curated_json["result"]["exportable"], true);
-    assert_eq!(curated_json["result"]["track_ids"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        curated_json["result"]["track_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
     assert_eq!(curated_json["stored"]["slug"], "cli-focus");
     let ids = curated_json["result"]["track_ids"]
         .as_array()
@@ -137,7 +158,15 @@ fn profile_curate_audit_explain_and_failed_save_contracts() {
 
     let audit = run(
         &home,
-        &["audit", "--ids", &ids, "--policy-json", &policy, "--format", "json"],
+        &[
+            "audit",
+            "--ids",
+            &ids,
+            "--policy-json",
+            &policy,
+            "--format",
+            "json",
+        ],
     );
     assert!(audit.status.success());
     assert_eq!(json_output(&audit)["passed"], true);
@@ -198,8 +227,8 @@ fn profile_curate_audit_explain_and_failed_save_contracts() {
         Some("updated through CLI")
     );
 
-    let focus_policy = serde_json::to_string(&PlaylistPolicy::for_preset(PlaylistPreset::Focus))
-        .unwrap();
+    let focus_policy =
+        serde_json::to_string(&PlaylistPolicy::for_preset(PlaylistPreset::Focus)).unwrap();
     let mismatch = run(
         &home,
         &[

@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -57,6 +57,13 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+
+      # Formatting is gated so the drift that accumulated before 0.2.5 cannot
+      # silently return. It needs no siblings and no build, but it is placed
+      # after the real gates deliberately: a formatting nit must never be the
+      # thing that hides a failing test in the log.
+      - name: Rustfmt
+        run: cargo fmt --all --check
 
       - name: Build Python bindings
         if: matrix.os != 'windows-latest'

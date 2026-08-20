@@ -138,9 +138,11 @@ where
     let argv: Vec<OsString> = args.into_iter().map(Into::into).collect();
     // Let KGLite/Clap own its standard informational exits without forcing an
     // otherwise-unused graph argument first.
-    if !argv.iter().skip(1).any(|value| {
-        matches!(value.to_str(), Some("--help" | "-h" | "--version" | "-V"))
-    }) {
+    if !argv
+        .iter()
+        .skip(1)
+        .any(|value| matches!(value.to_str(), Some("--help" | "-h" | "--version" | "-V")))
+    {
         startup_graph_path(&argv)?;
     }
     scrub_inherited_credentials();
@@ -259,9 +261,9 @@ where
     T: Serialize,
     F: FnOnce(&DirGraph, Option<&Path>) -> Result<T>,
 {
-    match state.with_context(|context| {
-        operation(context.graph().dir().as_ref(), context.source_path())
-    }) {
+    match state
+        .with_context(|context| operation(context.graph().dir().as_ref(), context.source_path()))
+    {
         Some(result) => respond(result),
         None => failure("no_active_graph", "no active graph is loaded"),
     }
@@ -313,20 +315,22 @@ fn curate_on_graph(
 
 fn audit_on_graph(graph: &DirGraph, args: OrderedPlaylistArgs) -> Result<PlaylistAudit> {
     if args.track_ids.is_empty() {
-        return Err(SonagramError::Playlist("track_ids must not be empty".into()));
+        return Err(SonagramError::Playlist(
+            "track_ids must not be empty".into(),
+        ));
     }
     let policy = resolve_policy(args.brief.as_ref(), args.preset, args.policy)?;
     match args.brief {
-        Some(brief) => {
-            curation::audit_playlist_for_brief(graph, &args.track_ids, &brief, &policy)
-        }
+        Some(brief) => curation::audit_playlist_for_brief(graph, &args.track_ids, &brief, &policy),
         None => curation::audit_playlist(graph, &args.track_ids, &policy),
     }
 }
 
 fn explain_on_graph(graph: &DirGraph, args: OrderedPlaylistArgs) -> Result<PlaylistExplanation> {
     if args.track_ids.is_empty() {
-        return Err(SonagramError::Playlist("track_ids must not be empty".into()));
+        return Err(SonagramError::Playlist(
+            "track_ids must not be empty".into(),
+        ));
     }
     let policy = resolve_policy(args.brief.as_ref(), args.preset, args.policy)?;
     match args.brief {
@@ -350,7 +354,8 @@ fn resolve_policy(
         }
     }
     let expected = brief.map(|value| value.preset).or(preset);
-    let resolved = policy.unwrap_or_else(|| PlaylistPolicy::for_preset(expected.unwrap_or_default()));
+    let resolved =
+        policy.unwrap_or_else(|| PlaylistPolicy::for_preset(expected.unwrap_or_default()));
     if resolved.version != CURATION_POLICY_VERSION {
         return Err(SonagramError::Playlist(format!(
             "unsupported policy version {}; expected {}",
@@ -425,7 +430,10 @@ fn respond<T: Serialize>(result: Result<T>) -> String {
 
 fn success<T: Serialize>(result: T) -> String {
     serde_json::to_string(&json!({ "ok": true, "result": result })).unwrap_or_else(|error| {
-        failure("serialization_error", &format!("serialize MCP result: {error}"))
+        failure(
+            "serialization_error",
+            &format!("serialize MCP result: {error}"),
+        )
     })
 }
 
@@ -465,9 +473,7 @@ fn startup_graph_path(argv: &[OsString]) -> Result<PathBuf> {
         index += 1;
     }
     let graph = graph.ok_or_else(|| {
-        SonagramError::Config(
-            "sonagram-mcp-server requires static --graph <music.kgl> mode".into(),
-        )
+        SonagramError::Config("sonagram-mcp-server requires static --graph <music.kgl> mode".into())
     })?;
     std::fs::canonicalize(&graph).map_err(|error| {
         SonagramError::Config(format!(
@@ -493,10 +499,9 @@ mod tests {
     use crate::record::AnalysisRecord;
 
     fn fixture_graph() -> std::sync::Arc<DirGraph> {
-        let record: AnalysisRecord = serde_json::from_str(include_str!(
-            "../tests/fixtures/analyses/04-marry-you.json"
-        ))
-        .unwrap();
+        let record: AnalysisRecord =
+            serde_json::from_str(include_str!("../tests/fixtures/analyses/04-marry-you.json"))
+                .unwrap();
         graph::build_graph(
             &[record],
             &LibraryInfo {
@@ -525,8 +530,15 @@ mod tests {
         let root = temp_dir("argv");
         let graph = root.join("music.kgl");
         std::fs::write(&graph, b"fixture").unwrap();
-        let argv = vec![OsString::from("sonagram-mcp-server"), OsString::from("--graph"), graph.clone().into_os_string()];
-        assert_eq!(startup_graph_path(&argv).unwrap(), std::fs::canonicalize(&graph).unwrap());
+        let argv = vec![
+            OsString::from("sonagram-mcp-server"),
+            OsString::from("--graph"),
+            graph.clone().into_os_string(),
+        ];
+        assert_eq!(
+            startup_graph_path(&argv).unwrap(),
+            std::fs::canonicalize(&graph).unwrap()
+        );
         assert!(startup_graph_path(&[OsString::from("sonagram-mcp-server")]).is_err());
         let writable = vec![
             OsString::from("sonagram-mcp-server"),
@@ -573,12 +585,7 @@ mod tests {
         let mut stale = policy.clone();
         stale.version += 1;
         assert!(resolve_policy(Some(&brief), None, Some(stale)).is_err());
-        assert!(resolve_policy(
-            Some(&brief),
-            Some(PlaylistPreset::Party),
-            Some(policy)
-        )
-        .is_err());
+        assert!(resolve_policy(Some(&brief), Some(PlaylistPreset::Party), Some(policy)).is_err());
     }
 
     #[test]

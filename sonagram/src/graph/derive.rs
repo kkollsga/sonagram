@@ -309,7 +309,10 @@ pub(super) fn add_camelot_adjacent(graph: &mut DirGraph) -> Result<usize> {
                 .get(code.as_str())
                 .unwrap_or_else(|| panic!("camelot code {code} has no Key node"));
             let mut props = HashMap::new();
-            props.insert("transition".to_string(), Value::String(transition.to_string()));
+            props.insert(
+                "transition".to_string(),
+                Value::String(transition.to_string()),
+            );
             specs.push(edge_prop(KEY, k.name, KEY, tgt, CAMELOT_ADJACENT, props));
         }
     }
@@ -395,20 +398,22 @@ pub(super) fn add_styles(
     }
 
     // hash → dense index in sorted order (union-find domain).
-    let hashes: Vec<&str> = sorted.iter().map(|r| r.source.content_hash.as_str()).collect();
-    let index_of: BTreeMap<&str, usize> =
-        hashes.iter().enumerate().map(|(i, h)| (*h, i)).collect();
-    let by_hash: BTreeMap<&str, &AnalysisRecord> =
-        sorted.iter().map(|r| (r.source.content_hash.as_str(), *r)).collect();
+    let hashes: Vec<&str> = sorted
+        .iter()
+        .map(|r| r.source.content_hash.as_str())
+        .collect();
+    let index_of: BTreeMap<&str, usize> = hashes.iter().enumerate().map(|(i, h)| (*h, i)).collect();
+    let by_hash: BTreeMap<&str, &AnalysisRecord> = sorted
+        .iter()
+        .map(|r| (r.source.content_hash.as_str(), *r))
+        .collect();
 
     // Mutual-kNN symmetrization → index-encode pairs → adaptive threshold (P10c).
     let pairs: Vec<(usize, usize, f64)> = mutual_pairs(sim_edges)
         .into_iter()
-        .filter_map(|(a, b, s)| {
-            match (index_of.get(a), index_of.get(b)) {
-                (Some(&ia), Some(&ib)) => Some((ia, ib, s)),
-                _ => None,
-            }
+        .filter_map(|(a, b, s)| match (index_of.get(a), index_of.get(b)) {
+            (Some(&ia), Some(&ib)) => Some((ia, ib, s)),
+            _ => None,
         })
         .collect();
     let threshold = choose_threshold(hashes.len(), &pairs);
@@ -431,11 +436,7 @@ pub(super) fn add_styles(
         .filter(|m| m.len() >= STYLE_MIN_SIZE)
         .collect();
     // Order: n_tracks desc, then min member hash asc (each group already sorted).
-    comps.sort_by(|a, b| {
-        b.len()
-            .cmp(&a.len())
-            .then_with(|| a[0].cmp(b[0]))
-    });
+    comps.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a[0].cmp(b[0])));
 
     if comps.is_empty() {
         return Ok((0, threshold));
@@ -489,14 +490,38 @@ pub(super) fn add_styles(
     let df = build_df(vec![
         ("unique_id", ColumnType::String, ColumnData::String(ids)),
         ("name", ColumnType::String, ColumnData::String(names)),
-        ("mean_bpm", ColumnType::Float64, ColumnData::Float64(mean_bpm)),
-        ("mean_energy", ColumnType::Float64, ColumnData::Float64(mean_energy)),
-        ("mean_valence", ColumnType::Float64, ColumnData::Float64(mean_valence)),
-        ("mean_acousticness", ColumnType::Float64, ColumnData::Float64(mean_acoustic)),
+        (
+            "mean_bpm",
+            ColumnType::Float64,
+            ColumnData::Float64(mean_bpm),
+        ),
+        (
+            "mean_energy",
+            ColumnType::Float64,
+            ColumnData::Float64(mean_energy),
+        ),
+        (
+            "mean_valence",
+            ColumnType::Float64,
+            ColumnData::Float64(mean_valence),
+        ),
+        (
+            "mean_acousticness",
+            ColumnType::Float64,
+            ColumnData::Float64(mean_acoustic),
+        ),
         ("n_tracks", ColumnType::Int64, ColumnData::Int64(n_tracks)),
         ("top_genres", ColumnType::List, ColumnData::List(top_genres)),
-        ("top_artists", ColumnType::List, ColumnData::List(top_artists)),
-        ("exemplar_titles", ColumnType::List, ColumnData::List(exemplars_col)),
+        (
+            "top_artists",
+            ColumnType::List,
+            ColumnData::List(top_artists),
+        ),
+        (
+            "exemplar_titles",
+            ColumnType::List,
+            ColumnData::List(exemplars_col),
+        ),
     ]);
     let n_styles = comps.len();
     add(graph, df, STYLE, "unique_id", "name")?;
@@ -529,7 +554,11 @@ fn profile(members: &[&AnalysisRecord]) -> StyleProfile {
     let mean_bpm = mean(members.iter().map(|r| Some(r.analysis.bpm as f64)));
     let mean_energy = mean(members.iter().map(|r| r.analysis.energy.map(|v| v as f64)));
     let mean_valence = mean(members.iter().map(|r| r.analysis.valence.map(|v| v as f64)));
-    let mean_acoustic = mean(members.iter().map(|r| r.analysis.acousticness.map(|v| v as f64)));
+    let mean_acoustic = mean(
+        members
+            .iter()
+            .map(|r| r.analysis.acousticness.map(|v| v as f64)),
+    );
 
     let top_genres = top_counts(
         members
@@ -572,7 +601,11 @@ fn profile(members: &[&AnalysisRecord]) -> StyleProfile {
         .collect();
     let exemplar_titles = exemplars(&ex_inputs, centroid.as_deref(), 5);
 
-    let name = style_name(mean_bpm, mean_acoustic, top_genres.first().map(String::as_str));
+    let name = style_name(
+        mean_bpm,
+        mean_acoustic,
+        top_genres.first().map(String::as_str),
+    );
 
     StyleProfile {
         name,
@@ -697,7 +730,11 @@ fn exemplars(
             .unwrap_or(Ordering::Equal)
             .then_with(|| a.1.cmp(b.1))
     });
-    ranked.into_iter().take(k).map(|(_, _, t)| t.to_string()).collect()
+    ranked
+        .into_iter()
+        .take(k)
+        .map(|(_, _, t)| t.to_string())
+        .collect()
 }
 
 /// The display title for a track — tag title, else the file name (same rule the
@@ -828,8 +865,14 @@ mod tests {
         // P14: mid band (0.30, 0.60) omits the acoustic/electric term entirely.
         assert_eq!(style_name(100.0, 0.45, Some("pop")), "mid-pop");
         // P14 boundary: exactly 0.60 → acoustic; exactly 0.30 → electric.
-        assert_eq!(style_name(80.0, 0.60, Some("jazz")), "downtempo-acoustic-jazz");
-        assert_eq!(style_name(80.0, 0.30, Some("jazz")), "downtempo-electric-jazz");
+        assert_eq!(
+            style_name(80.0, 0.60, Some("jazz")),
+            "downtempo-acoustic-jazz"
+        );
+        assert_eq!(
+            style_name(80.0, 0.30, Some("jazz")),
+            "downtempo-electric-jazz"
+        );
     }
 
     #[test]
@@ -848,8 +891,13 @@ mod tests {
     fn unique_names_suffixes_collisions_in_order() {
         // First keeps the base name; 2nd/3rd get -2/-3 in style-index order.
         let got = unique_names(
-            ["house-acoustic-pop", "house-acoustic-pop", "downtempo-folk", "house-acoustic-pop"]
-                .into_iter(),
+            [
+                "house-acoustic-pop",
+                "house-acoustic-pop",
+                "downtempo-folk",
+                "house-acoustic-pop",
+            ]
+            .into_iter(),
         );
         assert_eq!(
             got,
@@ -948,11 +996,31 @@ mod tests {
     fn mutual_pairs_keep_only_reciprocated_edges() {
         // a<->b reciprocated; a->c one-way (c never returns a); b<->d reciprocated.
         let edges = vec![
-            SimEdge { src: "a".into(), tgt: "b".into(), score: 0.9 },
-            SimEdge { src: "b".into(), tgt: "a".into(), score: 0.9 },
-            SimEdge { src: "a".into(), tgt: "c".into(), score: 0.8 },
-            SimEdge { src: "b".into(), tgt: "d".into(), score: 0.7 },
-            SimEdge { src: "d".into(), tgt: "b".into(), score: 0.7 },
+            SimEdge {
+                src: "a".into(),
+                tgt: "b".into(),
+                score: 0.9,
+            },
+            SimEdge {
+                src: "b".into(),
+                tgt: "a".into(),
+                score: 0.9,
+            },
+            SimEdge {
+                src: "a".into(),
+                tgt: "c".into(),
+                score: 0.8,
+            },
+            SimEdge {
+                src: "b".into(),
+                tgt: "d".into(),
+                score: 0.7,
+            },
+            SimEdge {
+                src: "d".into(),
+                tgt: "b".into(),
+                score: 0.7,
+            },
         ];
         let got = mutual_pairs(&edges);
         // Only (a,b) and (b,d) survive; a->c is excluded (one-way); emitted once
@@ -1008,7 +1076,10 @@ mod tests {
             ("cc-near", "Near".to_string(), Some(near.as_slice())),
             ("bb-mid", "Mid".to_string(), Some(mid.as_slice())),
         ];
-        assert_eq!(exemplars(&members, Some(&centroid), 5), vec!["Near", "Mid", "Far"]);
+        assert_eq!(
+            exemplars(&members, Some(&centroid), 5),
+            vec!["Near", "Mid", "Far"]
+        );
         // k truncates to the nearest two.
         assert_eq!(exemplars(&members, Some(&centroid), 2), vec!["Near", "Mid"]);
     }
