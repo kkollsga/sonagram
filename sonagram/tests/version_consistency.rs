@@ -1,10 +1,14 @@
 //! Mechanical gate: every statement of the embedded KGLite version agrees with
 //! the pin.
 //!
-//! Sonagram names the kglite version it embeds in nine places — two manifests,
-//! a rationale comment, a compiled-in error string, and five prose files.
+//! Sonagram names the kglite version it embeds in eleven places — two
+//! manifests, a rationale comment, a compiled-in error string, five prose
+//! files, and the two CI workflows that check the engine out at a release tag.
 //! Nothing but a human eye had ever checked them against each other, and two of
-//! them had silently drifted a whole minor version behind the pin. This test
+//! them had silently drifted a whole minor version behind the pin. The workflow
+//! pins were added to that list after the 0.16.3 -> 0.16.5 bump, where all four
+//! of them drifted while every site this test already covered moved correctly —
+//! a gate that covers most of the sites still lets the bump ship broken. This test
 //! derives the expected version from ONE source (the `kglite` entry in the
 //! workspace `Cargo.toml`) and asserts every other site agrees, so a future bump
 //! edits one pin and a red test enumerates the rest.
@@ -122,6 +126,46 @@ const PROSE_SITES: &[&str] = &[
     "docs/index.md",
 ];
 
+
+/// Workflow files that check out the kglite sibling at a release tag.
+///
+/// These pin the engine CI actually builds against. They drifted silently
+/// through the 0.16.3 -> 0.16.5 bump — the manifest said one thing and four
+/// workflow steps said another — which is exactly the failure this test exists
+/// to prevent, so they are asserted like every other site.
+const WORKFLOW_SITES: &[&str] = &[".github/workflows/ci.yml", ".github/workflows/release.yml"];
+
+/// Every `ref: v<version>` that belongs to a checkout step for `repository`.
+///
+/// Scoped deliberately: these workflows check out BOTH upstreams, each with its
+/// own `ref:`, so a blanket scan for `ref: v` would compare one engine's
+/// version against the other's pin and fail for the wrong reason. The `ref:` is
+/// matched only while inside a step whose `repository:` named the wanted repo.
+fn sibling_refs_in_workflow(yaml: &str, repository: &str) -> Vec<(usize, String)> {
+    let mut out = Vec::new();
+    let mut in_wanted_step = false;
+    for (i, line) in yaml.lines().enumerate() {
+        let t = line.trim();
+        if let Some(repo) = t.strip_prefix("repository:") {
+            // A new `repository:` key always ends the previous step's scope.
+            in_wanted_step = repo.trim() == repository;
+            continue;
+        }
+        if !in_wanted_step {
+            continue;
+        }
+        if let Some(r) = t.strip_prefix("ref:") {
+            let r = r.trim().trim_start_matches('v');
+            let end = r.find(|c: char| !is_version_char(c)).unwrap_or(r.len());
+            let token = r[..end].trim_end_matches('.');
+            if !token.is_empty() && token.contains('.') {
+                out.push((i + 1, token.to_string()));
+            }
+        }
+    }
+    out
+}
+
 #[test]
 fn kglite_version_is_stated_consistently_everywhere() {
     let manifest = read_repo_file("Cargo.toml");
@@ -232,6 +276,42 @@ fn kglite_version_is_stated_consistently_everywhere() {
         }
     }
 
+    // --- CI/release workflows: the tags CI builds BOTH engines from. ---
+    // sonara is asserted here too. It is not otherwise covered by this test, and
+    // its pins sit in the very same four steps that drifted for kglite, so
+    // leaving it out would reproduce the identical hole one bump later.
+    let sonara_expected = dep_version(&manifest, "sonara").unwrap_or_else(|| {
+        panic!(
+            "version_consistency: no `sonara = {{ version = \"…\" }}` entry found in \
+             Cargo.toml [workspace.dependencies]. The workflow tag pins are checked \
+             against it; without it there is nothing to check."
+        )
+    });
+    for site in WORKFLOW_SITES {
+        let contents = read_repo_file(site);
+        for (engine, repository, want) in [
+            ("kglite", "kkollsga/kglite", &expected),
+            ("sonara", "kkollsga/sonara", &sonara_expected),
+        ] {
+            let refs = sibling_refs_in_workflow(&contents, repository);
+            if refs.is_empty() {
+                failures.push(format!(
+                    "{site}: no `{repository}` checkout with a `ref: v<version>` found. CI \
+                     builds {engine} from a pinned tag; if that step moved, point this test \
+                     at its new home — do not drop the site."
+                ));
+            }
+            for (line_no, v) in &refs {
+                if &v != &want {
+                    failures.push(format!(
+                        "{site}:{line_no}: checks {engine} out at tag v{v}, pin says {want}. \
+                         CI would build against a different engine than the manifest declares."
+                    ));
+                }
+            }
+        }
+    }
+
     assert!(
         failures.is_empty(),
         "embedded KGLite version is stated inconsistently \
@@ -291,4 +371,33 @@ kglite-mcp-server = { version = \"0.15.2\", default-features = false }\n";
         Some("0.15.2")
     );
     assert_eq!(dep_version(manifest, "nonexistent"), None);
+}
+
+/// The workflow extractor must read only the named repository's `ref:`. These
+/// workflows check out both upstreams, and each engine's `ref:` sitting a few
+/// lines from the other's is exactly the value a blanket `ref:` scan would
+/// wrongly compare against the other engine's pin.
+#[test]
+fn workflow_refs_are_scoped_to_the_named_repository() {
+    let yaml = "\
+      - name: Check out sonara\n\
+        with:\n\
+          repository: kkollsga/sonara\n\
+          ref: v0.3.6\n\
+      - name: Check out kglite\n\
+        with:\n\
+          repository: kkollsga/kglite\n\
+          ref: v0.16.5\n\
+          path: _siblings/KGLite\n";
+    let refs = |repo| {
+        sibling_refs_in_workflow(yaml, repo)
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(refs("kkollsga/kglite"), vec!["0.16.5"]);
+    assert_eq!(refs("kkollsga/sonara"), vec!["0.3.6"]);
+    // A repository that is not checked out at all is a missing site, not a
+    // silent pass — the caller turns an empty result into a failure.
+    assert!(refs("kkollsga/absent").is_empty());
 }

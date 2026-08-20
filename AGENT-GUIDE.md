@@ -2,7 +2,7 @@
 
 You are an AI agent with MCP access to a **sonagram** knowledge graph: a music
 library mapped into [kglite](https://github.com/kkollsga/kglite) and served by
-`sonagram-mcp-server`, a thin KGLite 0.16.3 frontend. Generic exploration uses:
+`sonagram-mcp-server`, a thin KGLite 0.16.5 frontend. Generic exploration uses:
 
 - **`cypher_query`** — run one openCypher query, get up to ~15 rows inline.
   It takes a single `query` string and **nothing else**: there is no parameter

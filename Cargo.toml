@@ -38,28 +38,47 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.3 (an MCP-layer
-# release: the engine, the columnar node-property representation and the v6
-# `.kgl` container are untouched, so nothing about the graph we build or the
-# bytes we write moves.
-# What changes is the served tool surface: `extensions.tools_allow` pins a
-# closed-by-default tool list matched against the final agent-visible names, so
-# no dependency, credential or mode change can widen it; `reload_graph` re-reads
-# the served `.kgl` from disk and `extensions.graph_watch` does it automatically
-# on rewrite; `explore` and `read_code_source` auto-deregister on a read-only
-# `--graph` server whose graph carries no `Function`/`Class` nodes, which is
-# every music graph we serve; a read-only server no longer holds the file's
-# single-writer lease, so a served graph can be rebuilt in place; and
-# mcp-methods 0.4.5 makes the GitHub tools an explicit `builtins.github` opt-in
-# that is off by default).
+# compile time, and consume it in a later plan), kglite 0.16.5 (two releases in
+# one move, 0.16.4 + 0.16.5. The v6 `.kgl` container still does not move for us:
+# every format-affecting addition is opt-in and we opt into none of them, so the
+# graph we build is unchanged — both goldens survived the bump byte-identical.
+# The written container moves by exactly ONE byte, and it is the writer's own
+# stamp: on a 32,890-track build, offset 5322, `"library_version":"0.16.3"` →
+# `"0.16.5"`. Same size, same column order, and either binary reads either
+# file identically. Mask that field before content-hashing a `.kgl`.
+# The one change that reaches our source is a BREAKING Rust API move in 0.16.5:
+# node, relationship and map properties are now `kglite::datatypes::PropMap`
+# rather than `BTreeMap<String, Value>`. It is source-compatible for us because
+# we never name that field's type nor match `Value::Map` as a `BTreeMap`; the
+# type keeps key-ordered iteration, `Eq`, `Ord` and hashing, so our determinism
+# rests on the same guarantee it always did. It buys read-path speed by making a
+# materialised node's properties travel as a refcount instead of a deep copy
+# (upstream measures `ORDER BY n` +36.6%, `collect(n)` +9.8% at 10k).
+# Everything else is a capability we do not use and that costs nothing while
+# unused: an opt-in parallel Cypher runtime (0.16.4) that is off by default and
+# deliberately not exposed by the MCP or Bolt servers, so no served query
+# changes; property-type constraints (0.16.4) and relationship constraints
+# (0.16.5), both enforced only where declared — we declare none, so our files
+# stay loadable by older kglite instead of tripping 0.16.4's format note; and
+# change data capture, whose `state` column broke shape between 0.16.4 and
+# 0.16.5 and reaches no consumer of ours because we never enable it. A graph
+# that never enabled capture writes no epoch stamp and is byte-identical to
+# before.
+# Two fixes land under us without our asking: re-saving a loaded `.kgl` is now
+# byte-stable (the loader rebuilt column order from a `HashMap`, so every load
+# produced a differently-ordered save — precisely the non-determinism class this
+# repo treats as a bug), and `UNWIND` over a collected list is no longer
+# quadratic in memory. Note that a re-saved file stays ~79 bytes larger than a
+# fresh save and reaches a fixed point after one cycle, by design: a load warms
+# the `describe()` caches and a save persists them).
 #
 # The upstream contract these pins encode — what we consume, what we must never
 # depend on, and what we owe each upstream in notification — is recorded in the
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.3", default-features = false }
-kglite-mcp-server = { version = "0.16.3", default-features = false }
+kglite = { version = "0.16.5", default-features = false }
+kglite-mcp-server = { version = "0.16.5", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
