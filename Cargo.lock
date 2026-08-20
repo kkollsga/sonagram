@@ -2692,7 +2692,7 @@ dependencies = [
 
 [[package]]
 name = "sonagram"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "blake3",
  "filetime",
@@ -2711,7 +2711,7 @@ dependencies = [
 
 [[package]]
 name = "sonagram-python"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "kglite",
  "numpy",

@@ -4,6 +4,45 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.5] - 2026-08-20
+
+A maintenance release: the embedded graph engine moves to KGLite 0.16.5, which
+brings a measurable speed-up to the queries that return many tracks at once.
+Nothing about how your library is analyzed, stored, or queried changes.
+
+### Graph schema
+
+No change. Graph schema stays at **v3** and both canonical digests are
+byte-identical to 0.2.4 — **stored `.kgl` graphs do not need rebuilding.**
+
+One byte inside the file does move: a `.kgl` records which engine version wrote
+it, so a graph rebuilt under 0.2.5 differs from the same graph built under 0.2.4
+by that stamp and nothing else — same size, same contents, and either version
+reads either file. It only matters if you content-hash a `.kgl` to detect
+changes: mask the `library_version` field, or every engine upgrade will look
+like a data change.
+
+### Changed
+
+- Embedded KGLite: 0.16.3 → 0.16.5. Queries that return or sort many track
+  nodes at once are faster — measured **11% faster wall-clock** (and 26% less
+  CPU) on an `ORDER BY` over 5,000 tracks from a 32,890-track library, because
+  the engine now shares track properties between result rows instead of copying
+  them. Building a graph, rescanning an unchanged library, and ordinary
+  filtered lookups are unchanged in speed, and every measured result was
+  byte-identical before and after.
+- CI now checks formatting, and the whole workspace was reformatted to a
+  current rustfmt in this release. No behaviour change — the graph gate's
+  golden digests are untouched across the sweep.
+
+### Fixed
+
+- The release checks that keep our stated KGLite version consistent now also
+  cover the CI workflow pins, for both embedded engines. Those four pins had
+  drifted out of step with the manifest during this upgrade while every other
+  version site moved correctly; the check that exists to catch exactly that
+  had never looked at them.
+
 ## [0.2.4] - 2026-08-17
 
 A security release for the MCP server: the served tool surface is now closed
