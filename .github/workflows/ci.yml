@@ -59,11 +59,19 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       # Formatting is gated so the drift that accumulated before 0.2.5 cannot
-      # silently return. It needs no siblings and no build, but it is placed
-      # after the real gates deliberately: a formatting nit must never be the
-      # thing that hides a failing test in the log.
+      # silently return. Placed after the real gates deliberately: a formatting
+      # nit must never be the thing that hides a failing test in the log.
+      #
+      # SCOPED TO OUR OWN CRATES, never `--all`. `cargo fmt --all` also formats
+      # "local path-based dependencies", which here means the sonara sibling
+      # checkout -- an upstream that is READ-ONLY from this repo. `--all` both
+      # gated CI on sonara's formatting (it failed on all three runners against
+      # sonara/src, not ours) and, run locally, rewrote four files in the
+      # sibling working tree. That local rewrite is also why the local check
+      # went green while CI went red: the check passed against files it had
+      # itself just reformatted.
       - name: Rustfmt
-        run: cargo fmt --all --check
+        run: cargo fmt -p sonagram -p sonagram-python --check
 
       - name: Build Python bindings
         if: matrix.os != 'windows-latest'
