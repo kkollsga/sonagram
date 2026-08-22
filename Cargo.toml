@@ -38,47 +38,37 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.5 (two releases in
-# one move, 0.16.4 + 0.16.5. The v6 `.kgl` container still does not move for us:
-# every format-affecting addition is opt-in and we opt into none of them, so the
-# graph we build is unchanged — both goldens survived the bump byte-identical.
-# The written container moves by exactly ONE byte, and it is the writer's own
-# stamp: on a 32,890-track build, offset 5322, `"library_version":"0.16.3"` →
-# `"0.16.5"`. Same size, same column order, and either binary reads either
-# file identically. Mask that field before content-hashing a `.kgl`.
-# The one change that reaches our source is a BREAKING Rust API move in 0.16.5:
-# node, relationship and map properties are now `kglite::datatypes::PropMap`
-# rather than `BTreeMap<String, Value>`. It is source-compatible for us because
-# we never name that field's type nor match `Value::Map` as a `BTreeMap`; the
-# type keeps key-ordered iteration, `Eq`, `Ord` and hashing, so our determinism
-# rests on the same guarantee it always did. It buys read-path speed by making a
-# materialised node's properties travel as a refcount instead of a deep copy
-# (upstream measures `ORDER BY n` +36.6%, `collect(n)` +9.8% at 10k).
-# Everything else is a capability we do not use and that costs nothing while
-# unused: an opt-in parallel Cypher runtime (0.16.4) that is off by default and
-# deliberately not exposed by the MCP or Bolt servers, so no served query
-# changes; property-type constraints (0.16.4) and relationship constraints
-# (0.16.5), both enforced only where declared — we declare none, so our files
-# stay loadable by older kglite instead of tripping 0.16.4's format note; and
-# change data capture, whose `state` column broke shape between 0.16.4 and
-# 0.16.5 and reaches no consumer of ours because we never enable it. A graph
-# that never enabled capture writes no epoch stamp and is byte-identical to
-# before.
-# Two fixes land under us without our asking: re-saving a loaded `.kgl` is now
-# byte-stable (the loader rebuilt column order from a `HashMap`, so every load
-# produced a differently-ordered save — precisely the non-determinism class this
-# repo treats as a bug), and `UNWIND` over a collected list is no longer
-# quadratic in memory. Note that a re-saved file stays ~79 bytes larger than a
-# fresh save and reaches a fixed point after one cycle, by design: a load warms
-# the `describe()` caches and a save persists them).
+# compile time, and consume it in a later plan), kglite 0.16.6 (zero source
+# changes — the Rust API delta is additive for everything we name. The headline
+# is a BREAKING semantics fix in the optimized variable-length path: it answered
+# distance reachability instead of Cypher's trail reachability whenever the
+# clause's consumer collapsed row multiplicity, so on any cyclic graph a
+# `*1..k` query dropped the source from its own answer and a minimum hop count
+# of 2+ undercounted or answered empty. Both goldens are structurally BLIND to
+# it (either side of a build-A-vs-build-B comparison moves together), which is
+# why `sonagram/tests/traversal_semantics.rs` pins hand-derived trail answers
+# over a real cycle — verified red against 0.16.5 and green against 0.16.6 at
+# introduction. The v7 container change is per-section CRCs: saved bytes move
+# and saves cost ~+11–15% upstream-measured, but the format is additive in BOTH
+# directions — existing `.kgl` files load unchanged, older engines read
+# new-engine files, no rebuild. Behavior-visible tightenings that reach none of
+# our issued queries (swept 2026-08-22): `=~` now anchors to the whole value,
+# zero-argument `count()` is a syntax error, an unbound `$param` raises where it
+# answered empty (our agent docs already mandate inline literals), and unbounded
+# deep traversals stop at a quantified 10M-row ceiling during expansion. Free
+# wins under us: var-length BFS no longer allocates a graph-sized visited
+# buffer per row, `EXISTS {}` stops at its first witness, and the Python
+# wheel's parse cache is −25–36% per `.cypher()` call — upstream's number, not
+# ours. Any perf control in the var-length family is VOID across this bump —
+# four separate changes land there).
 #
 # The upstream contract these pins encode — what we consume, what we must never
 # depend on, and what we owe each upstream in notification — is recorded in the
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.5", default-features = false }
-kglite-mcp-server = { version = "0.16.5", default-features = false }
+kglite = { version = "0.16.6", default-features = false }
+kglite-mcp-server = { version = "0.16.6", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
