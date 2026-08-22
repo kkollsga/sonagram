@@ -4,6 +4,41 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.6] - 2026-08-22
+
+A maintenance release: the embedded graph engine moves to KGLite 0.16.6. How
+your library is analyzed and stored does not change; one class of similarity
+query now answers more completely (details below).
+
+### Graph schema
+
+No change. Graph schema stays at **v3** and both canonical digests are
+byte-identical to 0.2.5 — **stored `.kgl` graphs do not need rebuilding.**
+
+The bytes of a *newly saved* `.kgl` do change: the engine now writes a
+checksum for each section of the file, so corruption (a truncated copy, a bad
+disk) is caught at load instead of surfacing as wrong answers later. The
+format change is additive in both directions — existing graphs load unchanged,
+and older sonagram versions can read files written by this one. Saving is
+measured ~11–15% slower upstream; loading is unaffected.
+
+### Changed
+
+- Embedded KGLite: 0.16.5 → 0.16.6. The headline is a correctness fix for
+  multi-step similarity queries: chaining several `SIMILAR_TO` hops (as the
+  agent guide's "reach beyond the top-10" recipe does) previously dropped some
+  reachable tracks when similarity links form a loop — including the seed
+  track itself, which by Cypher's rules *is* reachable through a mutual pair.
+  Such queries now answer completely; seeing the seed in its own extended
+  neighbourhood is correct, not a bug. A new always-on test pins these answers
+  over a known loop so a future engine change cannot move them silently.
+- The engine is stricter about malformed queries: a typo like a `$parameter`
+  that was never given a value, or `count()` with no argument, now raises a
+  clear error where it previously answered empty. Agent-facing docs already
+  told agents to write every value inline, so recipes are unaffected.
+- Python `.cypher()` calls are faster on repeated queries (the engine wheel
+  now caches parsed queries — upstream measures 25–36% per call).
+
 ## [0.2.5] - 2026-08-20
 
 A maintenance release: the embedded graph engine moves to KGLite 0.16.5, which
