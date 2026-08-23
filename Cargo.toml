@@ -38,37 +38,38 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.6 (zero source
-# changes — the Rust API delta is additive for everything we name. The headline
-# is a BREAKING semantics fix in the optimized variable-length path: it answered
-# distance reachability instead of Cypher's trail reachability whenever the
-# clause's consumer collapsed row multiplicity, so on any cyclic graph a
-# `*1..k` query dropped the source from its own answer and a minimum hop count
-# of 2+ undercounted or answered empty. Both goldens are structurally BLIND to
-# it (either side of a build-A-vs-build-B comparison moves together), which is
-# why `sonagram/tests/traversal_semantics.rs` pins hand-derived trail answers
-# over a real cycle — verified red against 0.16.5 and green against 0.16.6 at
-# introduction. The v7 container change is per-section CRCs: saved bytes move
-# and saves cost ~+11–15% upstream-measured, but the format is additive in BOTH
-# directions — existing `.kgl` files load unchanged, older engines read
-# new-engine files, no rebuild. Behavior-visible tightenings that reach none of
-# our issued queries (swept 2026-08-22): `=~` now anchors to the whole value,
-# zero-argument `count()` is a syntax error, an unbound `$param` raises where it
-# answered empty (our agent docs already mandate inline literals), and unbounded
-# deep traversals stop at a quantified 10M-row ceiling during expansion. Free
-# wins under us: var-length BFS no longer allocates a graph-sized visited
-# buffer per row, `EXISTS {}` stops at its first witness, and the Python
-# wheel's parse cache is −25–36% per `.cypher()` call — upstream's number, not
-# ours. Any perf control in the var-length family is VOID across this bump —
-# four separate changes land there).
+# compile time, and consume it in a later plan), kglite 0.16.7 (zero source
+# changes — the release hardens the vector/embedding surface, and every
+# tightening is either unreachable from our build path or already our
+# behavior. `vector_search` now errors when NO selected type has an embedding
+# store for the column, instead of answering `[]` — unreachable for us: the
+# build inserts the Track `similarity` store unconditionally (graph/mod.rs
+# stage 5), empty or not, before the one `vector_search` call site runs, and
+# an empty store is still "store exists → []", not the error. The HNSW
+# auto-use floor moves 256→400 and whole-graph search learns to use the index
+# on multi-type graphs — both moot under our `with_exact(true)`. Deleting a
+# node now prunes its vector (previously a later-added node INHERITED the
+# deleted node's slot and answered phantom 1.0-score hits) and drops that
+# store's HNSW index; we never delete embedded nodes — every build is a fresh
+# graph — so this reaches only an agent mutating a served graph, where it is
+# strictly a correctness win. `lock_schema()` promotes typo'd-property reads
+# to errors (we never lock), four centralities lose `as_dict` and one-arg
+# `embeddings()`/`degrees()` raise on key collisions (we call none of them),
+# and `embed_texts`/`set_embeddings` accept identity/title-alias columns and
+# raise on unknown types instead of silently embedding zero (we set vectors
+# through the Rust `EmbeddingStore` directly). No container format change —
+# `.kgl` stays v7, either engine reads either file. Unlike 0.16.6 there is no
+# semantics change on any query our docs teach, so this bump adds no new
+# discriminating pin test; `traversal_semantics.rs` continues to pin the
+# 0.16.6 trail behavior).
 #
 # The upstream contract these pins encode — what we consume, what we must never
 # depend on, and what we owe each upstream in notification — is recorded in the
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.6", default-features = false }
-kglite-mcp-server = { version = "0.16.6", default-features = false }
+kglite = { version = "0.16.7", default-features = false }
+kglite-mcp-server = { version = "0.16.7", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
