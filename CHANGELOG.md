@@ -4,6 +4,37 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.7] - 2026-08-23
+
+A maintenance release: the embedded graph engine moves to KGLite 0.16.7. How
+your library is analyzed and stored does not change; the engine is more honest
+when something is wrong (details below).
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, the `.kgl` file format is unchanged,
+and both canonical digests are byte-identical to 0.2.6 — **stored `.kgl`
+graphs do not need rebuilding.**
+
+### Changed
+
+- Embedded KGLite: 0.16.6 → 0.16.7. The theme of the release is that a
+  similarity search that could not possibly match anything — asking for a
+  vector column that doesn't exist, for example — now raises a clear
+  did-you-mean error instead of silently answering "no similar tracks", which
+  was indistinguishable from a genuine empty result. Sonagram's own graph
+  build is unaffected (it always creates the similarity store before
+  searching it); the change protects agents querying a served graph.
+- Deleting a track from a live graph now removes its similarity vector with
+  it. Previously a track added *after* a deletion could inherit the deleted
+  track's vector and show up as a perfect-score match for queries meant for
+  the old track. Sonagram rebuilds the graph from scratch on each build, so
+  this could only surface on a graph an agent was editing live — but there it
+  was a real phantom-match bug, now fixed.
+- Whole-graph semantic search (no type filter) now uses the fast vector index
+  on graphs with several node types — upstream measures 6–13× — where it
+  previously fell back to a slow full scan.
+
 ## [0.2.6] - 2026-08-22
 
 A maintenance release: the embedded graph engine moves to KGLite 0.16.6. How
