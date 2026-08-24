@@ -38,29 +38,31 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.7 (zero source
-# changes — the release hardens the vector/embedding surface, and every
-# tightening is either unreachable from our build path or already our
-# behavior. `vector_search` now errors when NO selected type has an embedding
-# store for the column, instead of answering `[]` — unreachable for us: the
-# build inserts the Track `similarity` store unconditionally (graph/mod.rs
-# stage 5), empty or not, before the one `vector_search` call site runs, and
-# an empty store is still "store exists → []", not the error. The HNSW
-# auto-use floor moves 256→400 and whole-graph search learns to use the index
-# on multi-type graphs — both moot under our `with_exact(true)`. Deleting a
-# node now prunes its vector (previously a later-added node INHERITED the
-# deleted node's slot and answered phantom 1.0-score hits) and drops that
-# store's HNSW index; we never delete embedded nodes — every build is a fresh
-# graph — so this reaches only an agent mutating a served graph, where it is
-# strictly a correctness win. `lock_schema()` promotes typo'd-property reads
-# to errors (we never lock), four centralities lose `as_dict` and one-arg
-# `embeddings()`/`degrees()` raise on key collisions (we call none of them),
-# and `embed_texts`/`set_embeddings` accept identity/title-alias columns and
-# raise on unknown types instead of silently embedding zero (we set vectors
-# through the Rust `EmbeddingStore` directly). No container format change —
-# `.kgl` stays v7, either engine reads either file. Unlike 0.16.6 there is no
-# semantics change on any query our docs teach, so this bump adds no new
-# discriminating pin test; `traversal_semantics.rs` continues to pin the
+# compile time, and consume it in a later plan), kglite 0.16.9 (two releases
+# in one move, 0.16.8 + 0.16.9, zero source changes. 0.16.9 is a pure perf
+# recovery: the per-section CRC32 digests 0.16.6 added were computed by a
+# ~0.5 GB/s software table, so loading a digest-carrying `.kgl` cost +85% —
+# upstream's own 0.16.6 note claimed "loads unmoved" and was measured wrong;
+# `crc32fast` brings full verification to +5.3%. Digest VALUES are unchanged
+# (same CRC-32/IEEE), so this is not a format change in either direction —
+# either engine reads either file, and the `.kgl` golden digest does not
+# move. Any perf control in the `.kgl` load family is VOID across this bump.
+# 0.16.8 is correctness fixes, swept against our whole build path and every
+# taught recipe (src, wrapper, tests, agent docs, playlist skill) — none
+# reach us: `count(DISTINCT <rel var>)` counted peer nodes, not
+# relationships (we never count relationship variables; the one taught
+# DISTINCT is the `*1..2` trail recipe, pinned by traversal_semantics.rs);
+# an aggregating WITH…WHERE…LIMIT could underfill (not a shape we issue or
+# teach); composite indexes created in non-sorted property order were never
+# used (we create none); `storage="mapped"` staleness fixes (we build
+# in-memory graphs only); spatial fluent-method config fixes (unused);
+# edge-property writes under a live second reference were invisible to
+# traversals (we never SET r.p — agents on a served graph gain the fix);
+# `add_connections_internal` removed from the Python class (never called);
+# `Value` equality is now total so NaN folds consistently in DISTINCT /
+# grouping (every float we store is finite, and both goldens verify the
+# digest anyway). No semantics change on any query our docs teach, so no new
+# discriminating pin test — traversal_semantics.rs continues to pin the
 # 0.16.6 trail behavior).
 #
 # The upstream contract these pins encode — what we consume, what we must never
@@ -68,8 +70,8 @@ ureq = { version = "2", features = ["json"] }
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.7", default-features = false }
-kglite-mcp-server = { version = "0.16.7", default-features = false }
+kglite = { version = "0.16.9", default-features = false }
+kglite-mcp-server = { version = "0.16.9", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
