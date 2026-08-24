@@ -4,6 +4,35 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.8] - 2026-08-24
+
+A maintenance release: the embedded graph engine moves to KGLite 0.16.9
+(absorbing 0.16.8). How your library is analyzed and stored does not change;
+saved graphs load noticeably faster again (details below).
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, the `.kgl` file format is unchanged,
+and both canonical digests are byte-identical to 0.2.7 — **stored `.kgl`
+graphs do not need rebuilding.**
+
+### Changed
+
+- Embedded KGLite: 0.16.7 → 0.16.9. The headline is a loading-speed fix — and
+  a correction to this changelog: the 0.2.6 entry said the corruption
+  checksums added then left loading unaffected. That upstream claim turned
+  out to be wrong — verifying the checksums roughly doubled load time for
+  graphs saved by 0.2.6 or later. The engine now uses the CPU's built-in
+  checksum instructions, bringing the cost of full verification down to about
+  5% while keeping the same protection. Saved files are unchanged either way;
+  nothing needs re-saving.
+- Several query-correctness fixes for agents working on a live graph:
+  counting distinct relationships no longer undercounts when two tracks are
+  linked more than once, a filtered-and-limited aggregation no longer returns
+  fewer rows than asked, and an edge-property update made while other results
+  are held open is no longer invisible to later filters. None of these
+  affected how sonagram builds the graph itself.
+
 ## [0.2.7] - 2026-08-23
 
 A maintenance release: the embedded graph engine moves to KGLite 0.16.7. How
