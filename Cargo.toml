@@ -38,40 +38,66 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.9 (two releases
-# in one move, 0.16.8 + 0.16.9, zero source changes. 0.16.9 is a pure perf
-# recovery: the per-section CRC32 digests 0.16.6 added were computed by a
-# ~0.5 GB/s software table, so loading a digest-carrying `.kgl` cost +85% —
-# upstream's own 0.16.6 note claimed "loads unmoved" and was measured wrong;
-# `crc32fast` brings full verification to +5.3%. Digest VALUES are unchanged
-# (same CRC-32/IEEE), so this is not a format change in either direction —
-# either engine reads either file, and the `.kgl` golden digest does not
-# move. Any perf control in the `.kgl` load family is VOID across this bump.
-# 0.16.8 is correctness fixes, swept against our whole build path and every
-# taught recipe (src, wrapper, tests, agent docs, playlist skill) — none
-# reach us: `count(DISTINCT <rel var>)` counted peer nodes, not
-# relationships (we never count relationship variables; the one taught
-# DISTINCT is the `*1..2` trail recipe, pinned by traversal_semantics.rs);
-# an aggregating WITH…WHERE…LIMIT could underfill (not a shape we issue or
-# teach); composite indexes created in non-sorted property order were never
-# used (we create none); `storage="mapped"` staleness fixes (we build
-# in-memory graphs only); spatial fluent-method config fixes (unused);
-# edge-property writes under a live second reference were invisible to
-# traversals (we never SET r.p — agents on a served graph gain the fix);
-# `add_connections_internal` removed from the Python class (never called);
-# `Value` equality is now total so NaN folds consistently in DISTINCT /
-# grouping (every float we store is finite, and both goldens verify the
-# digest anyway). No semantics change on any query our docs teach, so no new
-# discriminating pin test — traversal_semantics.rs continues to pin the
-# 0.16.6 trail behavior).
+# compile time, and consume it in a later plan), kglite 0.16.11 (two
+# releases in one move, 0.16.10 + 0.16.11, zero source changes; both goldens
+# byte-identical and `capture_goldens` never run. Neither release reaches us,
+# because both are built almost entirely out of surfaces a graph has to opt
+# into and we opt into none.
+#
+# 0.16.10 is retrieval machinery: `build_text_index` / `text_bm25()` /
+# `score_fuse()` add a BM25 lexical lane, and vector indexes gain the same
+# incremental catch-up contract. We build no index of any kind. Our vector
+# lane is `kglite::api::algorithms::vector_search` over an `EmbeddingStore`
+# (`sonagram/src/graph/derive.rs:40`) — the exact scan, which is the oracle
+# the HNSW path is measured against and is untouched by the catch-up work.
+# The `.kgl` vector-index section's payload version moves to 3, but that
+# section is a rebuildable cache we never write, and a graph with no text
+# index writes byte-identical files; both goldens confirm it. Its perf items
+# sit outside us too: the streaming-aggregate group cap (same rows, same
+# order), the `storage="mapped"` first-property-probe index (we build
+# in-memory graphs only), the `text_bm25` top-k fusion (no index), and the
+# MCP server's opt-in `--parallel` read pin (off by default, reads only,
+# identical answers either way).
+#
+# 0.16.11 is the ontology / label / structured-data layer, every piece of it
+# declaration-gated: `define_ontology` + `materialize_ontology`, label
+# alternation `MATCH (n:A|B)`, table properties with declared shapes, and the
+# `table.upsert` / `table.delete` procedures. We declare no ontology, carry no
+# secondary label, and store no table property, so none of it changes what a
+# query of ours matches.
+#
+# The one item that could have reached us without an explicit call is the
+# `vacuum()` fix: auto-vacuum is on by default (threshold 0.3), and the
+# compaction was leaving `secondary_label_index` buckets pointing at stale
+# node indices — phantom rows, over-counted `count()`, lost labels. It
+# corrupts secondary labels only, and we create none (no `add_label`, no
+# `set_parent_type`, no ontology materialization), so no `.kgl` we have ever
+# written could carry the damage. Both goldens verify the digest regardless.
+#
+# One change is BREAKING-shaped and we are outside it: the six
+# declaration-backed rule procedures gained a `rule` column, so a bare `CALL`
+# returns one more column than before. We issue no `CALL` anywhere — swept
+# across src, the wrapper, tests, the agent docs and the playlist skill — so
+# no taught query's result shape moves. Same for `CREATE INDEX` on a
+# secondary-only label now erroring instead of silently building an index no
+# lookup consults (we create no indexes) and blueprint junction-edge `rename`
+# (we ship no blueprint). No semantics change on any query our docs teach, so
+# no new discriminating pin test — traversal_semantics.rs continues to pin the
+# 0.16.6 trail behavior.
+#
+# Perf controls: nothing in the `.kgl` load family moved this time, but two
+# ops upstream's own notes describe as improved are disqualified as control
+# cells across this bump — a streaming `count(*) ... LIMIT k` aggregate
+# (56 ms -> 26 ms upstream) and any `text_bm25` top-k. Pick a control from
+# elsewhere.
 #
 # The upstream contract these pins encode — what we consume, what we must never
 # depend on, and what we owe each upstream in notification — is recorded in the
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.9", default-features = false }
-kglite-mcp-server = { version = "0.16.9", default-features = false }
+kglite = { version = "0.16.11", default-features = false }
+kglite-mcp-server = { version = "0.16.11", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;

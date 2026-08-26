@@ -105,7 +105,7 @@ sonagram mcp install
 # RUN: '/absolute/path/sonagram-mcp-server' --graph '/.../music.kgl'
 ```
 
-The thin Sonagram frontend embeds KGLite 0.16.9's server and registers typed
+The thin Sonagram frontend embeds KGLite 0.16.11's server and registers typed
 profile/policy/curate/audit/explain/store tools against its live graph. KGLite
 still owns MCP, Cypher, graph lifecycle, and generic tools; Sonagram owns only
 the music-domain handlers.
