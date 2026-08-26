@@ -38,8 +38,8 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.11 (two
-# releases in one move, 0.16.10 + 0.16.11, zero source changes; both goldens
+# compile time, and consume it in a later plan), kglite 0.16.12 (three
+# releases in one move, 0.16.10 + 0.16.11 + 0.16.12, zero source changes; both goldens
 # byte-identical and `capture_goldens` never run. Neither release reaches us,
 # because both are built almost entirely out of surfaces a graph has to opt
 # into and we opt into none.
@@ -85,6 +85,16 @@ ureq = { version = "2", features = ["json"] }
 # no new discriminating pin test — traversal_semantics.rs continues to pin the
 # 0.16.6 trail behavior.
 #
+# 0.16.12 is a pure ontology-layer patch and is the cleanest non-event of the
+# three: `required_properties` / `property_types` were declared-but-dead and
+# now produce audit rows, `inverse_name` stopped auto-enrolling the physical
+# inverse check (it is a reading-direction alias; the audit had been scoring
+# every naming-only declaration as 100% violations, and `enforcement: error`
+# made correctly modelled graphs unbuildable), and `enforcement` gained a
+# per-check severity map. Every one of those reaches a graph only through
+# `define_ontology`, which we never call — so unlike the vacuum() fix in
+# 0.16.11, there is no default-on path by which any of it could touch us.
+#
 # Perf controls: nothing in the `.kgl` load family moved this time, but two
 # ops upstream's own notes describe as improved are disqualified as control
 # cells across this bump — a streaming `count(*) ... LIMIT k` aggregate
@@ -96,8 +106,8 @@ ureq = { version = "2", features = ["json"] }
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.11", default-features = false }
-kglite-mcp-server = { version = "0.16.11", default-features = false }
+kglite = { version = "0.16.12", default-features = false }
+kglite-mcp-server = { version = "0.16.12", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
