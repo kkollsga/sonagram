@@ -4,6 +4,46 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.9] - 2026-08-26
+
+A maintenance release: the embedded graph engine moves to KGLite 0.16.12
+(absorbing 0.16.10 and 0.16.11). How your library is analyzed and stored does
+not change, and neither does anything sonagram builds — this release is here so
+agents working on a live graph get three releases of engine fixes.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, the `.kgl` file format is unchanged,
+and both canonical digests are byte-identical to 0.2.8 — **stored `.kgl` graphs
+do not need rebuilding.**
+
+### Changed
+
+- Embedded KGLite: 0.16.9 → 0.16.12. The bulk of what these three releases add
+  is optional machinery sonagram does not switch on — a keyword (full-text)
+  search index, a way to rank results by keyword and meaning at once, and an
+  "ontology" layer for declaring how node types relate to each other. Sonagram
+  builds your graph the same way it did before, and the similarity search
+  behind playlists is unchanged.
+
+### Fixed
+
+Three fixes that matter to agents querying or editing a live graph. None of
+them affect how sonagram builds the graph, and none require a rebuild:
+
+- The engine's automatic housekeeping pass (which tidies up storage on its own,
+  with no explicit request) could corrupt extra labels an agent had attached to
+  nodes — afterwards, searching by such a label could return empty phantom
+  rows, over-count, or miss nodes that still had the label. Fixed.
+- Asking for an index on a label that only ever existed as an extra label used
+  to appear to succeed while building something no search would ever consult.
+  It now says so plainly.
+- On graphs using extra labels, two common query shapes (aggregating over
+  connections, and joining by location) had been falling back to a much slower
+  path for *every* query as soon as any extra label existed anywhere. The
+  engine now makes that decision per query — upstream measured the old
+  behaviour at 71x and 33x slower on the affected shapes.
+
 ## [0.2.8] - 2026-08-24
 
 A maintenance release: the embedded graph engine moves to KGLite 0.16.9
