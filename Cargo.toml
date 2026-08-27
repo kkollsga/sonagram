@@ -38,8 +38,9 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.12 (three
-# releases in one move, 0.16.10 + 0.16.11 + 0.16.12, zero source changes; both goldens
+# compile time, and consume it in a later plan), kglite 0.16.13 (four
+# releases across two sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped in
+# 0.2.9, 0.16.13 here; zero source changes throughout; both goldens
 # byte-identical and `capture_goldens` never run. Neither release reaches us,
 # because both are built almost entirely out of surfaces a graph has to opt
 # into and we opt into none.
@@ -95,6 +96,29 @@ ureq = { version = "2", features = ["json"] }
 # `define_ontology`, which we never call — so unlike the vacuum() fix in
 # 0.16.11, there is no default-on path by which any of it could touch us.
 #
+# 0.16.13 is ontology follow-ups plus label-alternation planning, and it is
+# the first of these to declare a **Rust API break**: `api::RelationshipDecl`
+# gained public fields `exempt` and `ancestry`, so a struct-literal
+# construction must add them. We never name the type (verified by grep and by
+# a clean `cargo build`), because we never call `define_ontology` — so the
+# break is declared past us rather than absorbed. Its column changes are the
+# same story one level up: `CALL ontology_audit()` gains `exempted` and
+# `domain_class`, `SHOW ONTOLOGY` gains `exempt`, and the new
+# `CALL edge_property_violation()` joins them — we issue no `CALL`.
+#
+# Its non-ontology fixes are the ones worth reading, because they are NOT
+# declaration-gated — they gate on an *index* existing, and we create none:
+# an index on `name` held a strict subset of what the same `MATCH` matched
+# (`n.name` falls back to the node title, `create_index` reads the stored
+# property alone), so building one silently dropped rows and `MERGE (n:T
+# {name: …})` could duplicate the node it missed; an index pre-filter pruned
+# every row against the *first* row's type, so an untyped `MATCH (n) WHERE
+# n.city = 'x'` could drop other types' matches; and a fluent `where()` over a
+# mixed-type set took the first indexed type's hits as the whole answer. We
+# issue no `MERGE`, no untyped `MATCH … WHERE` equality, and no fluent
+# `where()` — swept across src, wrapper, tests, agent docs and the playlist
+# skill. Agents on a live graph that build indexes gain all three.
+#
 # Perf controls: nothing in the `.kgl` load family moved this time, but two
 # ops upstream's own notes describe as improved are disqualified as control
 # cells across this bump — a streaming `count(*) ... LIMIT k` aggregate
@@ -106,8 +130,8 @@ ureq = { version = "2", features = ["json"] }
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.12", default-features = false }
-kglite-mcp-server = { version = "0.16.12", default-features = false }
+kglite = { version = "0.16.13", default-features = false }
+kglite-mcp-server = { version = "0.16.13", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
