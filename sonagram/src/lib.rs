@@ -64,6 +64,6 @@ mod tests {
     fn version_is_pinned() {
         // The lockstep version fields (Cargo.toml workspace, pyproject.toml,
         // this constant) must all agree on the release version.
-        assert_eq!(VERSION, "0.2.9");
+        assert_eq!(VERSION, "0.2.10");
     }
 }

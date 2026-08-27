@@ -23,8 +23,8 @@ from pathlib import Path
 import sonagram
 from sonagram import _sonagram
 
-assert sonagram.__version__ == "0.2.9", (
-    f"expected 0.2.9, got {sonagram.__version__!r}"
+assert sonagram.__version__ == "0.2.10", (
+    f"expected 0.2.10, got {sonagram.__version__!r}"
 )
 
 # Single source of truth for the floor, same as the Rust gate: our own metadata.

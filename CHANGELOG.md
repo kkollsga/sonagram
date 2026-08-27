@@ -4,6 +4,43 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.10] - 2026-08-27
+
+A maintenance release: the embedded graph engine moves to KGLite 0.16.13. How
+your library is analyzed and stored does not change, and neither does anything
+sonagram builds — this release exists so agents working on a live graph get
+another round of engine fixes.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, the `.kgl` file format is unchanged,
+and both canonical digests are byte-identical to 0.2.9 — **stored `.kgl` graphs
+do not need rebuilding.**
+
+### Changed
+
+- Embedded KGLite: 0.16.12 → 0.16.13. Most of this release refines the engine's
+  optional "ontology" layer for declaring how node types relate — machinery
+  sonagram does not switch on. Sonagram builds your graph the same way it did
+  before, and the similarity search behind playlists is unchanged.
+
+### Fixed
+
+Three fixes for agents querying or editing a live graph, all of which only
+applied once a search index had been created on it. Sonagram creates none, so
+nothing it built was ever affected and no rebuild is needed:
+
+- Creating an index on a track or artist **name** could silently drop rows from
+  later searches for that name — the index recorded only names stored as a
+  property, while the search also matched names carried as the node's title. A
+  "create if missing" write could likewise duplicate a node it had failed to
+  find. Such indexes are no longer trusted for these lookups.
+- A search across *all* node types filtered by a property (rather than one
+  named type) could drop matches, because results were checked against the
+  first match's type only.
+- The same flaw in the non-query ("fluent") search interface could return only
+  the first matching type's results when several types matched.
+
 ## [0.2.9] - 2026-08-26
 
 A maintenance release: the embedded graph engine moves to KGLite 0.16.12
