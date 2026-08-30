@@ -36,8 +36,8 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use kglite::api::mutation::{add_edges_from_specs, add_nodes};
-use kglite::api::DirGraph;
 use kglite::api::mutation::{ColumnData, ColumnType, DataFrame};
+use kglite::api::DirGraph;
 
 use crate::record::AnalysisRecord;
 use crate::Result;
