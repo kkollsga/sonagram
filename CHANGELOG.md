@@ -4,6 +4,38 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.11] - 2026-08-30
+
+A maintenance release: the embedded graph engine moves to KGLite 0.16.15 (two
+engine releases). How your library is analyzed and stored does not change, and
+neither does anything sonagram builds — this release exists to pick up two
+engine fixes that quietly repair saved graph files.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, the `.kgl` file format is unchanged,
+and both canonical digests are byte-identical to 0.2.10 — **stored `.kgl`
+graphs do not need rebuilding.**
+
+### Changed
+
+- Embedded KGLite: 0.16.13 → 0.16.15. The new engine features (load-time
+  options, memory estimation for large files, a result-row cap) are all
+  opt-in surfaces sonagram does not switch on; loading a saved graph is also
+  5–10% faster.
+
+### Fixed
+
+Two engine repairs that reach saved `.kgl` files automatically — no action
+needed:
+
+- A saved graph could report **zero connections per relationship type** after
+  being reopened (affecting overview summaries and query planning, not query
+  answers). Reopening such a file now recounts and repairs it.
+- Saving the same graph twice now produces **byte-identical files** again —
+  the same same-library-twice determinism sonagram promises for its own
+  builds, extended to the engine's file writer.
+
 ## [0.2.10] - 2026-08-27
 
 A maintenance release: the embedded graph engine moves to KGLite 0.16.13. How
