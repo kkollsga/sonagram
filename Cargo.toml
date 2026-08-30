@@ -38,12 +38,13 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.13 (four
-# releases across two sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped in
-# 0.2.9, 0.16.13 here; zero source changes throughout; both goldens
-# byte-identical and `capture_goldens` never run. Neither release reaches us,
-# because both are built almost entirely out of surfaces a graph has to opt
-# into and we opt into none.
+# compile time, and consume it in a later plan), kglite 0.16.15 (six
+# releases across three sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
+# in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 here; both goldens
+# byte-identical and `capture_goldens` never run throughout. 0.16.10–0.16.13
+# were zero-source-change bumps built out of surfaces a graph has to opt into;
+# 0.16.14 is the first to carry a source change here, and it is import paths
+# only (see below).
 #
 # 0.16.10 is retrieval machinery: `build_text_index` / `text_bm25()` /
 # `score_fuse()` add a BM25 lexical lane, and vector indexes gain the same
@@ -119,19 +120,43 @@ ureq = { version = "2", features = ["json"] }
 # `where()` — swept across src, wrapper, tests, agent docs and the playlist
 # skill. Agents on a live graph that build indexes gain all three.
 #
-# Perf controls: nothing in the `.kgl` load family moved this time, but two
-# ops upstream's own notes describe as improved are disqualified as control
-# cells across this bump — a streaming `count(*) ... LIMIT k` aggregate
-# (56 ms -> 26 ms upstream) and any `text_bm25` top-k. Pick a control from
-# elsewhere.
+# 0.16.14's one BREAKING change — `max_rows` renamed `max_work_units` on
+# `ExecuteOptions` / `CypherExecutor` / the Python keywords — misses us: we
+# construct `ExecuteOptions::eager(&params)` and never set the field (swept
+# src, bindings, wrapper, tests). What we DID take is its facade re-exports:
+# our four `use kglite::datatypes::values::{...}` imports (graph/mod.rs,
+# graph/song.rs, graph/derive.rs, tests/golden_graph.rs) now come from
+# `kglite::api::mutation` — the curated surface exporting the types its own
+# signatures name, which is exactly the reach-past those re-exports exist to
+# end. Same types, zero behaviour change. Its two data fixes reach us
+# passively and only as repairs: a reloaded `.kgl` no longer reports zero
+# edges per relationship type when counts weren't warm at save time (the load
+# now recounts instead of trusting fabricated zeros — repairs already-written
+# files), and two saves of the same graph are byte-identical again (four
+# persisted lists were in hash-map order), which is our own determinism
+# promise extended to the `.kgl` bytes themselves.
+#
+# 0.16.15 is entirely opt-in load machinery we don't opt into: `LoadOptions`
+# (`storage` / `defer_index_rebuild` on `load_file_with`; our `load_file`
+# calls are unchanged and are exactly the default options),
+# `estimate_load_memory` + `max_load_mb`, a true `row_limit` result cap, and
+# `KGLITE_TMPDIR`. Its fixes (spill-dir reclamation after a kill, concurrent
+# load errors, load errors naming operation + path) reach us passively and
+# are all improvements. No graph semantics move; both goldens confirm.
+#
+# Perf controls: `.kgl` loads are 5–10% faster in 0.16.15 by upstream's own
+# notes, so the whole `.kgl` load family is disqualified as a control cell
+# across this bump — as are the two carried from 0.16.13, the streaming
+# `count(*) ... LIMIT k` aggregate and any `text_bm25` top-k. Pick a control
+# from elsewhere (scan/analysis-side ops don't touch kglite at all).
 #
 # The upstream contract these pins encode — what we consume, what we must never
 # depend on, and what we owe each upstream in notification — is recorded in the
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.13", default-features = false }
-kglite-mcp-server = { version = "0.16.13", default-features = false }
+kglite = { version = "0.16.15", default-features = false }
+kglite-mcp-server = { version = "0.16.15", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;

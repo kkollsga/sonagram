@@ -47,7 +47,7 @@ schema between them, and nothing else:
         │  sonagram build     map records → nodes + edges + embeddings
         ▼
   music.kgl  (a kglite knowledge graph)
-        │  sonagram mcp install → sonagram-mcp-server (KGLite 0.16.13)
+        │  sonagram mcp install → sonagram-mcp-server (KGLite 0.16.15)
         ▼
   AI agent  ──preset + typed brief──▶  typed MCP curation tools
         │  library selection → sequencing → audit → provenance

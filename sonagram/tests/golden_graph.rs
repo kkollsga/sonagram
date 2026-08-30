@@ -718,7 +718,7 @@ fn contract_kglite() {
     use kglite::api::mutation::{add_nodes, EdgeSpec};
     use kglite::api::storage::{EmbeddingStore, StorageMode};
     use kglite::api::{DirGraph, NodeView, Value};
-    use kglite::datatypes::values::{ColumnData, ColumnType, DataFrame};
+    use kglite::api::mutation::{ColumnData, ColumnType, DataFrame};
     use std::collections::HashMap;
     use std::sync::Arc;
 

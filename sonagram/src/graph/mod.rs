@@ -38,7 +38,7 @@ use std::sync::Arc;
 use kglite::api::mutation::{add_edges_from_specs, add_nodes, EdgeSpec};
 use kglite::api::storage::EmbeddingStore;
 use kglite::api::{DirGraph, Value};
-use kglite::datatypes::values::{ColumnData, ColumnType, DataFrame};
+use kglite::api::mutation::{ColumnData, ColumnType, DataFrame};
 use sonara::similarity::{EMBEDDING_DIM, SIMILARITY_VERSION, WEIGHTS};
 
 use crate::enrich::{similar_key, EnrichmentData};

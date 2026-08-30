@@ -40,7 +40,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use kglite::api::algorithms::{vector_search, DistanceMetric, VectorSearchOptions};
 use kglite::api::mutation::{add_edges_from_specs, EdgeSpec};
 use kglite::api::{CurrentSelection, DirGraph, Value};
-use kglite::datatypes::values::{ColumnData, ColumnType};
+use kglite::api::mutation::{ColumnData, ColumnType};
 use sonara::similarity::{self, EMBEDDING_DIM};
 
 use crate::record::AnalysisRecord;
