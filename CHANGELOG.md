@@ -4,6 +4,29 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.13] - 2026-08-31
+
+A maintenance release: the embedded graph engine moves to KGLite 0.16.18 (one
+engine release). How your library is analyzed and stored does not change, and
+nothing sonagram builds moves — this release makes the agent server
+(`sonagram mcp`) sturdier at startup.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, the `.kgl` file format is unchanged,
+and both canonical digests are byte-identical to 0.2.12 — **stored `.kgl`
+graphs do not need rebuilding.**
+
+### Fixed
+
+- Embedded KGLite: 0.16.17 → 0.16.18. The agent server now starts even when
+  one of its optional extras can't: a data-export listener that fails to
+  claim its network port, or a configured source folder that has moved, is
+  reported as a warning in the startup summary instead of stopping the whole
+  server. The data-export listener also picks a free port automatically again
+  when none is configured, so several agent apps can share one machine
+  without colliding.
+
 ## [0.2.12] - 2026-08-31
 
 A maintenance release: the embedded graph engine moves to KGLite 0.16.17 (two
