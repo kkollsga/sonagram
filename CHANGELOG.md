@@ -4,6 +4,34 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.12] - 2026-08-31
+
+A maintenance release: the embedded graph engine moves to KGLite 0.16.17 (two
+engine releases). How your library is analyzed and stored does not change, and
+nothing sonagram builds moves — this release keeps the embedded engine current
+and slims what gets compiled alongside it.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, the `.kgl` file format is unchanged,
+and both canonical digests are byte-identical to 0.2.11 — **stored `.kgl`
+graphs do not need rebuilding.**
+
+### Changed
+
+- Embedded KGLite: 0.16.15 → 0.16.17. The engine dropped a diagnostics field
+  that never carried real information, taught its graph-file exports to label
+  nodes the way external graph viewers expect, and trimmed unused pieces of a
+  mapping dependency from the build — none of which changes how sonagram
+  builds or queries your graph.
+- Query cancellation inside the engine got more responsive (a long-running
+  pattern search now notices an interrupt in milliseconds rather than
+  seconds). Sonagram itself sets no query deadlines, so this reaches only
+  agents querying a live graph with timeouts of their own.
+- For developers building sonagram from source: dependency debug info is now
+  built as line-tables-only, cutting the debug build tree roughly a fifth
+  with no effect on the shipped package.
+
 ## [0.2.11] - 2026-08-30
 
 A maintenance release: the embedded graph engine moves to KGLite 0.16.15 (two
