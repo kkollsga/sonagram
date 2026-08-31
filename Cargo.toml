@@ -38,13 +38,12 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.15 (six
-# releases across three sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
-# in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 here; both goldens
-# byte-identical and `capture_goldens` never run throughout. 0.16.10–0.16.13
-# were zero-source-change bumps built out of surfaces a graph has to opt into;
-# 0.16.14 is the first to carry a source change here, and it is import paths
-# only (see below).
+# compile time, and consume it in a later plan), kglite 0.16.17 (eight
+# releases across four sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
+# in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
+# here; both goldens byte-identical and `capture_goldens` never run throughout.
+# All were zero-source-change bumps except 0.16.14, whose change was import
+# paths only (see below).
 #
 # 0.16.10 is retrieval machinery: `build_text_index` / `text_bm25()` /
 # `score_fuse()` add a BM25 lexical lane, and vector indexes gain the same
@@ -144,19 +143,39 @@ ureq = { version = "2", features = ["json"] }
 # load errors, load errors naming operation + path) reach us passively and
 # are all improvements. No graph semantics move; both goldens confirm.
 #
-# Perf controls: `.kgl` loads are 5–10% faster in 0.16.15 by upstream's own
-# notes, so the whole `.kgl` load family is disqualified as a control cell
-# across this bump — as are the two carried from 0.16.13, the streaming
-# `count(*) ... LIMIT k` aggregate and any `text_bm25` top-k. Pick a control
-# from elsewhere (scan/analysis-side ops don't touch kglite at all).
+# 0.16.16's one removal — `QueryDiagnostics::timed_out`, a field no engine
+# code ever wrote (constant `false`) — misses us: we never read query
+# diagnostics (swept src, bindings, wrapper, tests). Its additions are a
+# `FilterCondition` re-export for the fluent traversal API (we call none of
+# it) and a GraphML `label` key (we export no GraphML). The fixes worth
+# knowing exist are cancellation/deadline polling inside variable-length
+# expansion and the MATCH row loops — passive, and we set no query deadline
+# and no cancel flag, so they change nothing we observe; upstream measured
+# the added poll flat (worst benchmark cell +8.7% within its own run-to-run
+# noise). Upstream also collapsed its three publish workflows into one
+# release.yml — their infra, invisible to a cargo consumer.
+#
+# 0.16.17 is dependency-tree hygiene with no API or behavior change: geo is
+# pulled with default-features = false (we declare no direct geo dependency,
+# so nothing to re-activate), and the crate README/embedding guide gained the
+# debug-footprint recipe — which we adopted the same day via their inbox note
+# (see [profile.dev.package."*"] at the bottom of this file).
+#
+# Perf controls: neither 0.16.16 nor 0.16.17 describes an op as improved, so no new
+# disqualification. The 0.16.15 `.kgl`-load disqualification was scoped to
+# the 0.2.11 bump and has expired; loads did not move this release, making
+# them measurable-stable-across-the-last-dependency-move again once
+# re-measured. The 0.16.13 pair (streaming `count(*) ... LIMIT k`, any
+# `text_bm25` top-k) stays retired as a control. Scan/analysis-side ops
+# don't touch kglite at all and remain the safest anchors.
 #
 # The upstream contract these pins encode — what we consume, what we must never
 # depend on, and what we owe each upstream in notification — is recorded in the
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.15", default-features = false }
-kglite-mcp-server = { version = "0.16.15", default-features = false }
+kglite = { version = "0.16.17", default-features = false }
+kglite-mcp-server = { version = "0.16.17", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
@@ -172,3 +191,9 @@ version = "0.28"
 lto = "fat"
 codegen-units = 1
 opt-level = 3
+
+# Dependency debug info: line-tables-only (kglite's measured recipe, their
+# 2026-08-31 compile-footprint note — rlib −43%, debug tree ~−22%; our own
+# workspace crates keep full debug info; dependency backtraces keep file/line).
+[profile.dev.package."*"]
+debug = "line-tables-only"
