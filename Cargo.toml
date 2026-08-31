@@ -38,10 +38,11 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.17 (eight
-# releases across four sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
+# compile time, and consume it in a later plan), kglite 0.16.18 (nine
+# releases across five sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
 # in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
-# here; both goldens byte-identical and `capture_goldens` never run throughout.
+# in 0.2.12, 0.16.18 here; both goldens byte-identical and `capture_goldens`
+# never run throughout.
 # All were zero-source-change bumps except 0.16.14, whose change was import
 # paths only (see below).
 #
@@ -161,7 +162,17 @@ ureq = { version = "2", features = ["json"] }
 # debug-footprint recipe — which we adopted the same day via their inbox note
 # (see [profile.dev.package."*"] at the bottom of this file).
 #
-# Perf controls: neither 0.16.16 nor 0.16.17 describes an op as improved, so no new
+# 0.16.18 is MCP-server boot resilience, entirely inside the embedded server's
+# startup path: a peripheral that cannot start (a csv_http bind failure, a
+# manifest source_root that doesn't resolve) now degrades with a warning
+# instead of killing the boot, csv_http without an explicit `port:` binds an
+# OS-assigned port again, and the mcp-methods pin moves to 0.4.7 (schema-text
+# rewording only; no tool added, removed, or renamed). Engine, Cypher, storage
+# and the Rust API are untouched, so nothing we map or persist can move; both
+# goldens confirm. Our `sonagram-mcp-server` frontend inherits the fixes
+# passively — a misconfigured peripheral now costs a warning, not the boot.
+#
+# Perf controls: none of 0.16.16–0.16.18 describes an op as improved, so no new
 # disqualification. The 0.16.15 `.kgl`-load disqualification was scoped to
 # the 0.2.11 bump and has expired; loads did not move this release, making
 # them measurable-stable-across-the-last-dependency-move again once
@@ -174,8 +185,8 @@ ureq = { version = "2", features = ["json"] }
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.17", default-features = false }
-kglite-mcp-server = { version = "0.16.17", default-features = false }
+kglite = { version = "0.16.18", default-features = false }
+kglite-mcp-server = { version = "0.16.18", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
