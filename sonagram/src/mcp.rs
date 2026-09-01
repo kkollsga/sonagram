@@ -449,7 +449,15 @@ mod tests {
                 .any(|l| l == format!("env_file: ./{ENV_FILE_NAME}")),
             "manifest env_file must name {ENV_FILE_NAME}"
         );
-        assert!(MANIFEST_YAML.contains("graph_watch: true"));
+        // KGLite 0.16.19 retired `extensions.graph_watch` (the re-read it
+        // opted into is now unconditional); shipping the key would only cost
+        // every operator a boot warning.
+        assert!(
+            !MANIFEST_YAML
+                .lines()
+                .any(|l| l.trim_start().starts_with("graph_watch:")),
+            "graph_watch is retired upstream and must not ship in the template"
+        );
         for tool in [
             "ping",
             "cypher_query",

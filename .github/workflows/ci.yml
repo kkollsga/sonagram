@@ -44,7 +44,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: kkollsga/kglite
-          ref: v0.16.18
+          ref: v0.16.19
           path: _siblings/KGLite
       - name: Place siblings beside the workspace
         run: |

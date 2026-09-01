@@ -38,11 +38,11 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.18 (nine
-# releases across five sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
+# compile time, and consume it in a later plan), kglite 0.16.19 (ten
+# releases across six sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
 # in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
-# in 0.2.12, 0.16.18 here; both goldens byte-identical and `capture_goldens`
-# never run throughout.
+# in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 here; both goldens byte-identical and
+# `capture_goldens` never run throughout.
 # All were zero-source-change bumps except 0.16.14, whose change was import
 # paths only (see below).
 #
@@ -172,7 +172,28 @@ ureq = { version = "2", features = ["json"] }
 # goldens confirm. Our `sonagram-mcp-server` frontend inherits the fixes
 # passively — a misconfigured peripheral now costs a warning, not the boot.
 #
-# Perf controls: none of 0.16.16–0.16.18 describes an op as improved, so no new
+# 0.16.19 is writer-lease and freshness work in the MCP server and the `.kgl`
+# ownership layer. Three things it changes are inert for us by construction:
+# (1) a write-enabled server now takes the file's writer lease lazily (first
+# mutation, released at save) instead of at boot — our frontend refuses
+# `--writable`, so it never holds a lease and the new `--lease-label` flag
+# names nothing; (2) `save_graph` refuses a lost update and `WriteOwnership`
+# packages the read-modify-publish state machine — sonagram's build is
+# regenerate-and-publish (a deterministic graph rebuilt from cached records by
+# the sole producer, written through kglite's temp-file + atomic rename), not
+# read-modify-publish, so there is no lost update to guard and we deliberately
+# do not adopt it; (3) `LeaseHolder` gains a `label` field (their one
+# semver-flagged change) — we construct none. The one change that reaches us:
+# a `--graph` server now re-reads a regular `.kgl` **unconditionally** when the
+# file's identity moves (stat per tool call, single-flight, off-lock), which
+# retires `extensions.graph_watch` — our manifest's opt-in since 0.2.4 — into a
+# boot warning that arms nothing. The key is dropped from `music_mcp.yaml` and
+# the asset test now asserts its absence. Net for operators: the same
+# rescan-reaches-a-running-server behaviour, now guaranteed by the engine
+# rather than by a manifest line. Engine, Cypher, storage and the Rust API we
+# map through are untouched; both goldens confirm.
+#
+# Perf controls: none of 0.16.16–0.16.19 describes an op as improved, so no new
 # disqualification. The 0.16.15 `.kgl`-load disqualification was scoped to
 # the 0.2.11 bump and has expired; loads did not move this release, making
 # them measurable-stable-across-the-last-dependency-move again once
@@ -185,8 +206,8 @@ ureq = { version = "2", features = ["json"] }
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.18", default-features = false }
-kglite-mcp-server = { version = "0.16.18", default-features = false }
+kglite = { version = "0.16.19", default-features = false }
+kglite-mcp-server = { version = "0.16.19", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;

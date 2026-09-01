@@ -46,9 +46,10 @@ extensions:
     - music_playlist_show
     - music_playlist_update
     - music_playlist_delete
-  # Lazily re-read the served `.kgl` after a Sonagram build rewrites it, so a
-  # rescan reaches a running server without a client restart.
-  graph_watch: true
+  # A Sonagram build that rewrites the served `.kgl` reaches this server on its
+  # next tool call: KGLite 0.16.19 re-reads a changed `--graph` file
+  # unconditionally, so the former `graph_watch: true` opt-in is retired (it
+  # would only log a boot warning) and deliberately not set here.
 
 # Music-voiced descriptions for the two always-registered generic routes.
 # Kglite appends its own skill body after this text, so what follows is read as

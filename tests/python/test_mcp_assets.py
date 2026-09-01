@@ -471,9 +471,11 @@ with tempfile.TemporaryDirectory() as tmp:
         process.kill()
         process.wait()
 
-    # A rescan rewrites the served .kgl underneath a running server, so
-    # reload_graph has to reach the live query path — without the call the
-    # server keeps answering from the graph it booted on.
+    # A rescan rewrites the served .kgl underneath a running server. Two
+    # routes must reach the live query path: the explicit reload_graph tool
+    # (Desktop-callable), and — since KGLite 0.16.19 — the unconditional
+    # per-call re-read of a --graph file whose identity changed, which is what
+    # replaced our former `graph_watch: true` manifest opt-in.
     served_path = root / "served.kgl"
     shutil.copyfile(graph_path, served_path)
     shutil.copyfile(root / "music_mcp.yaml", root / "served_mcp.yaml")
@@ -499,6 +501,15 @@ with tempfile.TemporaryDirectory() as tmp:
         swapped_tracks = track_count(process, 34)
         assert swapped_tracks == 1, (
             f"reload did not reach the query path: {swapped_tracks}"
+        )
+        # Swap back to the 15-Track graph and ask WITHOUT reload_graph: the
+        # server must notice the file's identity moved and re-read it before
+        # answering. This is the engine guarantee the manifest now relies on
+        # instead of a graph_watch key.
+        shutil.copyfile(graph_path, served_path)
+        refreshed_tracks = track_count(process, 35)
+        assert refreshed_tracks == 15, (
+            f"automatic re-read did not reach the query path: {refreshed_tracks}"
         )
     finally:
         process.kill()
