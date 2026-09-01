@@ -4,6 +4,36 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.14] - 2026-09-01
+
+A maintenance release: the embedded graph engine moves to KGLite 0.16.19 (one
+engine release). How your library is analyzed and stored does not change, and
+nothing sonagram builds moves — this release makes a rescan reach a running
+agent server (`sonagram mcp`) by engine guarantee rather than by a manifest
+setting.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, the `.kgl` file format is unchanged,
+and both canonical digests are byte-identical to 0.2.13 — **stored `.kgl`
+graphs do not need rebuilding.**
+
+### Changed
+
+- Embedded KGLite: 0.16.18 → 0.16.19. The agent server now re-reads your
+  music graph automatically whenever a `sonagram build` rewrites it: the next
+  question an agent asks is answered from the new graph, with no
+  `reload_graph` call and no client restart. Previously this depended on a
+  `graph_watch: true` line in the installed server manifest; KGLite has
+  retired that setting (it now only logs a startup warning), so the manifest
+  sonagram installs no longer carries it. **Operators:** re-run
+  `sonagram mcp install --force` to refresh the installed manifest — the
+  stale line is harmless, but it prints a warning at every server start
+  until you do. Each rebuild costs the server one full re-read of the graph
+  on its next call, which is why the graph is best kept on local storage.
+- The agent server stays read-only, so KGLite's new writer-lease behaviour
+  (several write-enabled servers sharing one graph) does not apply to it.
+
 ## [0.2.13] - 2026-08-31
 
 A maintenance release: the embedded graph engine moves to KGLite 0.16.18 (one
