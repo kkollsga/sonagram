@@ -4,6 +4,40 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.15] - 2026-09-02
+
+A maintenance release: the embedded graph engine moves to KGLite 0.16.20 (one
+engine release). How your library is analyzed and stored does not change, and
+nothing sonagram builds moves — this release closes a way the agent server
+(`sonagram mcp`) could have been made writable behind its own read-only
+promise.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, the `.kgl` file format is unchanged,
+and both canonical digests are byte-identical to 0.2.14 — **stored `.kgl`
+graphs do not need rebuilding.**
+
+### Fixed
+
+- The agent server refuses to start when its installed manifest asks for write
+  access. Sonagram's music server is read-only by design and has always
+  rejected the `--writable` command-line flag; KGLite 0.16.20 adds a manifest
+  setting that says the same thing, and the installed manifest beside your
+  graph is yours to edit. Without this, that setting would have quietly opened
+  the graph to changes an agent made through `cypher_query` — changes the next
+  `sonagram build` throws away, since it rebuilds the graph from the scan
+  cache — while the manifest's own instructions still told the agent the
+  surface was read-only. Both spellings are now refused, and the error names
+  the file and the key to remove.
+
+### Changed
+
+- Embedded KGLite: 0.16.19 → 0.16.20. Nothing else in that release reaches
+  sonagram: the server's status line renames a counter and adds the graph's
+  last-saved time (sonagram reads neither), and the rest is write-path work on
+  a surface this server does not expose.
+
 ## [0.2.14] - 2026-09-01
 
 A maintenance release: the embedded graph engine moves to KGLite 0.16.19 (one
