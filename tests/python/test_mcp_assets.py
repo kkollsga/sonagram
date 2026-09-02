@@ -213,6 +213,30 @@ with tempfile.TemporaryDirectory() as tmp:
     )
     assert writable.returncode != 0
     assert "read-only" in writable.stderr
+    # KGLite 0.16.20 made `extensions.writable: true` the same statement the
+    # flag makes, and the installed manifest is operator-editable. Both halves
+    # of the opt-in must be refused by the shipped binary, not just the flag:
+    # `cypher_query` is on the allow-list, so an accepted mutation would land
+    # in a graph the next `sonagram build` regenerates and discards.
+    manifest_path = root / "music_mcp.yaml"
+    clean_manifest = manifest_path.read_text()
+    manifest_path.write_text(
+        clean_manifest.replace("extensions:\n", "extensions:\n  writable: true\n", 1)
+    )
+    manifest_optin = subprocess.run(
+        [server_path, "--graph", str(graph_path)],
+        env=env,
+        capture_output=True,
+        text=True,
+        # A regressed guard boots a real server here, and a stdio server with an
+        # inherited stdin waits forever: this assertion has to fail, not hang.
+        stdin=subprocess.DEVNULL,
+        timeout=60,
+    )
+    assert manifest_optin.returncode != 0
+    assert "read-only" in manifest_optin.stderr, manifest_optin.stderr
+    assert "music_mcp.yaml" in manifest_optin.stderr, manifest_optin.stderr
+    manifest_path.write_text(clean_manifest)
     selftest = subprocess.run(
         [server_path, "--graph", str(graph_path), "--selftest"],
         env=env,

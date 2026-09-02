@@ -449,6 +449,7 @@ fn failure(code: &str, message: &str) -> String {
 
 fn startup_graph_path(argv: &[OsString]) -> Result<PathBuf> {
     let mut graph = None;
+    let mut manifest = None;
     let mut index = 1;
     while index < argv.len() {
         let value = argv[index].to_string_lossy();
@@ -465,9 +466,21 @@ fn startup_graph_path(argv: &[OsString]) -> Result<PathBuf> {
                 ));
             }
             set_graph_arg(&mut graph, PathBuf::from(path))?;
+        } else if value == "--mcp-config" {
+            index += 1;
+            if let Some(path) = argv.get(index) {
+                manifest = Some(PathBuf::from(path));
+            }
+        } else if let Some(path) = value.strip_prefix("--mcp-config=") {
+            if !path.is_empty() {
+                manifest = Some(PathBuf::from(path));
+            }
         } else if value == "--writable" {
             return Err(SonagramError::Config(
-                "sonagram-mcp-server is intentionally read-only; --writable is unsupported".into(),
+                "sonagram-mcp-server is intentionally read-only; --writable is unsupported, \
+                 and so is `extensions.writable: true`, which says the same thing in the \
+                 manifest"
+                    .into(),
             ));
         }
         index += 1;
@@ -475,12 +488,72 @@ fn startup_graph_path(argv: &[OsString]) -> Result<PathBuf> {
     let graph = graph.ok_or_else(|| {
         SonagramError::Config("sonagram-mcp-server requires static --graph <music.kgl> mode".into())
     })?;
+    if let Some(manifest) = manifest.or_else(|| sibling_manifest(&graph)) {
+        reject_write_optin(&manifest)?;
+    }
     std::fs::canonicalize(&graph).map_err(|error| {
         SonagramError::Config(format!(
             "canonicalize MCP graph {}: {error}",
             graph.display()
         ))
     })
+}
+
+/// The manifest KGLite auto-detects for a `--graph` boot: the `<stem>_mcp.yaml`
+/// sibling of the graph file.
+///
+/// Mirrors `mcp_methods::server::find_sibling_manifest`, which is what
+/// `kglite-mcp-server` calls for this mode, and takes the graph argument
+/// **as written** for the same reason KGLite does — a relative `--graph`
+/// resolves its manifest relative to the same directory the server was started
+/// in. Sonagram never boots in workspace or source-root mode
+/// ([`startup_graph_path`] requires `--graph`), so those branches of KGLite's
+/// detection cannot apply here.
+fn sibling_manifest(graph: &Path) -> Option<PathBuf> {
+    let stem = graph.file_stem()?;
+    let candidate = graph
+        .parent()?
+        .join(format!("{}_mcp.yaml", stem.to_string_lossy()));
+    candidate.is_file().then_some(candidate)
+}
+
+/// Refuse a manifest that opts this server into writes.
+///
+/// KGLite 0.16.20 made `extensions.writable: true` the exact equivalent of
+/// `--writable`: either surface alone opens `cypher_query` to mutations. This
+/// binary refuses the flag because its music surface is read-only by
+/// construction, and the manifest beside the graph is operator-editable —
+/// `sonagram mcp install` never overwrites a differing one — so without this
+/// check the guarantee held on argv and silently lapsed in the manifest. What
+/// the lapse costs is not hypothetical: `cypher_query` is on the allow-list, so
+/// mutations would be accepted against a graph the next `sonagram build`
+/// regenerates from the record cache and discards them, under a manifest whose
+/// own `instructions:` tell the agent the surface is read-only.
+///
+/// Deliberately textual and fail-closed. Sonagram parses no YAML, so rather
+/// than model the shapes the key can take (nested, flow-style, quoted) this
+/// refuses *any* mention of it outside a comment. A false positive is loud and
+/// removable; a false negative would be a silently writable music server.
+fn reject_write_optin(manifest: &Path) -> Result<()> {
+    let Ok(contents) = std::fs::read_to_string(manifest) else {
+        // Unreadable or non-UTF-8: KGLite fails the boot on its own load with a
+        // better message than we could give. Nothing to add.
+        return Ok(());
+    };
+    let mentions_key = contents.lines().any(|line| {
+        let code = line.split('#').next().unwrap_or("");
+        code.contains("writable")
+    });
+    if mentions_key {
+        return Err(SonagramError::Config(format!(
+            "sonagram-mcp-server is intentionally read-only, but {} names `writable`; \
+             `extensions.writable: true` enables mutations exactly as `--writable` does. \
+             Remove the key — a mutation this server accepted would be discarded by the \
+             next `sonagram build`, which regenerates the graph.",
+            manifest.display()
+        )));
+    }
+    Ok(())
 }
 
 fn set_graph_arg(slot: &mut Option<PathBuf>, value: PathBuf) -> Result<()> {
@@ -548,6 +621,10 @@ mod tests {
         ];
         let error = startup_graph_path(&writable).unwrap_err().to_string();
         assert!(error.contains("read-only"));
+        // The flag refusal names the manifest spelling too: since KGLite
+        // 0.16.20 they are one opt-in, and an operator turned away from one
+        // must not go looking for the other.
+        assert!(error.contains("extensions.writable"), "{error}");
         let duplicate = vec![
             OsString::from("server"),
             OsString::from("--graph=a.kgl"),
@@ -638,5 +715,79 @@ mod tests {
             serde_json::from_str(&failure("invalid_request", "bad input")).unwrap();
         assert_eq!(error["ok"], false);
         assert_eq!(error["error"]["code"], "invalid_request");
+    }
+
+    /// `extensions.writable: true` in the sibling manifest is the same
+    /// statement `--writable` makes on argv (KGLite 0.16.20), and the manifest
+    /// beside an installed graph is operator-editable. A server that refused
+    /// the flag and honoured the key would serve a mutable music graph under
+    /// instructions promising a read-only one.
+    #[test]
+    fn a_manifest_write_optin_is_refused_like_the_flag() {
+        let root = temp_dir("manifest-writable");
+        let graph = root.join("music.kgl");
+        std::fs::write(&graph, b"fixture").unwrap();
+        let argv = vec![
+            OsString::from("sonagram-mcp-server"),
+            OsString::from("--graph"),
+            graph.clone().into_os_string(),
+        ];
+
+        // Control: the bundled manifest shape boots. Without this the test
+        // could pass because *every* manifest is refused.
+        let sibling = root.join("music_mcp.yaml");
+        std::fs::write(&sibling, crate::mcp::MANIFEST_YAML).unwrap();
+        assert!(startup_graph_path(&argv).is_ok());
+
+        std::fs::write(
+            &sibling,
+            "name: m\nextensions:\n  writable: true\n  tools_allow:\n    - cypher_query\n",
+        )
+        .unwrap();
+        let error = startup_graph_path(&argv).unwrap_err().to_string();
+        assert!(error.contains("read-only"), "{error}");
+        assert!(error.contains("music_mcp.yaml"), "{error}");
+
+        // A `#` comment that merely discusses the key is not the key.
+        std::fs::write(&sibling, "name: m\n# never set extensions.writable here\n").unwrap();
+        assert!(startup_graph_path(&argv).is_ok());
+
+        // An explicit --mcp-config wins over the sibling, exactly as it does
+        // for KGLite: the sibling here is clean and the named file is not.
+        let elsewhere = root.join("other.yaml");
+        std::fs::write(&elsewhere, "name: m\nextensions: {writable: true}\n").unwrap();
+        let with_config = vec![
+            OsString::from("sonagram-mcp-server"),
+            OsString::from("--graph"),
+            graph.clone().into_os_string(),
+            OsString::from("--mcp-config"),
+            elsewhere.clone().into_os_string(),
+        ];
+        assert!(startup_graph_path(&with_config).is_err());
+        let joined = vec![
+            OsString::from("sonagram-mcp-server"),
+            OsString::from("--graph"),
+            graph.into_os_string(),
+            OsString::from(format!("--mcp-config={}", elsewhere.display())),
+        ];
+        assert!(startup_graph_path(&joined).is_err());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// No manifest beside the graph is the bare-binary case, and it must boot.
+    #[test]
+    fn a_graph_without_a_sibling_manifest_still_boots() {
+        let root = temp_dir("no-manifest");
+        let graph = root.join("music.kgl");
+        std::fs::write(&graph, b"fixture").unwrap();
+        assert!(sibling_manifest(&graph).is_none());
+        let argv = vec![
+            OsString::from("sonagram-mcp-server"),
+            OsString::from("--graph"),
+            graph.into_os_string(),
+        ];
+        assert!(startup_graph_path(&argv).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

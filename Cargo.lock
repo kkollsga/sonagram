@@ -1532,7 +1532,7 @@ dependencies = [
 
 [[package]]
 name = "kglite"
-version = "0.16.19"
+version = "0.16.20"
 dependencies = [
  "bzip2",
  "chrono",
@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "kglite-mcp-server"
-version = "0.16.19"
+version = "0.16.20"
 dependencies = [
  "anyhow",
  "bytes",

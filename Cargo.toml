@@ -38,13 +38,13 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.19 (ten
-# releases across six sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
+# compile time, and consume it in a later plan), kglite 0.16.20 (eleven
+# releases across seven sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
 # in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
-# in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 here; both goldens byte-identical and
-# `capture_goldens` never run throughout.
-# All were zero-source-change bumps except 0.16.14, whose change was import
-# paths only (see below).
+# in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 in 0.2.14, 0.16.20 here; both goldens
+# byte-identical and `capture_goldens` never run throughout.
+# Only two reached our source: 0.16.14 (import paths) and 0.16.20 (the
+# manifest-side write opt-in our read-only guard now also covers — see below).
 #
 # 0.16.10 is retrieval machinery: `build_text_index` / `text_bm25()` /
 # `score_fuse()` add a BM25 lexical lane, and vector indexes gain the same
@@ -193,7 +193,29 @@ ureq = { version = "2", features = ["json"] }
 # rather than by a manifest line. Engine, Cypher, storage and the Rust API we
 # map through are untouched; both goldens confirm.
 #
-# Perf controls: none of 0.16.16–0.16.19 describes an op as improved, so no new
+# 0.16.20 is MCP-surface work, and it is the one bump since 0.16.14 that
+# changes our source. `extensions.writable: true` in a manifest is now the
+# same statement `--writable` makes on argv — either alone opens
+# `cypher_query` to mutations. `sonagram-mcp-server` guarantees a read-only
+# music surface and enforced it by refusing the flag, which after this release
+# covers only half the opt-in: an operator-edited `<stem>_mcp.yaml` (install
+# never overwrites a differing one) could enable writes through the allowed
+# `cypher_query`, mutations a later `sonagram build` would silently discard,
+# against a manifest whose own instructions say the surface is read-only. So
+# `startup_graph_path` now reads the manifest kglite will load — `--mcp-config`
+# when given, else the `<stem>_mcp.yaml` sibling of `--graph` — and refuses
+# boot when it declares the key. The bundled template does not carry it and an
+# asset test holds that. The rest is inert for us: the identity footer/header
+# rename (`generation` -> `load`, plus the new `file_saved`) is server output
+# we never parse; the `save_graph` clean-server no-op and its new `force`
+# argument sit behind `builtins.save_graph: false`; we persist through
+# `kglite::api::io::save_graph` directly, which is unchanged. `.lock-owner`
+# gains a `released=` line and `GraphFileIdentity` gains `modified()` — we
+# read neither, hold no lease, and the fastembed 5 -> 6 move is behind a
+# feature we do not enable. Engine, Cypher and storage are untouched; both
+# goldens confirm.
+#
+# Perf controls: none of 0.16.16–0.16.20 describes an op as improved, so no new
 # disqualification. The 0.16.15 `.kgl`-load disqualification was scoped to
 # the 0.2.11 bump and has expired; loads did not move this release, making
 # them measurable-stable-across-the-last-dependency-move again once
@@ -206,8 +228,8 @@ ureq = { version = "2", features = ["json"] }
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.19", default-features = false }
-kglite-mcp-server = { version = "0.16.19", default-features = false }
+kglite = { version = "0.16.20", default-features = false }
+kglite-mcp-server = { version = "0.16.20", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;

@@ -32,6 +32,13 @@ extensions:
   # The served surface is closed by default: every route not named here is
   # disabled, whatever kglite, mcp-methods or a future dependency registers.
   # Adding a tool to the music server is a deliberate edit of this list.
+  #
+  # This server is read-only by construction. Since KGLite 0.16.20,
+  # `extensions.writable: true` here says exactly what `--writable` says on the
+  # command line, and sonagram-mcp-server refuses both: a mutation it accepted
+  # would be discarded by the next `sonagram build`, which regenerates the
+  # graph from the record cache. Setting the key makes this server refuse to
+  # start rather than serve a mutable graph under the instructions above.
   tools_allow:
     - ping
     - cypher_query
