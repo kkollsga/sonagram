@@ -4,6 +4,48 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.16] - 2026-09-03
+
+A maintenance release: the embedded graph engine moves to KGLite 0.16.22 (two
+engine releases). How your library is analyzed and stored does not change, and
+nothing sonagram builds moves. The agent server's read-only guarantee is now
+enforced by the engine itself rather than by sonagram reading your manifest,
+which changes what happens when the manifest asks for write access — see below.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, the `.kgl` file format is unchanged,
+and both canonical digests are byte-identical to 0.2.15 — **stored `.kgl`
+graphs do not need rebuilding.**
+
+### Changed
+
+- The agent server (`sonagram mcp`) now pins itself read-only inside the graph
+  engine instead of inspecting the installed manifest for a write setting. The
+  guarantee is unchanged and stronger — no manifest setting and no command-line
+  flag can open the music graph to changes — but the *symptom* of asking for
+  one moves: since 0.2.15, `extensions.writable: true` in your
+  `<graph>_mcp.yaml` stopped the server from starting; it now starts normally,
+  logs one line naming the setting it overrode, and goes on refusing every
+  mutation. Nothing you could do to that file makes the server writable.
+  `--writable` on the command line is still refused outright, because that flag
+  is sonagram's own and an operator who passes it should get an error rather
+  than a log line.
+- Embedded KGLite: 0.16.20 → 0.16.22.
+
+### Fixed
+
+- A `vector_score(t, 'similarity', ...)` query that misspells the embedding
+  store now says so instead of returning zero rows. This is the escape hatch
+  `AGENT-GUIDE.md` documents for advanced similarity work; a typo used to look
+  exactly like "your library has nothing similar". Sonagram's own store name is
+  unchanged, so working queries are unaffected. (Inherited from KGLite
+  0.16.22.)
+- `sonagram mcp --selftest` now reports how many agent skills the session
+  serves, and sonagram's test gate asserts all five are there. A skills
+  directory keyed to the wrong name used to serve nothing while the selftest
+  still printed PASSED. (Inherited from KGLite 0.16.22.)
+
 ## [0.2.15] - 2026-09-02
 
 A maintenance release: the embedded graph engine moves to KGLite 0.16.20 (one
