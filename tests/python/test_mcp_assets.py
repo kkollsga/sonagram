@@ -105,6 +105,25 @@ def track_count(process, request_id):
     return int(rows.splitlines()[0])
 
 
+def scalar_count(process, request_id, predicate):
+    """`MATCH (t:Track) WHERE <predicate> RETURN count(t)`, as an int."""
+    text = tool_text(rpc(
+        process,
+        request_id,
+        "tools/call",
+        {
+            "name": "cypher_query",
+            "arguments": {
+                "query": f"MATCH (t:Track) WHERE {predicate} "
+                         "RETURN count(t) AS matched"
+            },
+        },
+    ))
+    header, rows = text.split("matched\n", 1)
+    assert header.startswith("1 row(s):"), text
+    return int(rows.splitlines()[0])
+
+
 repo = Path(__file__).resolve().parents[2]
 fixtures = repo / "sonagram" / "tests" / "fixtures" / "analyses"
 venv_binary = Path(sys.executable).with_name("sonagram")
@@ -214,28 +233,52 @@ with tempfile.TemporaryDirectory() as tmp:
     assert writable.returncode != 0
     assert "read-only" in writable.stderr
     # KGLite 0.16.20 made `extensions.writable: true` the same statement the
-    # flag makes, and the installed manifest is operator-editable. Both halves
-    # of the opt-in must be refused by the shipped binary, not just the flag:
-    # `cypher_query` is on the allow-list, so an accepted mutation would land
-    # in a graph the next `sonagram build` regenerates and discards.
+    # flag makes, and the installed manifest is operator-editable: `sonagram mcp
+    # install` never overwrites a differing one. `cypher_query` is on the
+    # allow-list, so an honoured key would accept mutations into a graph the
+    # next `sonagram build` regenerates and discards. Since KGLite 0.16.21 the
+    # binary pins the engine read-only (`ServerExtensions::read_only`) instead
+    # of grepping the manifest for the key, so the key is inert rather than
+    # fatal — the server boots and refuses the mutation. That refusal is the
+    # guarantee, and this is the only place it can be observed: the pin is not
+    # readable from our own process.
     manifest_path = root / "music_mcp.yaml"
     clean_manifest = manifest_path.read_text()
     manifest_path.write_text(
         clean_manifest.replace("extensions:\n", "extensions:\n  writable: true\n", 1)
     )
-    manifest_optin = subprocess.run(
-        [server_path, "--graph", str(graph_path)],
-        env=env,
-        capture_output=True,
-        text=True,
-        # A regressed guard boots a real server here, and a stdio server with an
-        # inherited stdin waits forever: this assertion has to fail, not hang.
-        stdin=subprocess.DEVNULL,
-        timeout=60,
-    )
-    assert manifest_optin.returncode != 0
-    assert "read-only" in manifest_optin.stderr, manifest_optin.stderr
-    assert "music_mcp.yaml" in manifest_optin.stderr, manifest_optin.stderr
+    optin_process, optin_tools, _ = inspect_server(graph_path, server_path, env=env)
+    try:
+        assert "cypher_query" in {tool["name"] for tool in optin_tools}
+        before = track_count(optin_process, 4)
+        assert before > 0, "control: the opt-in boot must serve the fixture graph"
+        mutation = rpc(
+            optin_process,
+            5,
+            "tools/call",
+            {
+                "name": "cypher_query",
+                "arguments": {
+                    "query": "MATCH (t:Track) SET t.title = 'mutated' RETURN count(t)"
+                },
+            },
+            allow_error=True,
+        )
+        rendered = json.dumps(mutation)
+        assert (
+            "read-only" in rendered
+            or "read only" in rendered
+            or "not enabled" in rendered
+            or "writable" in rendered
+        ), rendered
+        # ...and the graph is untouched. The refusal message alone is not the
+        # guarantee: a mutation refused with a confusing message but applied
+        # anyway passes the check above and fails these two.
+        assert track_count(optin_process, 6) == before
+        assert scalar_count(optin_process, 7, "t.title = 'mutated'") == 0
+    finally:
+        optin_process.kill()
+        optin_process.wait()
     manifest_path.write_text(clean_manifest)
     selftest = subprocess.run(
         [server_path, "--graph", str(graph_path), "--selftest"],
@@ -245,6 +288,31 @@ with tempfile.TemporaryDirectory() as tmp:
         text=True,
     )
     assert "Selftest PASSED" in selftest.stdout
+    # KGLite 0.16.22 reports how many skills the session actually serves.
+    # `skills: true` is the bundled marker, so the auto-detected project layer
+    # is `music_mcp.skills/` beside the YAML — the directory `sonagram mcp
+    # install` writes in the same operation as the manifest. Keyed to the wrong
+    # basename it resolves nothing and every earlier release still printed
+    # PASSED; the count is what makes that visible, so assert it rather than
+    # the word PASSED alone.
+    skills_line = next(
+        (line for line in selftest.stdout.splitlines() if "skills" in line), None
+    )
+    assert skills_line is not None, selftest.stdout
+    assert "0 served" not in skills_line, skills_line
+    for name in (
+        "music_library_profile",
+        "music_curation_policy",
+        "music_playlist_audit",
+        "music_playlist_store",
+    ):
+        assert name in skills_line, (name, skills_line)
+    # The fifth, `music_song_versions`, is gated on `graph_has_node_type:
+    # [Song]` and is correctly withheld here: Song nodes exist only for grouped
+    # versions and the fixture library has no duplicate recordings. Asserting
+    # its absence keeps the four above from being read as "all five" — and if a
+    # fixture ever gains a duplicate, this line names why it changed.
+    assert "music_song_versions" not in skills_line, skills_line
     # Boot the live server with credentials the music deployment must never
     # forward: mcp_server::run scrubs them, so kglite's github builtin stays off
     # and no github_* route can reach the surface asserted below.

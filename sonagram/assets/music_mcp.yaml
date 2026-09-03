@@ -35,10 +35,11 @@ extensions:
   #
   # This server is read-only by construction. Since KGLite 0.16.20,
   # `extensions.writable: true` here says exactly what `--writable` says on the
-  # command line, and sonagram-mcp-server refuses both: a mutation it accepted
-  # would be discarded by the next `sonagram build`, which regenerates the
-  # graph from the record cache. Setting the key makes this server refuse to
-  # start rather than serve a mutable graph under the instructions above.
+  # command line; sonagram-mcp-server refuses the flag outright and pins the
+  # engine read-only for the life of the process, so setting the key here is
+  # inert — the boot log names it and mutations stay refused. A mutation this
+  # server accepted would be discarded by the next `sonagram build`, which
+  # regenerates the graph from the record cache.
   tools_allow:
     - ping
     - cypher_query

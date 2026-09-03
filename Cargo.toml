@@ -38,13 +38,15 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.16.20 (eleven
-# releases across seven sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
+# compile time, and consume it in a later plan), kglite 0.16.22 (thirteen
+# releases across eight sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
 # in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
-# in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 in 0.2.14, 0.16.20 here; both goldens
-# byte-identical and `capture_goldens` never run throughout.
-# Only two reached our source: 0.16.14 (import paths) and 0.16.20 (the
-# manifest-side write opt-in our read-only guard now also covers — see below).
+# in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 in 0.2.14, 0.16.20 in 0.2.15,
+# 0.16.21 + 0.16.22 here; both goldens byte-identical and `capture_goldens`
+# never run throughout.
+# Only three reached our source: 0.16.14 (import paths), 0.16.20 (the
+# manifest-side write opt-in, guarded by a text grep) and 0.16.21, which
+# replaced that grep with an engine-side pin — see below.
 #
 # 0.16.10 is retrieval machinery: `build_text_index` / `text_bm25()` /
 # `score_fuse()` add a BM25 lexical lane, and vector indexes gain the same
@@ -215,7 +217,80 @@ ureq = { version = "2", features = ["json"] }
 # feature we do not enable. Engine, Cypher and storage are untouched; both
 # goldens confirm.
 #
-# Perf controls: none of 0.16.16–0.16.20 describes an op as improved, so no new
+# 0.16.21 is the release that ends our text-grep guard. `ServerExtensions`
+# gained `.read_only()`, which pins an embedded server read-only for the life
+# of the process: `--writable` and `extensions.writable: true` both stay inert
+# and boot logs one warning naming the spelling it overrode. `sonagram-mcp-server`
+# now calls it, and `reject_write_optin` + `sibling_manifest` are deleted with
+# it — the grep modelled kglite's own manifest resolution from outside, and a
+# convention we mirror is a convention that can drift into a false negative,
+# which here means a silently writable music server. The argv refusal stays:
+# `--writable` is our own surface and an operator who passes it deserves an
+# error, not a log line. The rest of the release is inert for us. A fired query
+# deadline now raises `CypherTimeoutError` instead of `CypherExecutionError` —
+# we set no deadline and catch neither class (swept src, bindings, wrapper,
+# tests, agent docs). `KgError::CypherTimeout` gains a `message` field and real
+# `elapsed_ms`/`limit_ms`, a break only for a caller that constructs or
+# destructures the variant exhaustively; we never name `KgError`.
+# `save_graph(force = true)` now requires the write opt-in — that tool sits
+# behind `builtins.save_graph: false` and we persist through
+# `kglite::api::io::save_graph` directly. `from_records()` now refuses an
+# unknown spec key: our one call (the generic-graph control in
+# `tests/python/test_mcp_assets.py`) uses `nodes` / `type` / `id_field` /
+# `title_field` / `records`, all accepted. `TypeCapabilities` becoming public
+# is additive and we draw no schema view of our own.
+#
+# 0.16.22 is blueprint and retrieval work, and it is the first bump in this
+# stretch whose headline fix is a data-loss bug we are structurally outside of:
+# `from_blueprint()` was folding a streamed junction CSV's later chunks onto
+# the first chunk's edges past 100k rows, dropping parallel edges and
+# overwriting their properties. We build every graph through
+# `kglite::api::mutation` from cached `TrackAnalysis` records — there is no
+# blueprint, no CSV and no `from_blueprint` call anywhere in this repo — so no
+# graph sonagram has ever written could carry that loss; both goldens confirm
+# the digests did not move. The same containment covers the rest of the
+# blueprint surface: the spec structs (`Blueprint`, `Settings`, `NodeSpec`,
+# `FkEdge`, `JunctionEdge`) gained public fields so an exhaustive struct
+# literal no longer compiles, `JunctionEdge::target` became `Vec<String>`, and
+# `"list"` / `"array"` columns, `labels` on a node spec, FK-edge properties,
+# union-target junction edges and unknown-key warnings all arrive with them. We
+# name none of those types (grep + a clean build), and our list-shaped facts —
+# genres, styles, artists — are modelled as nodes and edges, not as a joined
+# column a `"list"` type would unpack, so the new column type retires nothing
+# here.
+#
+# Two of its fixes are real improvements we inherit passively. Ranked retrieval
+# on a property with no index answered zero rows instead of raising: the fused
+# `WHERE text_bm25(...) > 0 ... ORDER BY ... LIMIT k` shape dropped every row
+# because the predicate could not evaluate, and `vector_score()` on an unknown
+# embedding store shared the defect. We build no text index and issue no
+# `text_bm25`, but we DO register a `similarity` embedding store per Track
+# (`graph::EMBEDDING_PROPERTY`) and `AGENT-GUIDE.md` teaches `vector_score(t,
+# 'similarity', [...])` as an escape hatch — that store exists, so the taught
+# query is unaffected, while a mistyped store name now says so instead of
+# returning an empty result an agent would read as "no similar tracks".
+# Relationship alternation `[:A|B]` inside `EXISTS { }` / `count { }` /
+# `size(...)` now parses; we teach no subquery pattern and carry no workaround
+# for it, so it is capability we gain rather than debt we retire.
+#
+# The MCP fix is the one worth an operator's attention: a declared `skills:`
+# pack whose path does not exist now refuses the boot instead of booting with
+# *every* skill silently gone, bundled methodology included, while `--selftest`
+# printed PASSED. `music_mcp.yaml` declares `skills: true`, which kglite treats
+# as "serve whatever the sibling `<stem>_mcp.skills` directory holds" — zero is
+# reported, not failed — and `sonagram mcp install` writes that directory with
+# five files in the same operation that writes the manifest. `--selftest` now
+# prints the skill count, so an install that resolved nothing is visible;
+# `tests/python/test_mcp_assets.py` asserts the five files and the selftest
+# line. The remaining items are ontology and `from_records` work behind
+# declarations we never make: `ontology_audit()` gains a `property` column,
+# `edge_property_violation()` gains `properties`, and `from_records` keeps a
+# node spec's `labels` when its `records` list is empty and honours a spec's
+# own `on_missing_endpoint` instead of overwriting it with the argument
+# default. We issue no `CALL`, declare no ontology, and our one `from_records`
+# spec sets neither key.
+#
+# Perf controls: none of 0.16.16–0.16.22 describes an op as improved, so no new
 # disqualification. The 0.16.15 `.kgl`-load disqualification was scoped to
 # the 0.2.11 bump and has expired; loads did not move this release, making
 # them measurable-stable-across-the-last-dependency-move again once
@@ -228,8 +303,8 @@ ureq = { version = "2", features = ["json"] }
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.16.20", default-features = false }
-kglite-mcp-server = { version = "0.16.20", default-features = false }
+kglite = { version = "0.16.22", default-features = false }
+kglite-mcp-server = { version = "0.16.22", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
