@@ -288,7 +288,7 @@ with tempfile.TemporaryDirectory() as tmp:
         text=True,
     )
     assert "Selftest PASSED" in selftest.stdout
-    # KGLite 0.16.22 reports how many skills the session actually serves.
+    # KGLite 0.17.1 reports how many skills the session actually serves.
     # `skills: true` is the bundled marker, so the auto-detected project layer
     # is `music_mcp.skills/` beside the YAML — the directory `sonagram mcp
     # install` writes in the same operation as the manifest. Keyed to the wrong
