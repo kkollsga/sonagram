@@ -391,6 +391,51 @@ with tempfile.TemporaryDirectory() as tmp:
         assert overview_description.startswith(overview_prefix), (
             overview_description[:200]
         )
+        # AGENT-GUIDE.md enumerates `cypher_query`'s arguments for the agent
+        # reading it, and kglite owns that schema. Nothing checked the two
+        # against each other, and both drifted: the guide said the tool takes
+        # "a single `query` string and nothing else" while the server had
+        # accepted `params` since at least 0.16.22, and 0.17.1 then added
+        # `timeout_ms`. An agent that believes the guide inlines every literal
+        # by hand and never sets a deadline. Pin the served property set and
+        # require the guide to name each member, so the next argument kglite
+        # adds turns this red instead of quietly falsifying the manual.
+        cypher_args = set(
+            by_name["cypher_query"].get("inputSchema", {}).get("properties", {})
+        )
+        assert cypher_args == {"query", "params", "timeout_ms"}, (
+            f"cypher_query's argument set moved: {sorted(cypher_args)}. "
+            "Update AGENT-GUIDE.md and docs/agent-guide.md in the same change."
+        )
+        guide = (repo / "AGENT-GUIDE.md").read_text()
+        for argument in sorted(cypher_args):
+            assert f"`{argument}`" in guide, (
+                f"AGENT-GUIDE.md never names cypher_query's `{argument}` argument"
+            )
+        # The schema advertising `params` is not the same claim as binding
+        # working through *our* manifest's tools_allow surface, and the guide
+        # now tells agents to use it. Bind one and prove the value reached the
+        # query: a server that ignored `params` would answer the unfiltered
+        # count here, and one that refused the key would error.
+        bound = tool_text(rpc(
+            process,
+            30,
+            "tools/call",
+            {
+                "name": "cypher_query",
+                "arguments": {
+                    "query": "MATCH (t:Track) WHERE t.energy > $floor "
+                             "RETURN count(t) AS matched",
+                    "params": {"floor": 2.0},
+                },
+            },
+        ))
+        header, rows = bound.split("matched\n", 1)
+        assert header.startswith("1 row(s):"), bound
+        # `energy` is a 0..1 axis, so a floor of 2.0 matches nothing. The value
+        # had to arrive for that to be the answer.
+        assert int(rows.splitlines()[0]) == 0, bound
+
         prompt_names = {prompt["name"] for prompt in prompts}
         assert {
             "music_library_profile",

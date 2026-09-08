@@ -15,9 +15,10 @@ An agent works the graph through three MCP tools:
 - **`graph_overview`** — the node/edge inventory with live counts and sample ids.
   Call it first on an unfamiliar graph to see the library's shape.
 - **`cypher_query`** — run one openCypher query, get up to ~15 rows inline. It
-  takes only a `query` string: there is **no parameter binding over MCP**, so
-  inline every literal (`{title:'Marry You'}`, `[0.1, ...]`). A `$param`
-  reference errors.
+  takes a `query` string, an optional `params` object binding the query's
+  `$name` placeholders, and an optional `timeout_ms` (the server's default
+  deadline is 180 seconds). Bind values through `params` rather than inlining
+  them; a `$name` the query uses and `params` omits is an error.
 - **`music_library_profile`** — report eligible counts, axis coverage, and
   distributions before translating an unusual request. Read coverage and
   p25/median/p75 before choosing any numeric threshold.

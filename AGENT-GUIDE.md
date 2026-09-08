@@ -5,9 +5,12 @@ library mapped into [kglite](https://github.com/kkollsga/kglite) and served by
 `sonagram-mcp-server`, a thin KGLite 0.17.1 frontend. Generic exploration uses:
 
 - **`cypher_query`** — run one openCypher query, get up to ~15 rows inline.
-  It takes a single `query` string and **nothing else**: there is no parameter
-  binding over MCP, so **inline every literal** (`{title:'Marry You'}`,
-  `[0.1, ...]`) — a `$param` reference errors with `Missing parameter`.
+  It takes a `query` string, an optional `params` object binding the query's
+  `$name` placeholders, and an optional `timeout_ms`. Prefer `params` over
+  inlining a value: `MATCH (t:Track {title: $t})` with
+  `params: {"t": "Marry You"}` binds as data, so quote-heavy titles need no
+  escaping. A `$name` used in the query but missing from `params` is an error,
+  never an empty result.
 - **`graph_overview`** — the node/edge inventory with live counts and sample
   ids. Call it first on an unfamiliar graph to see the library's shape.
 - **`music_library_profile`** — fast eligible counts, per-axis coverage, and
@@ -383,9 +386,15 @@ for `curate_playlist`.
   where `energy` is null (a null comparison is not true). Filter explicitly with
   `t.energy IS NOT NULL` when a null-able property must be present, and
   remember every "Null? yes" property above can drop rows this way.
-- **No query parameters over MCP**: `cypher_query` takes only the query string.
-  Inline all literals; `$seed`-style placeholders fail. (Quote-heavy titles like
-  `O'Neal`: use double-quoted Cypher strings to avoid shell/Cypher `'` fights.)
+- **Bind values with `params`, don't inline them**: `cypher_query` takes a
+  `params` object for the query's `$name` placeholders, and a value bound there
+  can never be read as Cypher syntax — which is what makes a title like
+  `O'Neal` a non-event instead of a quoting fight. (Inlining still works; the
+  `'` fights are then yours, and double-quoted Cypher strings are the escape.)
+  A `$name` the query uses and `params` omits is an error, not an empty result.
+  Its third argument is `timeout_ms`, which bounds a single call under the
+  server's 180-second default; a query that hits the deadline is cancelled
+  rather than left holding the graph's read lock.
 
 ## Field notes (from live agent validation, 456-track library, 2026-07-17)
 - **Similarity is "same vibe", not "same style".** The embedding ranks on
