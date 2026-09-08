@@ -4,6 +4,79 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.17] - 2026-09-08
+
+A maintenance release: the embedded graph engine moves to KGLite 0.17.1 (four
+engine releases). How your library is analyzed and stored does not change, and
+nothing sonagram builds moves. Two Cypher bugs that could return wrong answers
+are fixed upstream, the agent server now bounds a runaway query instead of
+losing the server to it, and the agent guide's account of `cypher_query`'s
+arguments — wrong in two ways — is corrected. **One measured cost:** every
+command that opens a `.kgl` takes about 48 ms longer; see **Performance**.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, the `.kgl` file format is unchanged,
+and both canonical digests are byte-identical to 0.2.16 — **stored `.kgl`
+graphs do not need rebuilding.** A 32,890-track graph built by this release is
+byte-for-byte identical to one built by 0.2.16, apart from the engine version
+stamped in its header.
+
+### Fixed
+
+- `ORDER BY` no longer silently ignores a sort key an earlier `WITH` produced.
+  `MATCH (t:Track) WITH t, t.energy AS e RETURN t.title ORDER BY e DESC`
+  returned the graph's own order rather than the sorted one, on every plan —
+  the `LIMIT` spelling of the same query was already right, which is why the
+  two disagreed. Affects `sonagram playlist --cypher` and every agent query.
+  (Inherited from KGLite 0.17.1.)
+- `RETURN *` with `ORDER BY … LIMIT` no longer answers a `*` column of `1`s
+  instead of the rows. (Inherited from KGLite 0.17.1.)
+- A runaway query can no longer take the agent server down with it. Every route
+  that reaches the engine — `cypher_query`, manifest query templates, recipe
+  queries — now runs under a 180-second default deadline, and `cypher_query`
+  takes a `timeout_ms` to change it for one call. Before, one bad query held
+  the graph's read lock with no cancel channel. `sonagram playlist --cypher` on
+  the command line is deliberately unchanged and stays unbounded. (Inherited
+  from KGLite 0.17.1.)
+- **`AGENT-GUIDE.md` was telling agents a call shape the server does not have.**
+  It named one `cypher_query` argument where the server serves three, asserted
+  there is "no parameter binding over MCP", and instructed agents to inline
+  every literal. `cypher_query` does take a `params` object binding the query's
+  `$name` placeholders — it has since before 0.2.16 — and binding is now the
+  advice, because a bound value can never be read as Cypher syntax, which also
+  makes a title like `O'Neal` a non-event rather than a quoting fight. The
+  third argument, `timeout_ms`, is new in this release. The test gate now pins
+  the served argument set against the guide, so the next one cannot drift in
+  unnoticed.
+
+### Changed
+
+- `cypher_query` renders lists, maps, nodes, relationships and paths as
+  ordinary JSON instead of the engine's tagged-enum form, so an agent reading a
+  result sees the values rather than their type wrappers. (Inherited from
+  KGLite 0.17.0.)
+- Embedded KGLite: 0.16.22 → 0.17.1.
+
+### Performance
+
+- **Every command that opens a `.kgl` costs about 48 ms more.** Measured on a
+  23 MB / 32,891-node graph against 0.2.16, release builds, eleven interleaved
+  rounds, with an unchanged-path control flat at -0.7%: `profile` 205 → 255 ms
+  (+24.1%), a scan-filter-project query 121 → 170 ms (+40.7%), an `ORDER BY`
+  over 5,000 nodes 166 → 213 ms (+28.6%). Every output was byte-identical to
+  0.2.16's. The cost is one fixed step in the graph load, not per query — the
+  `ORDER BY` cell does far more query work than the scan cell and moves by the
+  same absolute amount — and it buys a correctness fix: KGLite 0.17.0 now
+  normalizes stored endpoint references when it loads a complete snapshot, so a
+  property that captured a node can no longer follow a later rename or
+  deletion. Upstream measured 12–15% on small fixtures and said plainly that
+  those establish no large-graph scaling; this is what it costs at library
+  scale.
+- **Building and rescanning are unaffected.** A full 32,890-track build is flat
+  (-1.0% wall, -0.4% CPU, mean of three) and a no-op rescan of an unchanged
+  9,463-file library is flat (-2.1%), still reusing every cached record.
+
 ## [0.2.16] - 2026-09-03
 
 A maintenance release: the embedded graph engine moves to KGLite 0.16.22 (two
