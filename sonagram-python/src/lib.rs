@@ -227,7 +227,7 @@ fn load_via_kglite(py: Python<'_>, path: &Path) -> PyResult<Py<PyAny>> {
     let kglite = py.import("kglite").map_err(|e| {
         PyRuntimeError::new_err(format!(
             "sonagram.build()/scan_and_build() return a kglite.KnowledgeGraph, but \
-             importing `kglite` failed ({e}). Install it: `pip install kglite>=0.17.3`."
+             importing `kglite` failed ({e}). Install it: `pip install 'kglite>=0.17.3'`."
         ))
     })?;
     kglite

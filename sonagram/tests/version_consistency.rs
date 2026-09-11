@@ -240,7 +240,7 @@ fn kglite_version_is_stated_consistently_everywhere() {
     let hints = versions_after(&lib_rs, "kglite>=");
     if hints.is_empty() {
         failures.push(
-            "sonagram-python/src/lib.rs: no `pip install kglite>=<version>` hint found. \
+            "sonagram-python/src/lib.rs: no `pip install 'kglite>=<version>'` hint found. \
              The kglite-import failure path must tell the user which version to install."
                 .to_string(),
         );
@@ -249,7 +249,7 @@ fn kglite_version_is_stated_consistently_everywhere() {
         if v != &expected {
             failures.push(format!(
                 "sonagram-python/src/lib.rs: error string tells users `pip install \
-                 kglite>={v}`, but the pin (and pyproject floor) is {expected}. \
+                 'kglite>={v}'`, but the pin (and pyproject floor) is {expected}. \
                  Following that hint installs a version our own metadata forbids."
             ));
         }
@@ -338,7 +338,7 @@ fn version_extraction_does_not_subsume_longer_versions() {
         vec!["0.15.1"]
     );
     assert_eq!(
-        versions_after("`pip install kglite>=0.15.1`.", "kglite>="),
+        versions_after("`pip install 'kglite>=0.15.1'`.", "kglite>="),
         vec!["0.15.1"]
     );
     assert_eq!(

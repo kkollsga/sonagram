@@ -3,7 +3,7 @@
 Also gates the kglite install hint that is *compiled into* the extension.
 ``sonagram.build()`` hands the graph off to the separately installed ``kglite``
 wheel; when that import fails, the extension tells the user
-``pip install kglite>=<floor>``. That literal lives in
+``pip install 'kglite>=<floor>'``. That literal lives in
 ``sonagram-python/src/lib.rs`` and had drifted a whole minor version below
 ``pyproject.toml``'s own floor, so following it installed a version our metadata
 forbids. ``sonagram/tests/version_consistency.rs`` gates the Rust *source*; this
@@ -39,14 +39,14 @@ floor = declared[0]
 # accepted where `>=0.15.1` is expected.
 extension = Path(_sonagram.__file__)
 blob = extension.read_bytes()
-assert b"pip install kglite>=" in blob, (
-    f"no `pip install kglite>=` hint found in {extension}; the kglite-import "
+assert b"pip install 'kglite>=" in blob, (
+    f"no `pip install 'kglite>=` hint found in {extension}; the kglite-import "
     "failure path must tell the user which version to install"
 )
-found = re.findall(rb"pip install kglite>=([0-9][0-9.]*)", blob)
+found = re.findall(rb"pip install 'kglite>=([0-9][0-9.]*)'", blob)
 hinted = sorted({v.decode().rstrip(".") for v in found})
 assert hinted == [floor], (
-    f"{extension} tells users `pip install kglite>={', '.join(hinted)}` but pyproject.toml "
+    f"{extension} tells users `pip install 'kglite>={', '.join(hinted)}'` but pyproject.toml "
     f"declares kglite>={floor}. Rebuild (maturin develop) if the source is already fixed."
 )
 
