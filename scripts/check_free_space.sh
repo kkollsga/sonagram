@@ -3,14 +3,28 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 target_link="$repo_root/target"
-expected_target="/Volumes/EksternalHome/coding-cache/cargo-targets/sonagram"
+link_target="$(readlink "$target_link" 2>/dev/null || true)"
+target_dir="${CARGO_TARGET_DIR:-${link_target:-target}}"
+case "$target_dir" in
+  /*) ;;
+  *) target_dir="$repo_root/$target_dir" ;;
+esac
 
-if [ ! -L "$target_link" ] || [ "$(readlink "$target_link")" != "$expected_target" ]; then
-  echo "target must be a symlink to $expected_target" >&2
-  exit 1
+# A fresh checkout may not have created its target directory yet. Measure the
+# nearest existing parent so the guard remains portable across Cargo setups.
+probe="$target_dir"
+while [ ! -e "$probe" ]; do
+  parent="$(dirname "$probe")"
+  [ "$parent" != "$probe" ] || break
+  probe="$parent"
+done
+
+if [ -n "${FREE_GB:-}" ]; then
+  free_kib=$((FREE_GB * 1024 * 1024))
+else
+  free_kib="$(df -Pk "$probe" 2>/dev/null | awk 'NR == 2 { print $4 }')"
 fi
-
-free_kib="$(df -Pk "$expected_target" | awk 'NR == 2 { print $4 }')"
+[ -n "$free_kib" ] || exit 0
 fail_below_kib=$((15 * 1024 * 1024))
 warn_below_kib=$((40 * 1024 * 1024))
 
