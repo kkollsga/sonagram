@@ -2,7 +2,8 @@
 //!
 //! Scanning is CPU-heavy (sonara DSP saturates the cores) while enrichment is
 //! network-heavy (rate-limited Last.fm calls, ~5 req/s) — run together they
-//! cost each other nothing. The enrich side loops [`enrich_library_with`]
+//! cost each other nothing. The enrich side loops
+//! [`enrich_library_with`](crate::enrich::enrich_library_with)
 //! passes while the scan streams records to disk (P20 incremental writes):
 //! each pass picks up newly analyzed tracks — the Last.fm store is already
 //! incremental and resumable — and one final pass after the scan completes

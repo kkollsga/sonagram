@@ -11,7 +11,7 @@
 //!    on disk **and** its record still exists **and** is *fresh* (see below) ⇒
 //!    trust the cached hash, do nothing.
 //! 2. **Hash reuse** — stats changed, but the ID3-stripped
-//!    [`audio_content_hash`](hash::audio_content_hash) already has a *fresh*
+//!    [`audio_content_hash`] already has a *fresh*
 //!    record ⇒ the file was retagged or moved. Reuse the analysis; refresh
 //!    `SourceInfo` (path/size) and the index. Still zero analyses.
 //! 3. **Analyze** — an unseen hash, **or a stale record** ⇒ hand one canonical
@@ -195,7 +195,7 @@ pub fn stage_name(stage: ScanStage) -> &'static str {
 
 /// The on-disk scan progress snapshot (P20): `<lib>/.sonagram/scan_progress.json`.
 ///
-/// Written atomically (throttled to [`PROGRESS_INTERVAL`]) by
+/// Written atomically (throttled to `PROGRESS_INTERVAL`) by
 /// [`scan_library_with`] itself, so every entry point — CLI, Python, tests —
 /// produces the same observable progress. Read it with [`load_scan_progress`]
 /// (or `sonagram progress` / `sonagram status`). `updated_unix` going stale
@@ -769,7 +769,7 @@ pub fn probe_freshness(library_root: &Path) -> Result<FreshnessReport> {
 ///
 /// **Persistence discipline:** every new record is saved the moment its
 /// analysis completes, and the index is flushed (merged over the previous
-/// index) every [`INDEX_FLUSH_INTERVAL`] — so a killed cold scan resumes from
+/// index) every `INDEX_FLUSH_INTERVAL` — so a killed cold scan resumes from
 /// roughly where it stopped instead of losing the whole batch. Live progress is
 /// mirrored to `scan_progress.json` throughout (see [`ScanProgressSnapshot`]).
 pub fn scan_library_with(

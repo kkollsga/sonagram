@@ -38,11 +38,12 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.17.1 (seventeen
-# releases across nine sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
+# compile time, and consume it in a later plan), kglite 0.17.3 (nineteen
+# releases across ten sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
 # in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
 # in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 in 0.2.14, 0.16.20 in 0.2.15,
-# 0.16.21 + 0.16.22 in 0.2.16, 0.16.23 + 0.16.24 + 0.17.0 + 0.17.1 here; both
+# 0.16.21 + 0.16.22 in 0.2.16, 0.16.23 + 0.16.24 + 0.17.0 + 0.17.1 in 0.2.17,
+# 0.17.2 + 0.17.3 here; both
 # goldens byte-identical and `capture_goldens` never run throughout.
 # Only three have ever reached our source: 0.16.14 (import paths), 0.16.20 (the
 # manifest-side write opt-in, guarded by a text grep) and 0.16.21, which
@@ -383,26 +384,40 @@ ureq = { version = "2", features = ["json"] }
 # instead of eight positional arguments is its one API break, and we call it
 # nowhere.
 #
-# Perf controls: `.kgl` load is DISQUALIFIED as a control for this bump, and
-# it is the one cell with a predicted regression. 0.17.0's complete-snapshot
-# normalization visits every nonempty edge-property blob on load because the
-# unchanged disk format carries no marker proving one is reference-free;
-# upstream measured ordinary portable loads 12.2–15.2% slower and a broader
-# disk-directory reopen 283.8–305.8% slower. That is the premise-expiry case
-# CLAUDE.md names — a control is disqualified when the thing that moves is a
-# dependency — so loads become a measured cell here, not an anchor. The
-# 0.16.13 pair (streaming `count(*) ... LIMIT k`, any `text_bm25` top-k) stays
-# retired. The control remains `status <root>` in its explicit-root form,
-# which routes through the kglite-free `scan` module: scan/analysis-side ops
-# don't touch kglite at all and remain the safest anchors.
+# 0.17.2 adds Cypher 25 spellings (`FILTER`, `OFFSET`, `NODETACH DELETE`,
+# `FINISH`, and strict `INSERT`) plus scoped, set-composed read subqueries.
+# Its Rust break is confined to `PassCtx`, which we never name. The execution
+# changes do reach `sonagram playlist --cypher` and agent queries: ordinary
+# procedures and read subqueries now run once per incoming row, empty streams
+# stay empty, modern `CALL (x) { ... }` imports retain their scope, and empty
+# subqueries keep their declared result schema. We carry no parser or executor
+# workaround, so this is additive syntax plus repaired query answers.
+#
+# 0.17.3 is query planning and correctness. Stored relationship counts now
+# serve more typed and undirected `count(*)` / `COUNT { ... }` shapes, and
+# retrieval-score aliases projected through `WITH` retain the top-k index path.
+# Correlated and fused patterns now honor labels, inline properties, local
+# relationship names, and null optional relationship bindings instead of
+# accepting any incident edge. These changes touch only queries over an
+# already-built graph: our mapping, node identity, serialization, and graph
+# schema stay unchanged.
+#
+# Perf controls: 0.17.0's complete-snapshot normalization made `.kgl` load a
+# measured regression cell for the 0.2.17 release, which recorded the ~48 ms
+# fixed cost. That is historical evidence, not a prediction for this bump:
+# 0.17.2 and 0.17.3 do not change loading or graph construction. Their faster
+# count, existence, and retrieval-score plans are query improvements rather
+# than a path sonagram executes while mapping a library, so no build/rescan
+# performance claim moves here. The stable control remains `status <root>` in
+# its explicit-root form, which routes through the kglite-free `scan` module.
 #
 # The upstream contract these pins encode — what we consume, what we must never
 # depend on, and what we owe each upstream in notification — is recorded in the
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.17.1", default-features = false }
-kglite-mcp-server = { version = "0.17.1", default-features = false }
+kglite = { version = "0.17.3", default-features = false }
+kglite-mcp-server = { version = "0.17.3", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;

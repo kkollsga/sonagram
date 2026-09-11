@@ -117,7 +117,7 @@ fn personalize() -> (String, Option<String>, Option<String>) {
 /// missing directories. Refuses to overwrite an existing file unless `force`.
 ///
 /// `skills_root` defaults to [`default_skills_root`] (`~/.claude/skills`). The
-/// written file is personalized from the user's config (see [`personalize`]).
+/// written file is personalized from the user's config (see `personalize`).
 pub fn install(skills_root: Option<&Path>, force: bool) -> Result<InstallReport> {
     let root = match skills_root {
         Some(p) => p.to_path_buf(),

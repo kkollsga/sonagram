@@ -166,7 +166,7 @@ pub struct AnalysisDto {
     pub duration_sec: f32,
     pub bpm: f32,
     pub bpm_raw: f32,
-    /// How firmly the tempo estimate is anchored in the audio ([0,1]) — sonara's
+    /// How firmly the tempo estimate is anchored in the audio (0–1) — sonara's
     /// always-present `bpm_confidence`. Low (<0.45) flags ambient/rubato material
     /// where BPM is unreliable. Additive since sonara 0.2.4 — `#[serde(default)]`
     /// so pre-0.2.4 cached records (which lack the field) still deserialize (to

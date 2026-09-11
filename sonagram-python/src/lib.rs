@@ -227,7 +227,7 @@ fn load_via_kglite(py: Python<'_>, path: &Path) -> PyResult<Py<PyAny>> {
     let kglite = py.import("kglite").map_err(|e| {
         PyRuntimeError::new_err(format!(
             "sonagram.build()/scan_and_build() return a kglite.KnowledgeGraph, but \
-             importing `kglite` failed ({e}). Install it: `pip install kglite>=0.17.1`."
+             importing `kglite` failed ({e}). Install it: `pip install kglite>=0.17.3`."
         ))
     })?;
     kglite
@@ -252,8 +252,7 @@ fn load_via_kglite(py: Python<'_>, path: &Path) -> PyResult<Py<PyAny>> {
 
 /// The actionable message for a failed `kglite.load()` of a graph *we* just
 /// wrote: keeps the original error text, names the installed wheel version, and
-/// gives the one command that fixes the common cause (a stale pip `kglite`
-/// whose container format predates ours).
+/// gives the command that restores the supported runtime dependency floor.
 ///
 /// Pure string formatting so it is unit-testable without a Python interpreter.
 fn kglite_load_failure_message(installed_version: Option<&str>, original_error: &str) -> String {
@@ -263,9 +262,8 @@ fn kglite_load_failure_message(installed_version: Option<&str>, original_error: 
     };
     format!(
         "sonagram built the graph, but handing it to `kglite` failed: {original_error}. \
-         sonagram writes `.kgl` files that need kglite>=0.17.1, and {installed} — \
-         an older wheel cannot read that container format. \
-         Upgrade it: `pip install -U 'kglite>=0.17.1'`."
+         sonagram requires kglite>=0.17.3, and {installed}. \
+         Upgrade it: `pip install -U 'kglite>=0.17.3'`."
     )
 }
 
@@ -757,7 +755,7 @@ mod tests {
             "installed wheel version missing: {msg}"
         );
         assert!(
-            msg.contains("pip install -U 'kglite>=0.17.1'"),
+            msg.contains("pip install -U 'kglite>=0.17.3'"),
             "upgrade command missing: {msg}"
         );
     }
@@ -767,7 +765,7 @@ mod tests {
         let msg = kglite_load_failure_message(None, "boom");
         assert!(msg.contains("boom"));
         assert!(msg.contains("does not report a version"), "{msg}");
-        assert!(msg.contains("pip install -U 'kglite>=0.17.1'"), "{msg}");
+        assert!(msg.contains("pip install -U 'kglite>=0.17.3'"), "{msg}");
     }
 
     #[test]
