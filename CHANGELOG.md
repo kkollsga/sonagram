@@ -4,6 +4,35 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.18] - 2026-09-11
+
+A maintenance release updates the embedded graph engine to KGLite 0.17.3.
+Sonagram's analysis, graph schema, and persistence contract are unchanged.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Added
+
+- The embedded query engine supports scoped read subqueries and set composition
+  in `CALL`, plus Cypher 25 `FILTER`, `OFFSET`, `NODETACH DELETE`, `FINISH`, and
+  `INSERT` spellings. (Inherited from KGLite 0.17.2.)
+
+### Fixed
+
+- Correlated `EXISTS` patterns and fused aggregate plans now honor labels,
+  inline properties, and null relationship bindings on already-bound values.
+  (Inherited from KGLite 0.17.3.)
+
+### Changed
+
+- Typed and undirected relationship counts, bound-node `COUNT`/`EXISTS`
+  patterns, and vector/text score aliases use their indexed or counter-backed
+  execution paths where applicable. (Inherited from KGLite 0.17.3.)
+- Embedded KGLite: 0.17.1 → 0.17.3.
+
 ## [0.2.17] - 2026-09-08
 
 A maintenance release: the embedded graph engine moves to KGLite 0.17.1 (four
