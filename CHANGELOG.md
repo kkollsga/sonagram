@@ -4,6 +4,36 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.19] - 2026-09-13
+
+This release updates the embedded graph engine to KGLite 0.17.4 and documents
+its bounded MCP response flow. Sonagram's analysis, graph schema, and
+persistence contract are unchanged.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Added
+
+- Large MCP query results now provide bounded previews with an advertised
+  expansion action that retrieves retained evidence without rerunning the
+  query. Agents discover and copy that action rather than hard-coding its tool
+  name or result identifier. (Inherited from KGLite 0.17.4.)
+
+### Fixed
+
+- An omitted parameter referenced by a Cypher query is now an explicit tool
+  error instead of being treated as null. (Inherited from KGLite 0.17.4.)
+
+### Changed
+
+- Agent documentation now distinguishes a Cypher `LIMIT`, which bounds rows
+  executed, from MCP response budgeting, which bounds presentation of a
+  completed result.
+- Embedded KGLite: 0.17.3 → 0.17.4.
+
 ## [0.2.18] - 2026-09-11
 
 A maintenance release updates the embedded graph engine to KGLite 0.17.3.
