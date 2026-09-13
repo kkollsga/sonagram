@@ -1,7 +1,7 @@
 # Agent guide
 
 sonagram is built for AI agents: the graph is served by
-`sonagram-mcp-server`, a thin KGLite 0.17.3 frontend, and an agent translates intent into a typed Sonagram
+`sonagram-mcp-server`, a thin KGLite 0.17.4 frontend, and an agent translates intent into a typed Sonagram
 curation brief. The library—not the agent—selects, orders, repairs, audits, and
 stores playlists. The repo
 ships the full agent-facing manual as **`AGENT-GUIDE.md`** at its root, plus an
@@ -10,18 +10,26 @@ orientation; the manual is the reference.
 
 ## Generic and typed tools
 
-An agent works the graph through three MCP tools:
+An agent starts with these generic MCP tools:
 
 - **`graph_overview`** — the node/edge inventory with live counts and sample ids.
   Call it first on an unfamiliar graph to see the library's shape.
 - **`cypher_query`** — run one openCypher query, get up to ~15 rows inline. It
   takes a `query` string, an optional `params` object binding the query's
-  `$name` placeholders, and an optional `timeout_ms` (the server's default
-  deadline is 180 seconds). Bind values through `params` rather than inlining
+  `$name` placeholders, an optional `timeout_ms` (the server's default
+  deadline is 180 seconds), and an optional `_response` object for bounded or
+  full response control. Bind values through `params` rather than inlining
   them; a `$name` the query uses and `params` omits is an error.
 - **`music_library_profile`** — report eligible counts, axis coverage, and
   distributions before translating an unusual request. Read coverage and
   p25/median/p75 before choosing any numeric threshold.
+
+Large results arrive as bounded previews. Discover `_response` and the
+expansion tool through `tools/list`, then copy the preview's complete
+`next.selected_value` action without changing its tool name or `result_id`.
+The action reads retained evidence without rerunning the query. Cypher `LIMIT`
+bounds executed rows; `_response` only bounds presentation, so expansion cannot
+recover rows the query excluded.
 
 Typed `music_curation_policy`, `music_curate_playlist`,
 `music_audit_playlist`, `music_explain_playlist`, and `music_playlist*` store

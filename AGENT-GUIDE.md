@@ -2,11 +2,12 @@
 
 You are an AI agent with MCP access to a **sonagram** knowledge graph: a music
 library mapped into [kglite](https://github.com/kkollsga/kglite) and served by
-`sonagram-mcp-server`, a thin KGLite 0.17.3 frontend. Generic exploration uses:
+`sonagram-mcp-server`, a thin KGLite 0.17.4 frontend. Generic exploration uses:
 
 - **`cypher_query`** — run one openCypher query, get up to ~15 rows inline.
   It takes a `query` string, an optional `params` object binding the query's
-  `$name` placeholders, and an optional `timeout_ms`. Prefer `params` over
+  `$name` placeholders, an optional `timeout_ms`, and an optional `_response`
+  object for bounded/full response control. Prefer `params` over
   inlining a value: `MATCH (t:Track {title: $t})` with
   `params: {"t": "Marry You"}` binds as data, so quote-heavy titles need no
   escaping. A `$name` used in the query but missing from `params` is an error,
@@ -15,6 +16,14 @@ library mapped into [kglite](https://github.com/kkollsga/kglite) and served by
   ids. Call it first on an unfamiliar graph to see the library's shape.
 - **`music_library_profile`** — fast eligible counts, per-axis coverage, and
   p25/median/p75 distributions before unusual curation requests.
+
+Large results arrive as bounded previews. Discover `_response` and the
+expansion tool through `tools/list`; then copy the preview's complete
+`next.selected_value` action, keeping its tool name and `result_id` unchanged.
+Its JSON Pointer selects retained evidence without rerunning the query. A
+Cypher `LIMIT` still bounds rows executed, while `_response` only bounds how
+that completed result is presented; expansion cannot recover rows excluded by
+the query.
 
 Typed library operations are **`music_curation_policy`**,
 **`music_curate_playlist`**, **`music_audit_playlist`**,

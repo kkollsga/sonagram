@@ -105,10 +105,15 @@ sonagram mcp install
 # RUN: '/absolute/path/sonagram-mcp-server' --graph '/.../music.kgl'
 ```
 
-The thin Sonagram frontend embeds KGLite 0.17.3's server and registers typed
+The thin Sonagram frontend embeds KGLite 0.17.4's server and registers typed
 profile/policy/curate/audit/explain/store tools against its live graph. KGLite
 still owns MCP, Cypher, graph lifecycle, and generic tools; Sonagram owns only
 the music-domain handlers.
+
+MCP query output is bounded by default. Agents should discover the response
+controls through `tools/list` and copy the preview's advertised expansion
+action to inspect retained evidence. Query `LIMIT` controls executed rows;
+response budgeting controls only how the completed result is presented.
 
 ```python
 import sonagram

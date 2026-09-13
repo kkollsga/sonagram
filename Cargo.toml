@@ -38,12 +38,12 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.17.3 (nineteen
+# compile time, and consume it in a later plan), kglite 0.17.4 (twenty
 # releases across ten sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
 # in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
 # in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 in 0.2.14, 0.16.20 in 0.2.15,
 # 0.16.21 + 0.16.22 in 0.2.16, 0.16.23 + 0.16.24 + 0.17.0 + 0.17.1 in 0.2.17,
-# 0.17.2 + 0.17.3 here; both
+# 0.17.2 through 0.17.4 here; all
 # goldens byte-identical and `capture_goldens` never run throughout.
 # Only three have ever reached our source: 0.16.14 (import paths), 0.16.20 (the
 # manifest-side write opt-in, guarded by a text grep) and 0.16.21, which
@@ -393,6 +393,12 @@ ureq = { version = "2", features = ["json"] }
 # subqueries keep their declared result schema. We carry no parser or executor
 # workaround, so this is additive syntax plus repaired query answers.
 #
+# 0.17.4 adds bounded agent-response envelopes to the embedded MCP server and
+# fixes parameter validation, schema-plan invalidation, failed-write recovery,
+# and structured CLI failures. Sonagram's graph mapping API surface is
+# unchanged; the bounded MCP response contract is evaluated separately in the
+# adoption plan rather than enabled implicitly by this dependency move.
+#
 # 0.17.3 is query planning and correctness. Stored relationship counts now
 # serve more typed and undirected `count(*)` / `COUNT { ... }` shapes, and
 # retrieval-score aliases projected through `WITH` retain the top-k index path.
@@ -405,7 +411,7 @@ ureq = { version = "2", features = ["json"] }
 # Perf controls: 0.17.0's complete-snapshot normalization made `.kgl` load a
 # measured regression cell for the 0.2.17 release, which recorded the ~48 ms
 # fixed cost. That is historical evidence, not a prediction for this bump:
-# 0.17.2 and 0.17.3 do not change loading or graph construction. Their faster
+# 0.17.2 through 0.17.4 do not change loading or graph construction. Their faster
 # count, existence, and retrieval-score plans are query improvements rather
 # than a path sonagram executes while mapping a library, so no build/rescan
 # performance claim moves here. The stable control remains `status <root>` in
@@ -416,8 +422,8 @@ ureq = { version = "2", features = ["json"] }
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.17.3", default-features = false }
-kglite-mcp-server = { version = "0.17.3", default-features = false }
+kglite = { version = "0.17.4", default-features = false }
+kglite-mcp-server = { version = "0.17.4", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;

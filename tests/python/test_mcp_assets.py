@@ -8,26 +8,40 @@ import subprocess
 import sys
 import tempfile
 import threading
+from collections import deque
 from pathlib import Path
 
 import kglite
 import sonagram
 
 
+def stop_process(process):
+    if process.poll() is None:
+        process.kill()
+    process.wait()
+    for thread in process.reader_threads:
+        thread.join(timeout=1)
+
+
 def rpc(process, request_id, method, params, allow_error=False):
     payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
+    process.request_trace.append(payload)
     process.stdin.write(json.dumps(payload) + "\n")
     process.stdin.flush()
     while True:
         try:
             response = process.responses.get(timeout=30)
         except queue.Empty as error:
-            process.kill()
-            process.wait()
-            raise AssertionError(f"MCP server timed out during {method}") from error
+            stop_process(process)
+            raise AssertionError(
+                f"MCP server timed out during {method}; "
+                f"stdout: {process.raw_stdout_lines!r}; "
+                f"stderr: {''.join(process.stderr_lines)}"
+            ) from error
         if response is None:
-            stderr = process.stderr.read()
-            raise AssertionError(f"MCP server exited during {method}: {stderr}")
+            raise AssertionError(
+                f"MCP server exited during {method}: {''.join(process.stderr_lines)}"
+            )
         if response.get("id") == request_id:
             if allow_error:
                 return response
@@ -51,16 +65,30 @@ def inspect_server(graph_path, server, env=None):
         env=env,
     )
     process.responses = queue.Queue()
+    process.request_trace = []
+    process.raw_stdout_lines = []
+    process.stderr_lines = deque(maxlen=200)
 
     def read_responses():
         for line in process.stdout:
+            process.raw_stdout_lines.append(line)
             try:
                 process.responses.put(json.loads(line))
             except json.JSONDecodeError:
                 continue
         process.responses.put(None)
 
-    threading.Thread(target=read_responses, daemon=True).start()
+    stdout_thread = threading.Thread(target=read_responses, daemon=True)
+    stdout_thread.start()
+
+    def read_stderr():
+        # The boot summary can exceed the OS pipe capacity as tool descriptions
+        # grow; drain it while the child boots or it can block before stdio MCP starts.
+        process.stderr_lines.extend(process.stderr)
+
+    stderr_thread = threading.Thread(target=read_stderr, daemon=True)
+    stderr_thread.start()
+    process.reader_threads = (stdout_thread, stderr_thread)
     try:
         rpc(
             process,
@@ -77,8 +105,7 @@ def inspect_server(graph_path, server, env=None):
         prompts = rpc(process, 3, "prompts/list", {}).get("prompts", [])
         return process, tools, prompts
     except Exception:
-        process.kill()
-        process.wait()
+        stop_process(process)
         raise
 
 
@@ -167,6 +194,7 @@ with tempfile.TemporaryDirectory() as tmp:
     (library / ".sonagram" / "index.json").write_text(
         json.dumps(index, indent=2, sort_keys=True) + "\n"
     )
+    expected_hashes = sorted(entry["content_hash"] for entry in index.values())
 
     graph_path = root / "music.kgl"
     sonagram.build(str(library), str(graph_path))
@@ -277,8 +305,7 @@ with tempfile.TemporaryDirectory() as tmp:
         assert track_count(optin_process, 6) == before
         assert scalar_count(optin_process, 7, "t.title = 'mutated'") == 0
     finally:
-        optin_process.kill()
-        optin_process.wait()
+        stop_process(optin_process)
     manifest_path.write_text(clean_manifest)
     selftest = subprocess.run(
         [server_path, "--graph", str(graph_path), "--selftest"],
@@ -338,6 +365,7 @@ with tempfile.TemporaryDirectory() as tmp:
         expected_tools = {
             "ping",
             "cypher_query",
+            "expand_response",
             "graph_overview",
             "reload_graph",
             *domain_tools,
@@ -377,11 +405,14 @@ with tempfile.TemporaryDirectory() as tmp:
         description = by_name["music_library_profile"].get("description", "")
         assert "sonagram-curation-contract:v1" in description
         # Playlist methodology is routed through the dedicated profile tool;
-        # do not repeat several KB on every generic Cypher/overview reveal.
+        # do not repeat several thousand characters on every generic reveal.
+        # The 8,192-character ceiling includes KGLite's standard response-control
+        # help; it still fails if a second multi-thousand-character music
+        # methodology is appended.
         cypher_description = by_name["cypher_query"].get("description", "")
         overview_description = by_name["graph_overview"].get("description", "")
-        assert len(cypher_description) < 8000
-        assert len(overview_description) < 8000
+        assert len(cypher_description) < 8192, len(cypher_description)
+        assert len(overview_description) < 8192, len(overview_description)
         # The manifest's description overrides speak in the music voice and
         # kglite appends its own skill body after them, so the override is a
         # prefix. Losing it means the agent meets a generic graph tool instead.
@@ -403,7 +434,7 @@ with tempfile.TemporaryDirectory() as tmp:
         cypher_args = set(
             by_name["cypher_query"].get("inputSchema", {}).get("properties", {})
         )
-        assert cypher_args == {"query", "params", "timeout_ms"}, (
+        assert cypher_args == {"query", "params", "timeout_ms", "_response"}, (
             f"cypher_query's argument set moved: {sorted(cypher_args)}. "
             "Update AGENT-GUIDE.md and docs/agent-guide.md in the same change."
         )
@@ -412,6 +443,76 @@ with tempfile.TemporaryDirectory() as tmp:
             assert f"`{argument}`" in guide, (
                 f"AGENT-GUIDE.md never names cypher_query's `{argument}` argument"
             )
+        response_schema = by_name["cypher_query"]["inputSchema"]["properties"]["_response"]
+        minimum = response_schema["properties"]["max_bytes"]["minimum"]
+        assert isinstance(minimum, int) and minimum > 0
+        trace_start = len(process.request_trace)
+        probe = rpc(
+            process,
+            29,
+            "tools/call",
+            {
+                "name": "cypher_query",
+                "arguments": {
+                    "query": "MATCH (t:Track) RETURN t "
+                             "ORDER BY t.content_hash LIMIT 15",
+                    "_response": {"max_bytes": minimum},
+                },
+            },
+        )
+        # The framework budgets the MCP result object, excluding JSON-RPC
+        # framing. Compact UTF-8 reserialization preserves that measurement.
+        serialized = json.dumps(
+            probe, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+        assert len(serialized) <= minimum, (len(serialized), minimum)
+        preview = tool_payload(probe)["response_budget"]
+        assert preview["complete"] is False
+        assert preview["original_bytes"] > minimum
+        assert expected_hashes[-1] not in serialized.decode("utf-8")
+        assert preview["coverage"] != ""
+        coverage = next(
+            field["value"]["query_and_executor"]
+            for field in preview["domain_guidance"]["fields"]
+            if field.get("location") == "/coverage"
+        )
+        assert coverage["executed_rows"] == 15
+        assert coverage["engine_row_limit"] is None
+        assert coverage["query_literal_limits"] == [15]
+        action = preview["next"]["selected_value"]
+        expanded = rpc(process, 31, "tools/call", action)
+        assert action["name"] in by_name
+        assert action["arguments"]["result_id"] == preview["result_id"]
+        assert action["arguments"]["response"] == {"mode": "full"}
+        expanded_hashes = [
+            row[0]["properties"]["content_hash"]
+            for row in expanded["structuredContent"]["rows"]
+        ]
+        assert expanded_hashes == expected_hashes
+        trace = process.request_trace[trace_start:]
+        assert [entry["method"] for entry in trace] == ["tools/call", "tools/call"]
+        assert [entry["params"]["name"] for entry in trace] == [
+            "cypher_query",
+            action["name"],
+        ]
+        assert trace[1]["params"]["arguments"] == action["arguments"]
+
+        missing = rpc(
+            process,
+            32,
+            "tools/call",
+            {
+                "name": "cypher_query",
+                "arguments": {
+                    "query": "MATCH (t:Track) WHERE t.title = $missing "
+                             "RETURN count(t) AS matched LIMIT 1"
+                },
+            },
+            allow_error=True,
+        )
+        missing_text = json.dumps(missing).lower()
+        assert missing["result"]["isError"] is True, missing
+        assert "missing parameter: $missing" in missing_text, missing
         # The schema advertising `params` is not the same claim as binding
         # working through *our* manifest's tools_allow surface, and the guide
         # now tells agents to use it. Bind one and prove the value reached the
@@ -577,8 +678,7 @@ with tempfile.TemporaryDirectory() as tmp:
         assert deleted["ok"] is True and deleted["result"]["deleted"] is True
         assert not Path(stored_paths["m3u8_path"]).exists()
     finally:
-        process.kill()
-        process.wait()
+        stop_process(process)
 
     # The same manifest beside a generic graph keeps every Sonagram capability
     # gated off, even if it uses the conventional Track.content_hash shape.
@@ -605,8 +705,7 @@ with tempfile.TemporaryDirectory() as tmp:
         prompt_names = {prompt["name"] for prompt in prompts}
         assert not any(name.startswith("music_") for name in prompt_names)
     finally:
-        process.kill()
-        process.wait()
+        stop_process(process)
 
     # A rescan rewrites the served .kgl underneath a running server. Two
     # routes must reach the live query path: the explicit reload_graph tool
@@ -649,7 +748,6 @@ with tempfile.TemporaryDirectory() as tmp:
             f"automatic re-read did not reach the query path: {refreshed_tracks}"
         )
     finally:
-        process.kill()
-        process.wait()
+        stop_process(process)
 
 print("ok")
