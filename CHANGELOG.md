@@ -4,6 +4,30 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.20] - 2026-09-14
+
+This release updates the embedded graph engine to KGLite 0.17.5. Sonagram's
+analysis, graph schema, and persistence contract are unchanged.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Fixed
+
+- `sonagram-mcp-server` now reaches the source sandbox that `sonagram mcp
+  install` created regardless of which working directory the client starts it
+  from. The installed manifest names that sandbox by a path relative to
+  itself, and the engine now resolves it beside the manifest rather than
+  against the launching process's working directory. Previously a client
+  launched from elsewhere reported the source tools as having no active source
+  root. (Inherited from KGLite 0.17.5.)
+
+### Changed
+
+- Embedded KGLite: 0.17.4 → 0.17.5.
+
 ## [0.2.19] - 2026-09-13
 
 This release updates the embedded graph engine to KGLite 0.17.4 and documents
