@@ -54,7 +54,7 @@ def notify(process, method):
     process.stdin.flush()
 
 
-def inspect_server(graph_path, server, env=None):
+def inspect_server(graph_path, server, env=None, cwd=None):
     process = subprocess.Popen(
         [server, "--graph", str(graph_path)],
         stdin=subprocess.PIPE,
@@ -63,6 +63,7 @@ def inspect_server(graph_path, server, env=None):
         text=True,
         bufsize=1,
         env=env,
+        cwd=cwd,
     )
     process.responses = queue.Queue()
     process.request_trace = []
@@ -90,7 +91,7 @@ def inspect_server(graph_path, server, env=None):
     stderr_thread.start()
     process.reader_threads = (stdout_thread, stderr_thread)
     try:
-        rpc(
+        process.instructions = rpc(
             process,
             1,
             "initialize",
@@ -99,7 +100,7 @@ def inspect_server(graph_path, server, env=None):
                 "capabilities": {},
                 "clientInfo": {"name": "sonagram-test", "version": "1"},
             },
-        )
+        ).get("instructions", "")
         notify(process, "notifications/initialized")
         tools = rpc(process, 2, "tools/list", {}).get("tools", [])
         prompts = rpc(process, 3, "prompts/list", {}).get("prompts", [])
@@ -749,5 +750,53 @@ with tempfile.TemporaryDirectory() as tmp:
         )
     finally:
         stop_process(process)
+
+    # The installed manifest declares its source sandbox RELATIVELY
+    # (`source_root: ./.sonagram-mcp-public`), and a desktop client starts this
+    # server from whatever working directory it happens to hold. KGLite 0.17.5
+    # resolves that path from the manifest's own directory; before it, the same
+    # manifest resolved against the launching process's cwd, so the sandbox
+    # `sonagram mcp install` created was reachable only when the client's cwd
+    # happened to be the graph directory.
+    #
+    # The observable is `initialize`'s instructions: an unresolved declared
+    # source root appends a NOTE naming the path it tried. Both directions are
+    # asserted, because either one alone passes under cwd-relative resolution
+    # for the wrong reason.
+    unresolved_note = "no declared source root resolved"
+    elsewhere = root / "elsewhere"
+    elsewhere.mkdir()
+    process, _, _ = inspect_server(graph_path, server_path, env=env, cwd=str(elsewhere))
+    try:
+        assert unresolved_note not in process.instructions, (
+            "manifest-relative sandbox did not resolve when the server started "
+            f"from another directory: {process.instructions[-400:]}"
+        )
+    finally:
+        stop_process(process)
+
+    # The inverse, which is what makes the assertion above non-vacuous: put the
+    # sandbox at the server's cwd and NOT beside the manifest. Manifest-relative
+    # resolution must fail here; cwd-relative resolution would succeed.
+    decoy_cwd = root / "decoy-cwd"
+    (decoy_cwd / ".sonagram-mcp-public").mkdir(parents=True)
+    sandboxless = root / "sandboxless"
+    sandboxless.mkdir()
+    shutil.copyfile(graph_path, sandboxless / "music.kgl")
+    shutil.copyfile(root / "music_mcp.yaml", sandboxless / "music_mcp.yaml")
+    shutil.copyfile(root / "sonagram_mcp.env", sandboxless / "sonagram_mcp.env")
+    shutil.copytree(root / "music_mcp.skills", sandboxless / "music_mcp.skills")
+    process, _, _ = inspect_server(
+        sandboxless / "music.kgl", server_path, env=env, cwd=str(decoy_cwd)
+    )
+    try:
+        assert unresolved_note in process.instructions, (
+            "a sandbox present only at the server's cwd resolved the manifest's "
+            "relative source_root; resolution must be manifest-relative: "
+            f"{process.instructions[-400:]}"
+        )
+    finally:
+        stop_process(process)
+
 
 print("ok")

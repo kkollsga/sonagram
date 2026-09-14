@@ -258,9 +258,11 @@ beside the configured graph. Re-running identical assets is a no-op; differing
 operator files require `--force`. The manifest exposes only a dedicated empty
 source sandbox, never the graph/config parent, and prints the absolute executable
 `sonagram-mcp-server` sibling from the installed environment when available
-(`RUN (PowerShell)` on Windows). This thin KGLite 0.17.4 frontend adds typed
-profile/policy/curate/audit/explain and playlist-store tools while preserving
-KGLite's generic server and live graph lifecycle.
+(`RUN (PowerShell)` on Windows). The manifest names that sandbox by a path
+relative to itself, and the server resolves it beside the manifest, so a client
+may launch the server from any working directory. This thin KGLite 0.17.5
+frontend adds typed profile/policy/curate/audit/explain and playlist-store tools
+while preserving KGLite's generic server and live graph lifecycle.
 
 ## Examples
 
