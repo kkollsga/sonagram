@@ -4,6 +4,39 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.21] - 2026-09-17
+
+This release updates the embedded graph engine to KGLite 0.17.7 and moves the
+agent server's music methodology into the server binary itself. Sonagram's
+analysis, graph schema, and persistence contract are unchanged.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Added
+
+- `sonagram-mcp-server` now carries its five music skills (library profile,
+  curation policy, playlist audit, playlist store, song versions) inside the
+  binary as a KGLite producer skill layer, so an agent gets the same guidance
+  in every server mode even when the installed skills directory is missing.
+  The files `sonagram mcp install` writes still take precedence, so an
+  operator's edits keep winning. (Uses KGLite 0.17.7's `with_skills`.)
+
+### Changed
+
+- Skills are now delivered lazily by the engine: a tool's description carries
+  only the skill's when-to-use guidance plus a `skill("<name>")` pointer, and
+  the full methodology is fetched on demand through the new `skill` tool,
+  which the server always serves. The curation-policy skill stays eager
+  because it shapes the first playlist request. Tool descriptions shrink
+  accordingly. (Inherited from KGLite 0.17.6 / mcp-methods 0.4.11.)
+- Existing installs: the manifest comment and the curation-policy skill file
+  changed, so run `sonagram mcp install --force` to take the new copies.
+  Nothing else in the installed layout moves.
+- Embedded KGLite: 0.17.5 → 0.17.7.
+
 ## [0.2.20] - 2026-09-14
 
 This release updates the embedded graph engine to KGLite 0.17.5. Sonagram's
