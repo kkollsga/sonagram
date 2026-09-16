@@ -60,8 +60,11 @@ extensions:
   # would only log a boot warning) and deliberately not set here.
 
 # Music-voiced descriptions for the two always-registered generic routes.
-# Kglite appends its own skill body after this text, so what follows is read as
-# a prefix, not a replacement.
+# Kglite appends its bundled skill after this text, so what follows is read as a
+# prefix, not a replacement. Since mcp-methods 0.4.11 what gets appended depends
+# on the skill's delivery tier: `cypher_query`'s skill is eager, so its whole
+# body follows; `graph_overview`'s is lazy, so only its "when to use" block and
+# a `skill("graph_overview")` pointer do, and an agent fetches the body itself.
 tools:
   - bundled: cypher_query
     description: |

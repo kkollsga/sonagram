@@ -115,7 +115,20 @@ def tool_text(result):
 
 
 def tool_payload(result):
-    return json.loads(tool_text(result))
+    """The typed tool's JSON body, with mcp-methods' skill footer tolerated.
+
+    Since mcp-methods 0.4.11 the first call in a session to a tool whose skill
+    has not been fetched carries one trailing line naming it (`Skill "..."
+    applies to this tool ... call skill("...")`) inside the same text part as
+    the payload, so a plain `json.loads` of the part raises "Extra data".
+    Decode the leading JSON value and require whatever follows to be exactly
+    that footer, so a genuinely malformed or truncated body still fails here.
+    """
+    text = tool_text(result)
+    payload, end = json.JSONDecoder().raw_decode(text)
+    trailer = text[end:].strip()
+    assert not trailer or trailer.startswith('Skill "'), trailer[:200]
+    return payload
 
 
 def track_count(process, request_id):
@@ -369,6 +382,10 @@ with tempfile.TemporaryDirectory() as tmp:
             "expand_response",
             "graph_overview",
             "reload_graph",
+            # mcp-methods 0.4.11 registers the lazy-skill loader AFTER
+            # tools_allow is applied, so it is served whatever the manifest
+            # names and cannot be hidden.
+            "skill",
             *domain_tools,
         }
         assert set(by_name) == expected_tools, (
@@ -404,7 +421,21 @@ with tempfile.TemporaryDirectory() as tmp:
             )
             assert "error" in rejected, rejected
         description = by_name["music_library_profile"].get("description", "")
-        assert "sonagram-curation-contract:v1" in description
+        # mcp-methods 0.4.11 delivers a skill lazily unless it declares
+        # `delivery: eager`: the tool description now carries only the routing
+        # block and a `skill("<name>")` pointer, and the body — where the
+        # curation contract marker lives — is fetched on demand. Assert both
+        # halves, so a lost pointer or an unfetchable body still fails here.
+        assert 'skill("music_library_profile")' in description, description
+        fetched = tool_text(
+            rpc(
+                process,
+                24,
+                "tools/call",
+                {"name": "skill", "arguments": {"name": "music_library_profile"}},
+            )
+        )
+        assert "sonagram-curation-contract:v1" in fetched, fetched[:400]
         # Playlist methodology is routed through the dedicated profile tool;
         # do not repeat several thousand characters on every generic reveal.
         # The 8,192-character ceiling includes KGLite's standard response-control
@@ -415,8 +446,11 @@ with tempfile.TemporaryDirectory() as tmp:
         assert len(cypher_description) < 8192, len(cypher_description)
         assert len(overview_description) < 8192, len(overview_description)
         # The manifest's description overrides speak in the music voice and
-        # kglite appends its own skill body after them, so the override is a
-        # prefix. Losing it means the agent meets a generic graph tool instead.
+        # kglite appends its bundled skill after them (the whole body for eager
+        # `cypher_query`, only the routing block plus a `skill(...)` pointer for
+        # lazy `graph_overview` since mcp-methods 0.4.11), so the override is a
+        # prefix either way. Losing it means the agent meets a generic graph
+        # tool instead.
         cypher_prefix = "Read-only Cypher over the Sonagram music graph:"
         overview_prefix = "Inventory of the Sonagram music graph:"
         assert cypher_description.startswith(cypher_prefix), cypher_description[:200]
@@ -753,9 +787,9 @@ with tempfile.TemporaryDirectory() as tmp:
 
     # The installed manifest declares its source sandbox RELATIVELY
     # (`source_root: ./.sonagram-mcp-public`), and a desktop client starts this
-    # server from whatever working directory it happens to hold. KGLite 0.17.5
-    # resolves that path from the manifest's own directory; before it, the same
-    # manifest resolved against the launching process's cwd, so the sandbox
+    # server from whatever working directory it happens to hold. Since KGLite
+    # 0.17.5 that path resolves from the manifest's own directory; before it,
+    # the same manifest resolved against the launching process's cwd, so the sandbox
     # `sonagram mcp install` created was reachable only when the client's cwd
     # happened to be the graph directory.
     #

@@ -38,17 +38,18 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.17.5 (twenty-one
-# releases across twelve sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
+# compile time, and consume it in a later plan), kglite 0.17.7 (twenty-three
+# releases across thirteen sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
 # in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
 # in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 in 0.2.14, 0.16.20 in 0.2.15,
 # 0.16.21 + 0.16.22 in 0.2.16, 0.16.23 + 0.16.24 + 0.17.0 + 0.17.1 in 0.2.17,
-# 0.17.2 + 0.17.3 in 0.2.18, 0.17.4 in 0.2.19, 0.17.5 here; all
+# 0.17.2 + 0.17.3 in 0.2.18, 0.17.4 in 0.2.19, 0.17.5 in 0.2.20,
+# 0.17.6 + 0.17.7 here; all
 # goldens byte-identical and `capture_goldens` never run throughout.
 # Only three have ever reached our source: 0.16.14 (import paths), 0.16.20 (the
 # manifest-side write opt-in, guarded by a text grep) and 0.16.21, which
 # replaced that grep with an engine-side pin — see below. This bump reaches
-# none of it: `cargo check -p sonagram --all-targets` is clean across the four
+# none of it: `cargo check -p sonagram --all-targets` is clean across both
 # releases and every documented Rust break lands on a type we never name.
 #
 # 0.16.10 is retrieval machinery: `build_text_index` / `text_bm25()` /
@@ -393,6 +394,38 @@ ureq = { version = "2", features = ["json"] }
 # subqueries keep their declared result schema. We carry no parser or executor
 # workaround, so this is additive syntax plus repaired query answers.
 #
+# 0.17.6 + 0.17.7 are the skill layers, and none of them reaches our source in
+# this bump. 0.17.6 lets a `.kgl` carry the markdown methodology for querying
+# it — `kglite::api::skills` writes `KgliteSkill` system-label nodes that are
+# persisted but hidden from `node_types()`, `schema()`, `describe()` and
+# `db.labels()` — and an MCP server in `--graph`/`--watch` mode layers a served
+# graph's records above its own bundled set. It also carries mcp-methods
+# 0.4.11, which delivers a skill LAZILY by default: a tool description now gets
+# the skill's `## When to use` block plus one line naming `skill("<name>")`
+# instead of the whole body, and a new framework tool `skill(name)` returns the
+# body on request. That loader is registered AFTER `extensions.tools_allow` is
+# applied and cannot be hidden — an allowlist that hid it would aim every lazy
+# pointer at a tool the agent cannot call — so our closed allowlist now serves
+# one tool more than it names, which is why `tests/python/test_mcp_assets.py`'s
+# exact tool-set assertion gains `skill`. Bundled `cypher_query` stays on the
+# eager tier and bundled `graph_overview` is lazy, which is the distinction
+# `sonagram/assets/music_mcp.yaml`'s comment above `tools:` now draws.
+# 0.17.7 adds the producer layer an embedding binary registers for itself:
+# `ServerExtensions::with_skills` / `with_recipes`, served in every mode as
+# `owned:producer`, ranked `bundled < producer < graph < inline < declared
+# dirs < <basename>.skills/`, with `SkillRecord`, `Delivery` and `RecipeCatalog`
+# re-exported from `kglite_mcp_server`; it also stops a graph-carried or
+# producer recipe catalogue from arming the `extensions.tools_allow` boot
+# refusal, which only a manifest catalogue (the shape we declare) now does.
+# `with_skills` is where sonagram's five music skills are headed, but that is
+# the NEXT phase's change, not this one: here the only source edit is the
+# `kglite>=` floor in the binding's install check
+# (`sonagram-python/src/lib.rs`), and `sonagram/src/` is untouched.
+# Evidence: `sonagram/tests/version_consistency.rs` enumerates every site that
+# must agree with these pins; `tests/python/test_mcp_assets.py` boots the real
+# server and compares the served tool set as a whole set; both goldens are
+# byte-identical and `capture_goldens` was not run.
+#
 # 0.17.5 is embedded-MCP path resolution, and it reaches this server
 # directly. Our installed manifest declares `source_root:
 # ./.sonagram-mcp-public` relative to itself; that path now resolves beside the
@@ -422,7 +455,9 @@ ureq = { version = "2", features = ["json"] }
 # Perf controls: 0.17.0's complete-snapshot normalization made `.kgl` load a
 # measured regression cell for the 0.2.17 release, which recorded the ~48 ms
 # fixed cost. That is historical evidence, not a prediction for this bump:
-# 0.17.2 through 0.17.5 do not change loading or graph construction. Their faster
+# 0.17.2 through 0.17.7 do not change loading or graph construction — checked
+# entry by entry against each upstream changelog, and 0.17.6/0.17.7 are skill
+# and recipe surfaces, MCP delivery and boot-time resolution only. Their faster
 # count, existence, and retrieval-score plans are query improvements rather
 # than a path sonagram executes while mapping a library, so no build/rescan
 # performance claim moves here. The stable control remains `status <root>` in
@@ -433,8 +468,8 @@ ureq = { version = "2", features = ["json"] }
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.17.5", default-features = false }
-kglite-mcp-server = { version = "0.17.5", default-features = false }
+kglite = { version = "0.17.7", default-features = false }
+kglite-mcp-server = { version = "0.17.7", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
