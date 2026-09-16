@@ -472,7 +472,10 @@ mod tests {
         // and not a global one.
         let eager: Vec<&str> = SKILL_ASSETS
             .iter()
-            .filter(|(_, body)| body.contains("\ndelivery: eager\n"))
+            .filter(|(_, body)| {
+                body.lines()
+                    .any(|line| line.trim_end() == "delivery: eager")
+            })
             .map(|(name, _)| *name)
             .collect();
         assert_eq!(eager, ["music_curation_policy.md"]);
