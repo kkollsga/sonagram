@@ -3,8 +3,15 @@
 //! The assets are embedded so both Cargo and PyPI installs can materialize a
 //! deployment next to the configured `.kgl` graph without a repository checkout.
 //! Kglite owns the server and generic graph tools; Sonagram's thin frontend
-//! registers only the typed music-domain methods through Kglite's extension
-//! seam and installs the declarative manifest plus domain methodology.
+//! registers the typed music-domain methods through Kglite's extension seam,
+//! installs the declarative manifest, and carries the domain methodology on
+//! two layers of Kglite's own precedence order: the installed
+//! `<stem>_mcp.skills/` directory [`install`] writes, and the producer layer
+//! [`skill_records`] hands `ServerExtensions::with_skills` (see
+//! [`crate::mcp_server`]). Both are rendered from the same [`SKILL_ASSETS`],
+//! and the files outrank the producer records name for name, so an installed
+//! deployment behaves exactly as before and a file-less one still gets the
+//! methodology.
 
 use std::path::{Path, PathBuf};
 
@@ -59,6 +66,34 @@ pub const SKILL_ASSETS: &[(&str, &str)] = &[
         include_str!("../assets/music_mcp.skills/music_song_versions.md"),
     ),
 ];
+
+/// The bundled music methodologies as kglite skill records, sorted by name.
+///
+/// Parsing goes through [`kglite::api::skills::parse_markdown`] (the `okf`
+/// feature) so the frontmatter dialect is the engine's own — the very dialect
+/// the server applies to the installed `<stem>_mcp.skills/` files — instead of
+/// a hand-rolled reader that could disagree with it. [`SKILL_ASSETS`] stays the
+/// single source of truth; nothing here restates a record's frontmatter.
+///
+/// The sort is what makes the producer layer deterministic: kglite resolves a
+/// repeated name last-wins within the layer, and the boot summary reports the
+/// layer in registration order.
+///
+/// `parse_markdown` runs `kglite::api::skills::validate` itself, so a malformed
+/// asset surfaces here as an error rather than at server boot — where a
+/// producer record that fails validation is fatal, the records being embedder
+/// code rather than graph data.
+pub fn skill_records() -> Result<Vec<kglite::api::skills::SkillRecord>> {
+    let mut records = Vec::with_capacity(SKILL_ASSETS.len());
+    for (asset, body) in SKILL_ASSETS {
+        let record = kglite::api::skills::parse_markdown(body).map_err(|error| {
+            SonagramError::Graph(format!("bundled skill asset {asset}: {error}"))
+        })?;
+        records.push(record);
+    }
+    records.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(records)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstallReport {
@@ -431,10 +466,78 @@ mod tests {
             assert!(body.contains("applies_when:"), "{name}");
             assert!(body.len() < 4096, "{name} exceeds the 4 KB soft target");
         }
+        // The one eager asset. `delivery:` is absent everywhere else, which is
+        // the lazy default: an eager body is inlined into the description of
+        // every tool the skill references, so the tier is a per-asset decision
+        // and not a global one.
+        let eager: Vec<&str> = SKILL_ASSETS
+            .iter()
+            .filter(|(_, body)| body.contains("\ndelivery: eager\n"))
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(eager, ["music_curation_policy.md"]);
         assert!(SKILL_ASSETS
             .iter()
             .all(|(_, body)| body.contains(CURATION_CONTRACT_MARKER)));
         assert!(crate::skill::SKILL_MD.contains(CURATION_CONTRACT_MARKER));
+    }
+
+    /// The producer layer `mcp_server::server_extensions` registers.
+    ///
+    /// Every assertion here is a boot-time failure elsewhere: kglite refuses to
+    /// start when a producer record fails `validate`, and mcp-methods drops a
+    /// skill whose declared targets are all unregistered. Both classes are
+    /// cheap to catch in-process and expensive to meet in the field.
+    #[test]
+    fn producer_skill_records_are_the_five_assets_and_all_boot_valid() {
+        let records = skill_records().unwrap();
+        assert_eq!(records.len(), SKILL_ASSETS.len());
+
+        let stems: Vec<String> = {
+            let mut stems: Vec<String> = SKILL_ASSETS
+                .iter()
+                .map(|(asset, _)| asset.trim_end_matches(".md").to_string())
+                .collect();
+            stems.sort();
+            stems
+        };
+        let names: Vec<String> = records.iter().map(|r| r.name.clone()).collect();
+        assert_eq!(names, stems, "a record's name must be its asset's stem");
+
+        for record in &records {
+            kglite::api::skills::validate(record)
+                .unwrap_or_else(|error| panic!("{} would fail the boot: {error}", record.name));
+            assert!(
+                !record.references_tools.is_empty(),
+                "{} declares no target tool, so nothing advertises it",
+                record.name
+            );
+            assert!(
+                record.body.contains(CURATION_CONTRACT_MARKER),
+                "{}",
+                record.name
+            );
+        }
+    }
+
+    /// The delivery tier, per record. Eager inlines the whole body into every
+    /// referenced tool's description; lazy advertises a `skill("<name>")`
+    /// pointer instead. `music_curation_policy` shapes the first call's
+    /// parameters before any result exists, which is the one case worth the
+    /// bytes; the observable split is asserted end to end in
+    /// `tests/python/test_mcp_assets.py`.
+    #[test]
+    fn only_the_curation_policy_is_delivered_eagerly() {
+        use kglite::api::skills::Delivery;
+
+        for record in skill_records().unwrap() {
+            let expected = if record.name == "music_curation_policy" {
+                Delivery::Eager
+            } else {
+                Delivery::Lazy
+            };
+            assert_eq!(record.delivery, expected, "{}", record.name);
+        }
     }
 
     #[test]

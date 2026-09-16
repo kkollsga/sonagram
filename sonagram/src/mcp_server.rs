@@ -1,7 +1,11 @@
 //! Sonagram's typed music-domain extension of KGLite's MCP server.
 //!
 //! This module is the single registration authority used by both the native
-//! `sonagram-mcp-server` binary and the Python-wheel console entry point.
+//! `sonagram-mcp-server` binary and the Python-wheel console entry point: the
+//! typed music tools, the read-only pin, and — since KGLite 0.17.7 — the five
+//! music methodologies, registered as a producer skill layer from
+//! [`crate::mcp::skill_records`] so a deployment with no installed
+//! `<stem>_mcp.skills/` directory still serves them.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -146,7 +150,7 @@ where
         startup_graph_path(&argv)?;
     }
     scrub_inherited_credentials();
-    let extensions = server_extensions();
+    let extensions = server_extensions()?;
     kglite_mcp_server::run_with_extensions(argv, extensions)?;
     Ok(())
 }
@@ -176,8 +180,21 @@ fn scrub_inherited_credentials() {
 /// `<stem>_mcp.yaml` resolution from outside. That grep could only ever be as
 /// right as its copy of a convention it did not own, and its failure mode was
 /// a false negative: a silently writable music server.
-fn server_extensions() -> ServerExtensions {
-    ServerExtensions::new().read_only().with_domain_tools(|registry| {
+///
+/// [`ServerExtensions::with_skills`] (KGLite 0.17.7) carries the second half of
+/// the served surface: the five music methodologies as `owned:producer`
+/// records, from the same [`crate::mcp::SKILL_ASSETS`] `sonagram mcp install`
+/// writes to `<stem>_mcp.skills/`. The file layer outranks them name for name,
+/// so an installed deployment is byte-for-byte the surface it was; a bare
+/// binary beside a `.kgl` now gets the methodology too. A record that fails
+/// `kglite::api::skills::validate` fails the boot, which is why the parse is
+/// fallible here rather than unwrapped — and why every asset is validated in
+/// `crate::mcp`'s own unit tests.
+fn server_extensions() -> Result<ServerExtensions> {
+    let extensions = ServerExtensions::new()
+        .read_only()
+        .with_skills(crate::mcp::skill_records()?);
+    Ok(extensions.with_domain_tools(|registry| {
         // A generic KGLite graph must not acquire music methods merely because
         // it happens to sit beside Sonagram's manifest assets.
         let state = registry.graph_state();
@@ -257,7 +274,7 @@ fn server_extensions() -> ServerExtensions {
             "Delete a stored playlist's M3U and metadata pair. confirm_slug must exactly match slug.",
             |args| respond(delete_playlist(args)),
         )
-    })
+    }))
 }
 
 fn handle_graph<T, F>(state: &DomainGraphState, operation: F) -> String
@@ -729,6 +746,20 @@ mod tests {
         assert!(error.contains("read-only"), "{error}");
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The extension builder itself must be constructible.
+    ///
+    /// `server_extensions` is the only caller of `mcp::skill_records`, and a
+    /// producer record that fails `kglite::api::skills::validate` aborts the
+    /// server boot rather than being skipped. The records are checked one by
+    /// one in `crate::mcp`'s tests; this asserts the wiring propagates instead
+    /// of panicking, so a future `unwrap()` here fails a test rather than a
+    /// desktop client's launch.
+    #[test]
+    fn the_served_extensions_build_with_the_producer_skill_layer() {
+        assert!(server_extensions().is_ok());
+        assert_eq!(crate::mcp::skill_records().unwrap().len(), 5);
     }
 
     /// No manifest beside the graph is the bare-binary case, and it must boot.

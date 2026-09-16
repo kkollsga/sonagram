@@ -2,6 +2,7 @@
 name: music_curation_policy
 description: "TRIGGER for every request to create, improve, or vary a playlist, including aggressive or non-aggressive intent. Translate intent into a Sonagram preset and typed policy/brief, then invoke the library curation method. SKIP hand-authored candidate selection or ordering: Cypher is exploratory, never the final playlist engine."
 references_tools: [music_library_profile, music_curation_policy, music_curate_playlist]
+delivery: eager
 applies_when:
   tool_registered: music_curate_playlist
   graph_has_property: {node_type: Track, prop_name: is_music}

@@ -354,6 +354,15 @@ with tempfile.TemporaryDirectory() as tmp:
     # its absence keeps the four above from being read as "all five" — and if a
     # fixture ever gains a duplicate, this line names why it changed.
     assert "music_song_versions" not in skills_line, skills_line
+    # KGLite 0.17.7: `ServerExtensions::with_skills` registers the same five
+    # methodologies from inside the binary, and the child's boot summary — which
+    # `--selftest` mirrors to its own stderr — reports the layer. `served` is the
+    # count the embedder contributed, so this is the assertion that catches a
+    # dropped `.with_skills(...)`. The `active as owned:producer` count is NOT
+    # asserted here: in the installed layout the `music_mcp.skills/` files win by
+    # name, so it is 0. The file-less layout at the end of this script is where
+    # the producer records are the ones actually serving.
+    assert "producer skills: 5 served" in selftest.stderr, selftest.stderr[-2000:]
     # Boot the live server with credentials the music deployment must never
     # forward: mcp_server::run scrubs them, so kglite's github builtin stays off
     # and no github_* route can reach the surface asserted below.
@@ -441,6 +450,21 @@ with tempfile.TemporaryDirectory() as tmp:
         # The 8,192-character ceiling includes KGLite's standard response-control
         # help; it still fails if a second multi-thousand-character music
         # methodology is appended.
+        # `music_curation_policy` is the one asset declaring `delivery: eager`,
+        # so mcp-methods inlines its whole body under `## Methodology` into every
+        # tool it references — `music_curate_playlist` among them. The lazy tier
+        # is the contrast: `music_audit_playlist` is referenced only by
+        # `music_playlist_audit`, which carries no `delivery:` key, so its
+        # description gets the `skill("...")` pointer and none of the body.
+        curate_description = by_name["music_curate_playlist"].get("description", "")
+        assert "sonagram-curation-contract:v1" in curate_description, (
+            curate_description[-600:]
+        )
+        audit_description = by_name["music_audit_playlist"].get("description", "")
+        assert 'skill("music_playlist_audit")' in audit_description, audit_description
+        assert "Audit is the acceptance gate" not in audit_description, (
+            audit_description[-600:]
+        )
         cypher_description = by_name["cypher_query"].get("description", "")
         overview_description = by_name["graph_overview"].get("description", "")
         assert len(cypher_description) < 8192, len(cypher_description)
@@ -831,6 +855,46 @@ with tempfile.TemporaryDirectory() as tmp:
         )
     finally:
         stop_process(process)
+
+    # Delete the installed skills directory and serve the SAME manifest and
+    # graph: what is left is KGLite 0.17.7's producer layer, the five records
+    # `mcp::skill_records()` hands `ServerExtensions::with_skills`. This is last
+    # in the script on purpose — every check above copies `music_mcp.skills/`
+    # somewhere or counts its five files.
+    shutil.rmtree(root / "music_mcp.skills")
+    assert not (root / "music_mcp.skills").exists()
+    fileless = subprocess.run(
+        [server_path, "--graph", str(graph_path), "--selftest"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert "Selftest PASSED" in fileless.stdout, fileless.stdout
+    # With no file layer left to shadow them, every producer record is the one
+    # serving its name — which is the half the installed-layout assertion above
+    # cannot see.
+    assert "producer skills: 5 served" in fileless.stderr, fileless.stderr[-2000:]
+    assert "5 active as owned:producer" in fileless.stderr, fileless.stderr[-2000:]
+    fileless_skills = next(
+        (line for line in fileless.stdout.splitlines() if "skills" in line), None
+    )
+    assert fileless_skills is not None, fileless.stdout
+    for name in (
+        "music_library_profile",
+        "music_curation_policy",
+        "music_playlist_audit",
+        "music_playlist_store",
+    ):
+        assert name in fileless_skills, (name, fileless_skills)
+    # ...and the fifth one now appears, which it does not in the installed
+    # layout (see the comment on its absence above). A `SkillRecord` has no
+    # `applies_when` field at all, so `music_song_versions`' `graph_has_node_type:
+    # [Song]` gate lives only in the markdown the file layer parses and does not
+    # travel to the producer copy. What still bounds it is mcp-methods 0.4.11's
+    # unregistered-target rule: it routes to `cypher_query`/`graph_overview`,
+    # which this server registers, so it is advertised here.
+    assert "music_song_versions" in fileless_skills, fileless_skills
 
 
 print("ok")

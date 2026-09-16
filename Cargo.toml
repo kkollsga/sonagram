@@ -46,11 +46,13 @@ ureq = { version = "2", features = ["json"] }
 # 0.17.2 + 0.17.3 in 0.2.18, 0.17.4 in 0.2.19, 0.17.5 in 0.2.20,
 # 0.17.6 + 0.17.7 here; all
 # goldens byte-identical and `capture_goldens` never run throughout.
-# Only three have ever reached our source: 0.16.14 (import paths), 0.16.20 (the
-# manifest-side write opt-in, guarded by a text grep) and 0.16.21, which
-# replaced that grep with an engine-side pin — see below. This bump reaches
-# none of it: `cargo check -p sonagram --all-targets` is clean across both
-# releases and every documented Rust break lands on a type we never name.
+# Only four have ever reached our source: 0.16.14 (import paths), 0.16.20 (the
+# manifest-side write opt-in, guarded by a text grep), 0.16.21, which replaced
+# that grep with an engine-side pin, and 0.17.7, whose producer skill layer
+# `sonagram/src/mcp_server.rs` now registers — all four are described below.
+# Nothing else in this bump reaches us: `cargo check -p sonagram --all-targets`
+# is clean across both releases and every documented Rust break lands on a type
+# we never name.
 #
 # 0.16.10 is retrieval machinery: `build_text_index` / `text_bm25()` /
 # `score_fuse()` add a BM25 lexical lane, and vector indexes gain the same
@@ -417,14 +419,26 @@ ureq = { version = "2", features = ["json"] }
 # re-exported from `kglite_mcp_server`; it also stops a graph-carried or
 # producer recipe catalogue from arming the `extensions.tools_allow` boot
 # refusal, which only a manifest catalogue (the shape we declare) now does.
-# `with_skills` is where sonagram's five music skills are headed, but that is
-# the NEXT phase's change, not this one: here the only source edit is the
-# `kglite>=` floor in the binding's install check
-# (`sonagram-python/src/lib.rs`), and `sonagram/src/` is untouched.
+# `with_skills` is where sonagram's five music skills now live, and it is the
+# whole of what this bump adds to our source: `sonagram/src/mcp.rs`'s
+# `skill_records()` parses each embedded `SKILL_ASSETS` body with
+# `kglite::api::skills::parse_markdown` and returns them sorted by name, and
+# `sonagram/src/mcp_server.rs`'s `server_extensions()` hands that vector to
+# `.with_skills(...)` before `run_with_extensions`. The installed
+# `music_mcp.skills/` directory still outranks the producer layer name for
+# name, so an installed deployment is unchanged; a file-less one (a bare
+# binary beside a `.kgl`, or an install whose skills directory was removed)
+# now serves the same five methodologies from the binary itself. A producer
+# record carries no `applies_when:`, so `music_song_versions` — withheld by
+# its `graph_has_node_type: [Song]` gate in the file layer — is advertised
+# there, bounded instead by 0.4.11's unregistered-target rule.
 # Evidence: `sonagram/tests/version_consistency.rs` enumerates every site that
-# must agree with these pins; `tests/python/test_mcp_assets.py` boots the real
-# server and compares the served tool set as a whole set; both goldens are
-# byte-identical and `capture_goldens` was not run.
+# must agree with these pins; `sonagram/src/mcp.rs`'s unit tests validate all
+# five records (one that failed `kglite::api::skills::validate` would fail the
+# server boot); `tests/python/test_mcp_assets.py` boots the real server,
+# compares the served tool set as a whole set, and re-runs the selftest with
+# `music_mcp.skills/` deleted; both goldens are byte-identical and
+# `capture_goldens` was not run.
 #
 # 0.17.5 is embedded-MCP path resolution, and it reaches this server
 # directly. Our installed manifest declares `source_root:
@@ -467,8 +481,16 @@ ureq = { version = "2", features = ["json"] }
 # depend on, and what we owe each upstream in notification — is recorded in the
 # repo's local design notes; `sonagram/tests/version_consistency.rs` is the
 # mechanical half and enumerates every site that must agree with these pins.
+#
+# `okf` is on for one reason: it gates `kglite::api::skills::{parse_markdown,
+# import_path}`, and `parse_markdown` is how `sonagram/src/mcp.rs` turns our
+# own five bundled `SKILL.md` assets into `SkillRecord`s. The frontmatter
+# dialect is kglite's (and mcp-methods'), not ours — a hand-rolled reader here
+# would be a shadow copy of a format we do not own, and it would disagree with
+# the very files the server's own file layer parses. The cost is one optional,
+# pure-Rust dependency (`yaml-rust2`).
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.17.7", default-features = false }
+kglite = { version = "0.17.7", default-features = false, features = ["okf"] }
 kglite-mcp-server = { version = "0.17.7", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
