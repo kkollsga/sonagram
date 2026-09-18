@@ -38,21 +38,23 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.17.9 (twenty-five
-# releases across fourteen sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
+# compile time, and consume it in a later plan), kglite 0.17.10 (twenty-six
+# releases across fifteen sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
 # in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
 # in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 in 0.2.14, 0.16.20 in 0.2.15,
 # 0.16.21 + 0.16.22 in 0.2.16, 0.16.23 + 0.16.24 + 0.17.0 + 0.17.1 in 0.2.17,
 # 0.17.2 + 0.17.3 in 0.2.18, 0.17.4 in 0.2.19, 0.17.5 in 0.2.20,
-# 0.17.6 + 0.17.7 in 0.2.21, 0.17.8 + 0.17.9 here; all
+# 0.17.6 + 0.17.7 in 0.2.21, 0.17.8 + 0.17.9 in 0.2.22, 0.17.10 here; all
 # goldens byte-identical and `capture_goldens` never run throughout.
 # Only four have ever reached our source: 0.16.14 (import paths), 0.16.20 (the
 # manifest-side write opt-in, guarded by a text grep), 0.16.21, which replaced
 # that grep with an engine-side pin, and 0.17.7, whose producer skill layer
 # `sonagram/src/mcp_server.rs` now registers — all four are described below.
-# Nothing in 0.17.8 or 0.17.9 joins them: `cargo test -p sonagram` needed no
-# source edit across both releases, and every documented Rust break in them
-# lands in `kglite::okf`, a module we never name.
+# Nothing since has joined them: 0.17.8 and 0.17.9 broke only `kglite::okf`
+# types we never name, and 0.17.10 is a pure Cypher-executor fix release with
+# no public API change at all (its own `semver-check` reports 196 checks and no
+# required update), so `cargo test -p sonagram` needed no source edit for any
+# of the three.
 #
 # 0.16.10 is retrieval machinery: `build_text_index` / `text_bm25()` /
 # `score_fuse()` add a BM25 lexical lane, and vector indexes gain the same
@@ -396,6 +398,28 @@ ureq = { version = "2", features = ["json"] }
 # subqueries keep their declared result schema. We carry no parser or executor
 # workaround, so this is additive syntax plus repaired query answers.
 #
+# 0.17.10 is a pure Cypher-executor fix release — no public API change, no new
+# syntax, no dependency move (mcp-methods stays 0.4.12) — and it repairs two
+# wrong answers in clause shapes sonagram itself never writes. (1) A
+# non-aggregating `WITH` is a scope barrier again: it used to project the row's
+# values but leave node/edge/path *identity* bindings in place, so a name the
+# projection dropped stayed silently bound and a later `MATCH` anchored on the
+# stale node instead of scanning — and `CREATE`/`SET`/`MERGE`/`FOREACH` after
+# such a `WITH` acted on nothing, silently. (2) `*` beside another projection
+# item now expands instead of being projected as an expression: `WITH *, a + 1
+# AS b` used to answer a column literally named `*` while dropping every
+# value-carrying name, `WITH *, count(*)` folded the input into one group, and
+# `MATCH p = (a)-->(b) RETURN *` omitted `p`. Neither reaches our source: no
+# file in this repo — `sonagram/src/`, the five `sonagram/assets/
+# music_mcp.skills/*.md` methodologies, `skills/sonagram-playlist/SKILL.md`,
+# the docs' example queries — contains a `WITH` clause or a `*` projection at
+# all, which is checkable with `git grep -n "RETURN \*\|WITH \*"`. What the
+# two fixes reach is the query surface we hand to users and agents:
+# `sonagram playlist --cypher` and the served `cypher_query`, where a
+# multi-stage query an agent composes now gets the answer it asked for. The
+# executor is the only thing that moved, so graph construction is untouched:
+# both goldens are byte-identical and `capture_goldens` was not run.
+#
 # 0.17.8 + 0.17.9 are the Obsidian vault format, and sonagram is not a vault:
 # we build our graph from `TrackAnalysis` records in `sonagram/src/graph/`, not
 # from markdown, and the `okf` feature is on here for exactly one symbol —
@@ -517,11 +541,12 @@ ureq = { version = "2", features = ["json"] }
 # Perf controls: 0.17.0's complete-snapshot normalization made `.kgl` load a
 # measured regression cell for the 0.2.17 release, which recorded the ~48 ms
 # fixed cost. That is historical evidence, not a prediction for this bump:
-# 0.17.2 through 0.17.9 do not change loading or graph construction — checked
+# 0.17.2 through 0.17.10 do not change loading or graph construction — checked
 # entry by entry against each upstream changelog; 0.17.6/0.17.7 are skill and
-# recipe surfaces, MCP delivery and boot-time resolution only, and 0.17.8/0.17.9
+# recipe surfaces, MCP delivery and boot-time resolution only, 0.17.8/0.17.9
 # are the vault reader and writer, a code path a `TrackAnalysis` build never
-# enters. Their faster
+# enters, and 0.17.10 edits the Cypher executor's projection and scope handling,
+# which a build never executes. Their faster
 # count, existence, and retrieval-score plans are query improvements rather
 # than a path sonagram executes while mapping a library, so no build/rescan
 # performance claim moves here. The stable control remains `status <root>` in
@@ -540,8 +565,8 @@ ureq = { version = "2", features = ["json"] }
 # the very files the server's own file layer parses. The cost is one optional,
 # pure-Rust dependency (`yaml-rust2`).
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.17.9", default-features = false, features = ["okf"] }
-kglite-mcp-server = { version = "0.17.9", default-features = false }
+kglite = { version = "0.17.10", default-features = false, features = ["okf"] }
+kglite-mcp-server = { version = "0.17.10", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
