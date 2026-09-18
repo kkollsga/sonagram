@@ -4,6 +4,47 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.23] - 2026-09-19
+
+This release updates the embedded graph engine to KGLite 0.17.10. Sonagram's
+analysis, graph schema, persistence contract and served tool surface are
+unchanged; no sonagram source needed an edit.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Changed
+
+- Embedded KGLite: 0.17.9 → 0.17.10, and the Python runtime floor with it
+  (`kglite>=0.17.10`).
+
+### Fixed
+
+- Inherited from KGLite 0.17.10: a non-aggregating `WITH` is a scope barrier
+  again. It used to project the row's values but leave node, edge and path
+  *bindings* in place, so a variable the projection dropped stayed silently
+  bound — a later `MATCH` on that name anchored on the stale node instead of
+  scanning, `OPTIONAL MATCH` read it back out of a null-extended row, and
+  `RETURN *` listed an out-of-scope column. The write clauses lost writes the
+  same way and just as quietly: `CREATE`, `SET`, `MERGE` and `FOREACH` after
+  such a `WITH` acted on nothing, with no error. An *aggregating* `WITH` was
+  correct throughout.
+- Inherited from KGLite 0.17.10: `*` written beside another projection item now
+  expands. `RETURN *` / `WITH *` expanded only when the `*` stood alone;
+  alongside anything else it was projected like an ordinary expression, giving
+  a column literally named `*` while every value-carrying name in scope was
+  dropped. Two spellings lost rows rather than cells — `WITH *, count(*) AS c`
+  folded the whole input into one group, and `WITH DISTINCT *, 1 AS k`
+  deduplicated every row down to one. `MATCH p = (a)-->(b) RETURN *` now also
+  returns `p`.
+
+Both repairs reach the query surface sonagram hands to users and agents —
+`sonagram playlist --cypher` and the served `cypher_query`. No query sonagram
+itself authors uses either shape, so nothing in the bundled skills, the CLI
+examples or the docs changes answer.
+
 ## [0.2.22] - 2026-09-18
 
 This release updates the embedded graph engine to KGLite 0.17.9. Sonagram's
