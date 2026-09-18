@@ -38,21 +38,21 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.17.7 (twenty-three
-# releases across thirteen sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
+# compile time, and consume it in a later plan), kglite 0.17.9 (twenty-five
+# releases across fourteen sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
 # in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
 # in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 in 0.2.14, 0.16.20 in 0.2.15,
 # 0.16.21 + 0.16.22 in 0.2.16, 0.16.23 + 0.16.24 + 0.17.0 + 0.17.1 in 0.2.17,
 # 0.17.2 + 0.17.3 in 0.2.18, 0.17.4 in 0.2.19, 0.17.5 in 0.2.20,
-# 0.17.6 + 0.17.7 here; all
+# 0.17.6 + 0.17.7 in 0.2.21, 0.17.8 + 0.17.9 here; all
 # goldens byte-identical and `capture_goldens` never run throughout.
 # Only four have ever reached our source: 0.16.14 (import paths), 0.16.20 (the
 # manifest-side write opt-in, guarded by a text grep), 0.16.21, which replaced
 # that grep with an engine-side pin, and 0.17.7, whose producer skill layer
 # `sonagram/src/mcp_server.rs` now registers — all four are described below.
-# Nothing else in this bump reaches us: `cargo check -p sonagram --all-targets`
-# is clean across both releases and every documented Rust break lands on a type
-# we never name.
+# Nothing in 0.17.8 or 0.17.9 joins them: `cargo test -p sonagram` needed no
+# source edit across both releases, and every documented Rust break in them
+# lands in `kglite::okf`, a module we never name.
 #
 # 0.16.10 is retrieval machinery: `build_text_index` / `text_bm25()` /
 # `score_fuse()` add a BM25 lexical lane, and vector indexes gain the same
@@ -396,6 +396,54 @@ ureq = { version = "2", features = ["json"] }
 # subqueries keep their declared result schema. We carry no parser or executor
 # workaround, so this is additive syntax plus repaired query answers.
 #
+# 0.17.8 + 0.17.9 are the Obsidian vault format, and sonagram is not a vault:
+# we build our graph from `TrackAnalysis` records in `sonagram/src/graph/`, not
+# from markdown, and the `okf` feature is on here for exactly one symbol —
+# `kglite::api::skills::parse_markdown`, which reads a `SKILL.md` frontmatter
+# body (see the note above the pins). Everything the two releases add hangs off
+# `kglite::okf::build` / `export` and `.kglite/vault.yaml`: the `obsidian`
+# dialect as a real format rather than an alias for `loose`, `structure:`
+# deriving `Section` / `Chunk` / callout / fence / list / table nodes from a
+# note's body, `edge_defaults:`, `export.edge_tables`, `okf.validate`,
+# `okf.fingerprint` / `rebuild_if_changed`, and the `kglite okf
+# check|build|export|status` commands. We call none of it, and the four
+# major-class `kglite::okf` breaks `make semver-check` reported upstream
+# (`build` returning `BuildOutput`, `BuildOptions` gaining `profile` and losing
+# `embed`, `Profile` losing struct-literal construction, `ExportOptions` /
+# `ExportReport` gaining fields) land on types no sonagram file names — which
+# is why this bump edits no source at all.
+#
+# What does reach us is one line of the embedded server's boot, and it reaches
+# the served surface rather than our code. 0.17.8 stops `kglite-mcp-server`
+# bundling a skill whose gate the boot already knows is shut: the four
+# code-graph skills (`read_code_source`, `explore`, `code_graph_analysis`,
+# `code_graph_views`) are bundled only where the graph carries `Function` /
+# `Class`, and `vault_authoring` only under `--vault`. A music graph carries
+# neither and we never pass `--vault`, so both sets were already withheld from
+# the agent by their `applies_when:` gates — what changes is that mcp-methods
+# no longer charges their bodies against its 64 KiB per-session skill budget,
+# which it levies at resolve time before any gate is read. Our five music
+# methodologies are unaffected either way: they are producer records from
+# `ServerExtensions::with_skills`, and `tests/python/test_mcp_assets.py` still
+# asserts `producer skills: 5 served` in both the installed and the file-less
+# layout. 0.17.9 trims the same budget further (`graph_overview` drops the
+# code-graph preamble, `save_graph` two restating sections) with no change to
+# which skills exist. `okf` also became a default feature of
+# `kglite-mcp-server` so a plain `cargo install` ships a working `--vault`; our
+# `default-features = false` pin is unchanged by that, and `--vault` is not a
+# mode this binary offers.
+#
+# The rest of 0.17.8/0.17.9's non-vault fixes are engine correctness we inherit
+# for free. Two are Cypher, so they reach `sonagram playlist --cypher` and
+# agent queries: a fused `MATCH … WITH <group>, count(…)` now keeps the
+# pattern's node labels (and a two-`MATCH` fusion its row multiplicity), and a
+# parenthesised label check — `WHERE (a:Album OR a:Track)` — parses as the
+# boolean expression it is instead of failing as a MATCH pattern. We carried no
+# workaround for either, so this is repaired answers, not a migration. The disk
+# `flock`-across-`fork` fix is for a storage mode we never select. Neither
+# touches graph construction, which is why both goldens are byte-identical and
+# `capture_goldens` was not run.
+#
 # 0.17.6 + 0.17.7 are the skill layers, and none of them reaches our source in
 # this bump. 0.17.6 lets a `.kgl` carry the markdown methodology for querying
 # it — `kglite::api::skills` writes `KgliteSkill` system-label nodes that are
@@ -469,9 +517,11 @@ ureq = { version = "2", features = ["json"] }
 # Perf controls: 0.17.0's complete-snapshot normalization made `.kgl` load a
 # measured regression cell for the 0.2.17 release, which recorded the ~48 ms
 # fixed cost. That is historical evidence, not a prediction for this bump:
-# 0.17.2 through 0.17.7 do not change loading or graph construction — checked
-# entry by entry against each upstream changelog, and 0.17.6/0.17.7 are skill
-# and recipe surfaces, MCP delivery and boot-time resolution only. Their faster
+# 0.17.2 through 0.17.9 do not change loading or graph construction — checked
+# entry by entry against each upstream changelog; 0.17.6/0.17.7 are skill and
+# recipe surfaces, MCP delivery and boot-time resolution only, and 0.17.8/0.17.9
+# are the vault reader and writer, a code path a `TrackAnalysis` build never
+# enters. Their faster
 # count, existence, and retrieval-score plans are query improvements rather
 # than a path sonagram executes while mapping a library, so no build/rescan
 # performance claim moves here. The stable control remains `status <root>` in
@@ -490,8 +540,8 @@ ureq = { version = "2", features = ["json"] }
 # the very files the server's own file layer parses. The cost is one optional,
 # pure-Rust dependency (`yaml-rust2`).
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.17.7", default-features = false, features = ["okf"] }
-kglite-mcp-server = { version = "0.17.7", default-features = false }
+kglite = { version = "0.17.9", default-features = false, features = ["okf"] }
+kglite-mcp-server = { version = "0.17.9", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;

@@ -1556,7 +1556,7 @@ dependencies = [
 
 [[package]]
 name = "kglite"
-version = "0.17.7"
+version = "0.17.9"
 dependencies = [
  "bzip2",
  "chrono",
@@ -1572,6 +1572,7 @@ dependencies = [
  "memmap2",
  "petgraph",
  "postcard",
+ "pulldown-cmark",
  "rayon",
  "regex",
  "rstar 0.13.0",
@@ -1590,9 +1591,10 @@ dependencies = [
 
 [[package]]
 name = "kglite-mcp-server"
-version = "0.17.7"
+version = "0.17.9"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "clap",
@@ -1704,9 +1706,9 @@ dependencies = [
 
 [[package]]
 name = "mcp-methods"
-version = "0.4.11"
+version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31c5a17334897b67053e843235be8c66610d0c6684c845bea30e70ecff9dd204"
+checksum = "5bcc5fdac2ffd82893fbc640b569785bdc63ead7f3c6c3d695685b692ddf2d1a"
 dependencies = [
  "anyhow",
  "clap",
@@ -2061,6 +2063,17 @@ checksum = "645dbe486e346d9b5de3ef16ede18c26e6c70ad97418f4874b8b1889d6e761ea"
 dependencies = [
  "ar_archive_writer",
  "cc",
+]
+
+[[package]]
+name = "pulldown-cmark"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9f068eba8e7071c5f9511831b44f32c740d5adf574e990f946ddb53db2f314e"
+dependencies = [
+ "bitflags 2.13.1",
+ "memchr",
+ "unicase",
 ]
 
 [[package]]
@@ -3216,6 +3229,12 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "unicase"
+version = "2.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbc4bc3a9f746d862c45cb89d705aa10f187bb96c76001afab07a0d35ce60142"
 
 [[package]]
 name = "unicode-ident"
