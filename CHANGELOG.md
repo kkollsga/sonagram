@@ -4,6 +4,41 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.22] - 2026-09-18
+
+This release updates the embedded graph engine to KGLite 0.17.9. Sonagram's
+analysis, graph schema, persistence contract and served tool surface are
+unchanged; no sonagram source needed an edit.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Changed
+
+- Embedded KGLite: 0.17.7 → 0.17.9, and the Python runtime floor with it
+  (`kglite>=0.17.9`).
+- `sonagram-mcp-server` boots with a smaller skill payload. KGLite 0.17.8 stops
+  bundling a skill whose gate the boot already knows is shut — the four
+  code-graph skills unless the graph carries `Function`/`Class` nodes, and
+  `vault_authoring` outside vault mode — and 0.17.9 trims the remaining bodies
+  further. A music graph carries neither node type, so those skills were
+  already withheld from the agent; what changes is that they no longer spend
+  the MCP session's 64 KiB skill budget, which is charged before any gate is
+  read. Sonagram's own five music methodologies are unaffected and still serve
+  in every deployment shape.
+
+### Fixed
+
+- Inherited from KGLite 0.17.8: a fused `MATCH … WITH <group>, count(…)` now
+  keeps the pattern's node labels (and a two-`MATCH` fusion its row
+  multiplicity), so a grouped count over a labelled node no longer counts peers
+  of other labels; and a parenthesised label check such as
+  `WHERE (a:Album OR a:Track)` now parses as the boolean expression it is
+  instead of failing as a malformed MATCH pattern. Both reach `sonagram
+  playlist --cypher` and agent queries.
+
 ## [0.2.21] - 2026-09-17
 
 This release updates the embedded graph engine to KGLite 0.17.7 and moves the
