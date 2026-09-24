@@ -4,6 +4,44 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.24] - 2026-09-24
+
+This release updates the embedded graph engine to KGLite 0.18.0 (taking 0.17.11
+and 0.17.12 along the way). Sonagram's analysis, graph schema, persistence
+contract and served tool surface are unchanged; no sonagram source needed an
+edit.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Changed
+
+- Embedded KGLite: 0.17.10 → 0.18.0, and the Python runtime floor with it
+  (`kglite>=0.18.0`).
+- Inherited from KGLite 0.18.0, in queries you write through
+  `sonagram playlist --cypher` or the MCP `cypher_query`: `r.type`, `r.id` and
+  the endpoint keys (`r.start`, `` r.`end` ``) read a relationship's stored
+  property first and otherwise fall back to the relationship itself, in every
+  clause. Sonagram stores none of those keys on a relationship, so `r.type`
+  still answers the relationship type; `r.id`, `r.start` and `` r.`end` `` on a
+  matched relationship now answer its id and endpoint ids instead of `null`.
+- Inherited from KGLite 0.18.0: `shortestPath` / `allShortestPaths` honour a
+  written hop bound (`*..3`) and refuse shapes they cannot search (a minimum
+  above 1, more than one relationship) with a syntax error instead of a wrong
+  path.
+- Inherited from KGLite 0.18.0: node embedding stores are also reachable from
+  Cypher through `db.node_embeddings.*` / `db.embeddings.*`. They list store
+  metadata and search by a supplied vector; there is still no Cypher way to read
+  a Track's stored similarity vector.
+
+### Fixed
+
+- Inherited from KGLite 0.18.0: `labels(x)[i]` answered `null` for a node
+  carried as a value (from `startNode(r)`, `collect` / `UNWIND`, a path or a
+  subquery) while `head(labels(x))` was right; it now answers the label.
+
 ## [0.2.23] - 2026-09-19
 
 This release updates the embedded graph engine to KGLite 0.17.10. Sonagram's
