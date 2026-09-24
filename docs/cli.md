@@ -260,7 +260,7 @@ source sandbox, never the graph/config parent, and prints the absolute executabl
 `sonagram-mcp-server` sibling from the installed environment when available
 (`RUN (PowerShell)` on Windows). The manifest names that sandbox by a path
 relative to itself, and the server resolves it beside the manifest, so a client
-may launch the server from any working directory. This thin KGLite 0.17.10
+may launch the server from any working directory. This thin KGLite 0.18.0
 frontend adds typed profile/policy/curate/audit/explain and playlist-store tools
 while preserving KGLite's generic server and live graph lifecycle. The server
 also carries the same five methodologies inside the binary, so a deployment

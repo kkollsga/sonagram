@@ -38,23 +38,25 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.17.10 (twenty-six
-# releases across fifteen sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
+# compile time, and consume it in a later plan), kglite 0.18.0 (twenty-nine
+# releases across sixteen sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
 # in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
 # in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 in 0.2.14, 0.16.20 in 0.2.15,
 # 0.16.21 + 0.16.22 in 0.2.16, 0.16.23 + 0.16.24 + 0.17.0 + 0.17.1 in 0.2.17,
 # 0.17.2 + 0.17.3 in 0.2.18, 0.17.4 in 0.2.19, 0.17.5 in 0.2.20,
-# 0.17.6 + 0.17.7 in 0.2.21, 0.17.8 + 0.17.9 in 0.2.22, 0.17.10 here; all
+# 0.17.6 + 0.17.7 in 0.2.21, 0.17.8 + 0.17.9 in 0.2.22, 0.17.10 in 0.2.23,
+# 0.17.11 + 0.17.12 + 0.18.0 here; all
 # goldens byte-identical and `capture_goldens` never run throughout.
 # Only four have ever reached our source: 0.16.14 (import paths), 0.16.20 (the
 # manifest-side write opt-in, guarded by a text grep), 0.16.21, which replaced
 # that grep with an engine-side pin, and 0.17.7, whose producer skill layer
 # `sonagram/src/mcp_server.rs` now registers — all four are described below.
 # Nothing since has joined them: 0.17.8 and 0.17.9 broke only `kglite::okf`
-# types we never name, and 0.17.10 is a pure Cypher-executor fix release with
+# types we never name, 0.17.10 is a pure Cypher-executor fix release with
 # no public API change at all (its own `semver-check` reports 196 checks and no
-# required update), so `cargo test -p sonagram` needed no source edit for any
-# of the three.
+# required update), and every Rust break in 0.17.11, 0.17.12 and 0.18.0 lands on
+# an item no sonagram file names (see the 0.18.0 note below), so `cargo test -p
+# sonagram` needed no source edit for any of the six.
 #
 # 0.16.10 is retrieval machinery: `build_text_index` / `text_bm25()` /
 # `score_fuse()` add a BM25 lexical lane, and vector indexes gain the same
@@ -398,6 +400,35 @@ ureq = { version = "2", features = ["json"] }
 # subqueries keep their declared result schema. We carry no parser or executor
 # workaround, so this is additive syntax plus repaired query answers.
 #
+# 0.18.0 (with 0.17.11 + 0.17.12, which the 0.17.10 pin already admitted but
+# the lockfile never took) is relationship embeddings at parity with nodes, and
+# sonagram is a node-embedding consumer through the Rust API only: we write one
+# `EmbeddingStore` per graph (`sonagram/src/graph/mod.rs`) and read it through
+# `kglite::api::algorithms::vector_search` (`sonagram/src/graph/derive.rs`).
+# The four major-class Rust findings of kglite's `make semver-check` —
+# `TextScoreRewrite` / `RelValue` / `EdgeBinding` / `ImportStats` gaining public
+# fields, `RawOp` gaining relationship-embedding variants, and the arity of
+# `import_embeddings_from_file` / `export_embeddings_to_file` /
+# `embed_property` / `resolve_ops` — all land on items no sonagram file names
+# (checkable by `git grep` for each name), as do 0.17.11's
+# `okf::rebuild_if_changed` and 0.17.12's `RecipeRecord.tool`. The Python-side
+# refusals (`embeddings()` / `embedding()` / `remove_embeddings()` on a missing
+# store now raise instead of answering `{}` / `None`) reach no code here: the
+# `sonagram` wrapper hands back a kglite graph and calls no embedding method
+# itself. What does reach users is the query surface we serve —
+# `sonagram playlist --cypher` and the MCP `cypher_query`: `r.type` / `r.id`
+# and the endpoint keys now read a stored relationship property first and fall
+# back to the envelope, `shortestPath` honours hop bounds (we teach no
+# `shortestPath`), `SET n.type` is allowed, and `db.node_embeddings.*` exists.
+# None of it changes a query our docs or five methodologies teach — we store no
+# `type` / `id` / `start` / `end` property on any relationship, so every `r.type`
+# an agent writes still answers the relationship type — and `db.node_embeddings
+# .list` yields store metadata, not vectors, so AGENT-GUIDE.md's "no Cypher way
+# to read a Track's stored embedding" stays true (probed against the 0.18.0
+# wheel). 0.17.12's additive `.kgl` provenance stamps do not enter the canonical
+# digest; both goldens are byte-identical and `capture_goldens` was not run, and
+# `tests/python/test_mcp_assets.py`'s whole-set tool assertion is unchanged.
+#
 # 0.17.10 is a pure Cypher-executor fix release — no public API change, no new
 # syntax, no dependency move (mcp-methods stays 0.4.12) — and it repairs two
 # wrong answers in clause shapes sonagram itself never writes. (1) A
@@ -541,12 +572,13 @@ ureq = { version = "2", features = ["json"] }
 # Perf controls: 0.17.0's complete-snapshot normalization made `.kgl` load a
 # measured regression cell for the 0.2.17 release, which recorded the ~48 ms
 # fixed cost. That is historical evidence, not a prediction for this bump:
-# 0.17.2 through 0.17.10 do not change loading or graph construction — checked
+# 0.17.2 through 0.18.0 do not change loading or graph construction — checked
 # entry by entry against each upstream changelog; 0.17.6/0.17.7 are skill and
 # recipe surfaces, MCP delivery and boot-time resolution only, 0.17.8/0.17.9
 # are the vault reader and writer, a code path a `TrackAnalysis` build never
-# enters, and 0.17.10 edits the Cypher executor's projection and scope handling,
-# which a build never executes. Their faster
+# enters, 0.17.10 edits the Cypher executor's projection and scope handling,
+# which a build never executes, and 0.17.11 through 0.18.0 add vault, recipe and
+# relationship-embedding surfaces a `TrackAnalysis` build never calls. Their faster
 # count, existence, and retrieval-score plans are query improvements rather
 # than a path sonagram executes while mapping a library, so no build/rescan
 # performance claim moves here. The stable control remains `status <root>` in
@@ -565,8 +597,8 @@ ureq = { version = "2", features = ["json"] }
 # the very files the server's own file layer parses. The cost is one optional,
 # pure-Rust dependency (`yaml-rust2`).
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.17.10", default-features = false, features = ["okf"] }
-kglite-mcp-server = { version = "0.17.10", default-features = false }
+kglite = { version = "0.18.0", default-features = false, features = ["okf"] }
+kglite-mcp-server = { version = "0.18.0", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
