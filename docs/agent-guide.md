@@ -1,7 +1,7 @@
 # Agent guide
 
 sonagram is built for AI agents: the graph is served by
-`sonagram-mcp-server`, a thin KGLite 0.18.0 frontend, and an agent translates intent into a typed Sonagram
+`sonagram-mcp-server`, a thin KGLite 0.19.1 frontend, and an agent translates intent into a typed Sonagram
 curation brief. The library—not the agent—selects, orders, repairs, audits, and
 stores playlists. The repo
 ships the full agent-facing manual as **`AGENT-GUIDE.md`** at its root, plus an
@@ -17,8 +17,10 @@ An agent starts with these generic MCP tools:
 - **`cypher_query`** — run one openCypher query, get up to ~15 rows inline. It
   takes a `query` string, an optional `params` object binding the query's
   `$name` placeholders, an optional `timeout_ms` (the server's default
-  deadline is 180 seconds), and an optional `_response` object for bounded or
-  full response control. Bind values through `params` rather than inlining
+  deadline is 180 seconds), an optional `_response` object for bounded or
+  full response control, and an optional `valid_at` date that scopes the query
+  to a validity instant (sonagram's graph declares no validity intervals, so
+  leave it unset). Bind values through `params` rather than inlining
   them; a `$name` the query uses and `params` omits is an error.
 - **`music_library_profile`** — report eligible counts, axis coverage, and
   distributions before translating an unusual request. Read coverage and

@@ -486,14 +486,20 @@ with tempfile.TemporaryDirectory() as tmp:
         # against each other, and both drifted: the guide said the tool takes
         # "a single `query` string and nothing else" while the server had
         # accepted `params` since at least 0.16.22, and 0.17.1 then added
-        # `timeout_ms`. An agent that believes the guide inlines every literal
-        # by hand and never sets a deadline. Pin the served property set and
+        # `timeout_ms`, and 0.19.0 added `valid_at`. An agent that believes the
+        # guide inlines every literal by hand and never sets a deadline. Pin the served property set and
         # require the guide to name each member, so the next argument kglite
         # adds turns this red instead of quietly falsifying the manual.
         cypher_args = set(
             by_name["cypher_query"].get("inputSchema", {}).get("properties", {})
         )
-        assert cypher_args == {"query", "params", "timeout_ms", "_response"}, (
+        assert cypher_args == {
+            "query",
+            "params",
+            "timeout_ms",
+            "valid_at",
+            "_response",
+        }, (
             f"cypher_query's argument set moved: {sorted(cypher_args)}. "
             "Update AGENT-GUIDE.md and docs/agent-guide.md in the same change."
         )
