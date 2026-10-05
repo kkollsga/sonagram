@@ -4,6 +4,32 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.26] - 2026-10-05
+
+This release updates the embedded graph engine to KGLite 0.19.3 (taking 0.19.2
+along the way; 0.19.2 was published to PyPI only, so on crates.io 0.19.3
+follows 0.19.1). Sonagram's analysis, graph schema, persistence contract and
+mapping are unchanged; no sonagram Rust source needed an edit.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Changed
+
+- Embedded KGLite: 0.19.1 → 0.19.3, and the Python runtime floor with it
+  (`kglite>=0.19.3`).
+- Inherited from KGLite 0.19.2 and 0.19.3: the new valid-time default (an
+  unprefixed statement reads as of today on a graph that declares validity),
+  the blueprint changes and the load-time data advisories do not apply to a
+  sonagram graph, which declares no validity and is built through
+  `kglite::api::mutation`. One change reaches queries you write through
+  `sonagram playlist --cypher` or the MCP `cypher_query`: `date` / `datetime`
+  plus or minus a `duration` with months or years shifts by calendar months
+  (`date('2024-01-15') + duration({months: 1})` is `2024-02-15`, was
+  `2024-02-14`). Use `duration({days: 30})` for a 30-day step.
+
 ## [0.2.25] - 2026-10-03
 
 This release updates the embedded graph engine to KGLite 0.19.1 (taking 0.18.1

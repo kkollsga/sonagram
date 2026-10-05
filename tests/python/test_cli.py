@@ -22,7 +22,7 @@ import tempfile
 import sonagram
 from sonagram.cli import main
 
-VERSION = "0.2.25"
+VERSION = "0.2.26"
 
 assert sonagram.__version__ == VERSION, (
     f"expected {VERSION}, got {sonagram.__version__!r}"
