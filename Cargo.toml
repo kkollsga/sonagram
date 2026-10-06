@@ -38,14 +38,14 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.19.3 (thirty-four
-# releases across seventeen sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
+# compile time, and consume it in a later plan), kglite 0.19.4 (thirty-five
+# releases across eighteen sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
 # in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
 # in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 in 0.2.14, 0.16.20 in 0.2.15,
 # 0.16.21 + 0.16.22 in 0.2.16, 0.16.23 + 0.16.24 + 0.17.0 + 0.17.1 in 0.2.17,
 # 0.17.2 + 0.17.3 in 0.2.18, 0.17.4 in 0.2.19, 0.17.5 in 0.2.20,
 # 0.17.6 + 0.17.7 in 0.2.21, 0.17.8 + 0.17.9 in 0.2.22, 0.17.10 in 0.2.23,
-# 0.17.11 + 0.17.12 + 0.18.0 + 0.18.1 + 0.19.0 + 0.19.1 in 0.2.25, 0.19.2 + 0.19.3 here; all
+# 0.17.11 + 0.17.12 + 0.18.0 + 0.18.1 + 0.19.0 + 0.19.1 in 0.2.25, 0.19.2 + 0.19.3 in 0.2.26, 0.19.4 here; all
 # goldens byte-identical and `capture_goldens` never run throughout.
 # Only four have ever reached our source: 0.16.14 (import paths), 0.16.20 (the
 # manifest-side write opt-in, guarded by a text grep), 0.16.21, which replaced
@@ -569,7 +569,7 @@ ureq = { version = "2", features = ["json"] }
 # already-built graph: our mapping, node identity, serialization, and graph
 # schema stay unchanged.
 #
-# 0.18.1, 0.19.0, 0.19.1, 0.19.2 and 0.19.3 reach no sonagram Rust source either: the breaks the
+# 0.18.1, 0.19.0, 0.19.1, 0.19.2, 0.19.3 and 0.19.4 reach no sonagram Rust source either: the breaks the
 # 0.19 changelog lists (new fields on `blueprint::Settings`, `MaterializedLabel`,
 # `RdfStats`, `RdfConfig`; `DirGraph::save_disk` returning `SaveError`; removed
 # fluent temporal helpers; a filter argument on traversal/subgraph fns) land on
@@ -589,6 +589,17 @@ ureq = { version = "2", features = ["json"] }
 # calls no blueprint, `from_records` or temporal surface, so none is reached;
 # both goldens stay byte-identical. 0.19.2 shipped to PyPI only and its crates
 # were held back, so on crates.io 0.19.3 follows 0.19.1.
+#
+# 0.19.4's breaks do not reach sonagram either, each checked against the code:
+# the title rules (`add_nodes` titling from a `title` column, `CREATE`/`MERGE`
+# preferring `title`, `unique_id_field='title'`, id-derived titles) change what
+# `n.title` answers only where nodes are written without a title field, and
+# sonagram's node loads pass an explicit one (the song layer's update pass adds
+# properties to existing Track nodes), so both goldens are byte-identical; the lone `CREATE ... {title: ...}` is a traversal test fixture
+# that still passes unchanged. The fluent validity writers, `create_index` on
+# disk graphs, `DeclareReport`, `CALL outline` id kinds and the
+# `adopt_client_roots` refusal name surfaces and manifest keys no sonagram file
+# uses.
 #
 # Perf controls: 0.17.0's complete-snapshot normalization made `.kgl` load a
 # measured regression cell for the 0.2.17 release, which recorded the ~48 ms
@@ -618,8 +629,8 @@ ureq = { version = "2", features = ["json"] }
 # the very files the server's own file layer parses. The cost is one optional,
 # pure-Rust dependency (`yaml-rust2`).
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.19.3", default-features = false, features = ["okf"] }
-kglite-mcp-server = { version = "0.19.3", default-features = false }
+kglite = { version = "0.19.4", default-features = false, features = ["okf"] }
+kglite-mcp-server = { version = "0.19.4", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
