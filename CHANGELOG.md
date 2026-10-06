@@ -4,6 +4,28 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.27] - 2026-10-06
+
+This release updates the embedded graph engine to KGLite 0.19.4. Sonagram's
+analysis, graph schema, persistence contract and mapping are unchanged; no
+sonagram Rust source needed an edit.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Changed
+
+- Embedded KGLite: 0.19.3 → 0.19.4, and the Python runtime floor with it
+  (`kglite>=0.19.4`).
+- Inherited from KGLite 0.19.4: the title rules (a `title` column or pattern
+  key now titles a node; a node created without a title is titled from its id)
+  and the validity-writer checks do not reach a sonagram graph, which titles
+  every node explicitly and declares no validity. Queries you write through
+  `sonagram playlist --cypher` or the MCP `cypher_query` are unaffected, and
+  filtered `MATCH ... LIMIT` queries hold far less memory.
+
 ## [0.2.26] - 2026-10-05
 
 This release updates the embedded graph engine to KGLite 0.19.3 (taking 0.19.2
