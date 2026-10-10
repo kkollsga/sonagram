@@ -4,6 +4,36 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.28] - 2026-10-10
+
+This release updates the embedded graph engine to KGLite 0.19.6 (and 0.19.5,
+which sonagram skipped). Sonagram's analysis, graph schema, persistence
+contract and mapping are unchanged; no sonagram Rust source needed an edit.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Changed
+
+- Embedded KGLite: 0.19.4 → 0.19.6, and the Python runtime floor with it
+  (`kglite>=0.19.6`).
+- Inherited from KGLite 0.19.5: an unaliased `RETURN` item is now named by the
+  text the query wrote (`RETURN toInteger('3')` yields the column
+  `toInteger('3')`, not `tointeger(3)`). Queries you write through
+  `sonagram playlist --cypher` or the MCP `cypher_query` that read such a
+  column by its old lowercased name need an `AS` alias; plain `t.content_hash`
+  and `t` columns are unchanged. `MERGE` now returns one row per match, and
+  reusing a path variable within a query is an error.
+- Inherited from KGLite 0.19.6: ontology rules declared at `warn` or `error`
+  now bind writes, and a held writer lease or a read-only handle raises its own
+  error class and code. Sonagram declares no ontology and it
+  commit through the loaders that ignore both, so no sonagram graph or command
+  changes behaviour.
+- Embedded Bolt, Node and Java changes in these releases (server auth, queueing
+  and query limits, bindings) name surfaces sonagram does not ship.
+
 ## [0.2.27] - 2026-10-06
 
 This release updates the embedded graph engine to KGLite 0.19.4. Sonagram's
