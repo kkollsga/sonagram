@@ -336,6 +336,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "chrono-tz"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a6139a8597ed92cf816dfb33f5dd6cf0bb93a6adc938f11039f371bc5bcd26c3"
+dependencies = [
+ "chrono",
+ "phf",
+]
+
+[[package]]
 name = "clap"
 version = "4.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1556,10 +1566,11 @@ dependencies = [
 
 [[package]]
 name = "kglite"
-version = "0.19.6"
+version = "0.20.0"
 dependencies = [
  "bzip2",
  "chrono",
+ "chrono-tz",
  "crc32fast",
  "csv",
  "fixedbitset",
@@ -1592,7 +1603,7 @@ dependencies = [
 
 [[package]]
 name = "kglite-mcp-server"
-version = "0.19.6"
+version = "0.20.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -1708,9 +1719,9 @@ dependencies = [
 
 [[package]]
 name = "mcp-methods"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bcc5fdac2ffd82893fbc640b569785bdc63ead7f3c6c3d695685b692ddf2d1a"
+checksum = "97eb20dc0d7038ec9ff777df628774b32081dadebe5404aaa100c47d702308e9"
 dependencies = [
  "anyhow",
  "clap",
@@ -1989,6 +2000,24 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_derive",
+]
+
+[[package]]
+name = "phf"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "913273894cec178f401a31ec4b656318d95473527be05c0752cc41cdc32be8b7"
+dependencies = [
+ "phf_shared",
+]
+
+[[package]]
+name = "phf_shared"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06005508882fb681fd97892ecff4b7fd0fee13ef1aa569f8695dae7ab9099981"
+dependencies = [
+ "siphasher",
 ]
 
 [[package]]
@@ -2677,6 +2706,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 
 [[package]]
+name = "siphasher"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2700,7 +2735,7 @@ dependencies = [
 
 [[package]]
 name = "sonagram"
-version = "0.2.28"
+version = "0.2.29"
 dependencies = [
  "blake3",
  "filetime",
@@ -2719,7 +2754,7 @@ dependencies = [
 
 [[package]]
 name = "sonagram-python"
-version = "0.2.28"
+version = "0.2.29"
 dependencies = [
  "kglite",
  "numpy",

@@ -1,4 +1,8 @@
-.PHONY: check-free-space prune-target check-dev-docs
+.PHONY: gate check-free-space prune-target check-dev-docs
+
+# Fast local checkpoint: the dev-docs size bound runs here so it is a gate
+# someone actually invokes (CI never sees the gitignored dev-docs/).
+gate: check-dev-docs
 
 check-free-space:
 	@./scripts/check_free_space.sh

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "sonagram"
-version = "0.2.28"
+version = "0.2.29"
 description = "Map a music library's analysis into a kglite knowledge graph for AI agents"
 requires-python = ">=3.9"
 license = {file = "LICENSE"}
@@ -34,7 +34,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 dependencies = [
-    "kglite>=0.19.6",
+    "kglite>=0.20.0",
 ]
 
 # Bundled Rust console script. The CLI is linked into this wheel's existing

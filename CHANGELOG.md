@@ -4,6 +4,31 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.29] - 2026-10-12
+
+This release updates the embedded graph engine to KGLite 0.20.0 (and 0.19.7,
+which sonagram skipped). Sonagram's analysis, graph schema, mapping and
+playlist behavior are unchanged; no sonagram Rust source needed an edit.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Changed
+
+- Embedded KGLite: 0.19.6 → 0.20.0, and the Python runtime floor with it
+  (`kglite>=0.20.0`).
+- Inherited from KGLite 0.20.0: a graph saved by this release is a `.kgl` v8
+  file, which sonagram 0.2.28 and earlier cannot open. This release still opens
+  graphs saved by earlier versions. Downgrading means rebuilding the graph with
+  `sonagram build`.
+
+### Added
+
+- `make gate` runs the `dev-docs/` size bound (`check-dev-docs`), which no
+  target invoked before.
+
 ## [0.2.28] - 2026-10-10
 
 This release updates the embedded graph engine to KGLite 0.19.6 (and 0.19.5,
