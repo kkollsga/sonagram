@@ -1610,7 +1610,7 @@ dependencies = [
 
 [[package]]
 name = "kglite"
-version = "0.21.1"
+version = "0.21.2"
 dependencies = [
  "bzip2",
  "chrono",
@@ -1648,7 +1648,7 @@ dependencies = [
 
 [[package]]
 name = "kglite-mcp-server"
-version = "0.21.1"
+version = "0.21.2"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2802,7 +2802,7 @@ dependencies = [
 
 [[package]]
 name = "sonagram"
-version = "0.2.30"
+version = "0.2.31"
 dependencies = [
  "blake3",
  "filetime",
@@ -2821,7 +2821,7 @@ dependencies = [
 
 [[package]]
 name = "sonagram-python"
-version = "0.2.30"
+version = "0.2.31"
 dependencies = [
  "kglite",
  "numpy",

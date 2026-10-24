@@ -4,6 +4,27 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.31] - 2026-10-24
+
+This release updates the embedded graph engine to KGLite 0.21.2. Sonagram's
+analysis, graph schema, mapping and playlist behavior are unchanged; no
+sonagram Rust source needed an edit.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Changed
+
+- Embedded KGLite: 0.21.1 → 0.21.2, and the Python runtime floor with it
+  (`kglite>=0.21.2`).
+- `sonagram-mcp-server --selftest` now fails when KGLite skips a skill at load.
+  All five bundled music skills load, so the selftest still passes.
+- `sonagram-mcp-server` keeps answering `--version` itself: KGLite 0.21.2
+  prints `sonagram <version>`, while sonagram prints
+  `sonagram-mcp-server <version>`.
+
 ## [0.2.30] - 2026-10-24
 
 This release updates the embedded graph engine to KGLite 0.21.1 (and 0.21.0,
