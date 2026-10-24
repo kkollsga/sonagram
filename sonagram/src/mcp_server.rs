@@ -140,6 +140,17 @@ where
     T: Into<OsString>,
 {
     let argv: Vec<OsString> = args.into_iter().map(Into::into).collect();
+    // KGLite's stale-build check reads a binary's installed version from
+    // `<binary> --version`, so with `with_identity` that line must carry
+    // sonagram's version, not the engine's.
+    if argv
+        .iter()
+        .skip(1)
+        .any(|value| matches!(value.to_str(), Some("--version" | "-V")))
+    {
+        println!("{}", version_line());
+        return Ok(());
+    }
     // Let KGLite/Clap own its standard informational exits without forcing an
     // otherwise-unused graph argument first.
     if !argv
@@ -153,6 +164,11 @@ where
     let extensions = server_extensions()?;
     kglite_mcp_server::run_with_extensions(argv, extensions)?;
     Ok(())
+}
+
+/// The `--version` line: `<name> X.Y.Z`, whose last token KGLite parses.
+fn version_line() -> String {
+    format!("sonagram-mcp-server {}", env!("CARGO_PKG_VERSION"))
 }
 
 /// Drop GitHub credentials the launching client happened to export: a music
@@ -181,9 +197,9 @@ fn scrub_inherited_credentials() {
 /// right as its copy of a convention it did not own, and its failure mode was
 /// a false negative: a silently writable music server.
 ///
-/// [`ServerExtensions::with_identity`] (KGLite 0.21.0) makes `--version` and the
-/// stale-build notice name sonagram rather than KGLite, so a reload compares
-/// sonagram's own version.
+/// [`ServerExtensions::with_identity`] (KGLite 0.21.0) makes the stale-build
+/// notice, `ping` and `serverInfo` name sonagram rather than KGLite, so a reload
+/// compares sonagram's own version; `run` answers `--version` itself to match.
 ///
 /// [`ServerExtensions::with_skills`] (KGLite 0.17.7) carries the second half of
 /// the served surface: the five music methodologies as `owned:producer`
@@ -684,6 +700,16 @@ mod tests {
             serde_json::from_str(&failure("invalid_request", "bad input")).unwrap();
         assert_eq!(error["ok"], false);
         assert_eq!(error["error"]["code"], "invalid_request");
+    }
+
+    #[test]
+    fn version_line_ends_in_the_sonagram_version() {
+        let line = version_line();
+        assert_eq!(
+            line.split_whitespace().last(),
+            Some(env!("CARGO_PKG_VERSION")),
+            "KGLite parses the last token of --version: {line}"
+        );
     }
 
     /// `--reload-preflight` is KGLite's hidden flag: a running server re-executes
