@@ -181,6 +181,10 @@ fn scrub_inherited_credentials() {
 /// right as its copy of a convention it did not own, and its failure mode was
 /// a false negative: a silently writable music server.
 ///
+/// [`ServerExtensions::with_identity`] (KGLite 0.21.0) makes `--version` and the
+/// stale-build notice name sonagram rather than KGLite, so a reload compares
+/// sonagram's own version.
+///
 /// [`ServerExtensions::with_skills`] (KGLite 0.17.7) carries the second half of
 /// the served surface: the five music methodologies as `owned:producer`
 /// records, from the same [`crate::mcp::SKILL_ASSETS`] `sonagram mcp install`
@@ -193,6 +197,7 @@ fn scrub_inherited_credentials() {
 fn server_extensions() -> Result<ServerExtensions> {
     let extensions = ServerExtensions::new()
         .read_only()
+        .with_identity("sonagram", env!("CARGO_PKG_VERSION"))
         .with_skills(crate::mcp::skill_records()?);
     Ok(extensions.with_domain_tools(|registry| {
         // A generic KGLite graph must not acquire music methods merely because
@@ -679,6 +684,35 @@ mod tests {
             serde_json::from_str(&failure("invalid_request", "bad input")).unwrap();
         assert_eq!(error["ok"], false);
         assert_eq!(error["error"]["code"], "invalid_request");
+    }
+
+    /// `--reload-preflight` is KGLite's hidden flag: a running server re-executes
+    /// this binary with it and expects an exit with no side effects. Our
+    /// pre-boot path must pass it through untouched and write nothing.
+    #[test]
+    fn reload_preflight_flag_passes_startup_without_side_effects() {
+        let root = temp_dir("reload-preflight");
+        let graph = root.join("music.kgl");
+        std::fs::write(&graph, b"fixture").unwrap();
+        let argv = vec![
+            OsString::from("sonagram-mcp-server"),
+            OsString::from("--graph"),
+            graph.clone().into_os_string(),
+            OsString::from("--reload-preflight"),
+        ];
+        let before: Vec<_> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            startup_graph_path(&argv).unwrap(),
+            std::fs::canonicalize(&graph).unwrap()
+        );
+        let after: Vec<_> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(before, after, "startup path must not create files");
     }
 
     /// Argv parsing is manifest-blind, and deliberately so.
