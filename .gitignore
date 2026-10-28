@@ -56,14 +56,11 @@ secrets.toml
 Thumbs.db
 desktop.ini
 
-# Agent instruction trees (local only, both harnesses). `CLAUDE.md` +
-# `.claude/skills/` are the authority; `AGENTS.md` + `.agents/skills/` are
-# generated adapters. All four are ignored deliberately: they are local
-# working instructions, and tracking a generated adapter would put a
-# regeneration artifact under review on every conventions edit.
+# Agent instruction files (local only). `AGENTS.md` is the instructions file;
+# `.agents/skills/` holds the skills and `.claude/skills` is a symlink to it.
+# Ignored deliberately: they are local working instructions, not package content.
 .claude/
 /.agents/
-CLAUDE.md
 AGENTS.md
 
 # Local dev working folder + cross-project coordination channel — never

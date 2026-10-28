@@ -2,7 +2,7 @@
 //! phase runs via `cargo test -p sonagram --test golden_graph`.
 //!
 //! sonagram's output is a graph, so the net is **digest fidelity +
-//! determinism**, not audio fidelity (CLAUDE.md, "The graph gate"). Three
+//! determinism**, not audio fidelity (AGENTS.md, "The graph gate"). Three
 //! standing parts:
 //!
 //! - [`golden_graph`] — build the graph from the 15 frozen `TrackAnalysis`

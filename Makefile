@@ -1,8 +1,15 @@
-.PHONY: gate check-free-space prune-target check-dev-docs
+# The skills live in .agents/skills/; .claude/skills must be a symlink to them.
+.PHONY: gate check-free-space prune-target check-dev-docs check-skill-layout
 
 # Fast local checkpoint: the dev-docs size bound runs here so it is a gate
 # someone actually invokes (CI never sees the gitignored dev-docs/).
-gate: check-dev-docs
+gate: check-dev-docs check-skill-layout
+
+check-skill-layout:
+	@[ -d .agents/skills ] || { echo "FAIL: .agents/skills is missing"; exit 1; }; \
+	[ -L .claude/skills ] || { echo "FAIL: .claude/skills is not a symlink (move it into .agents/skills, then ln -s ../.agents/skills .claude/skills)"; exit 1; }; \
+	[ "$$(cd .claude/skills && pwd -P)" = "$$(cd .agents/skills && pwd -P)" ] || { echo "FAIL: .claude/skills does not resolve to .agents/skills"; exit 1; }; \
+	echo "skills layout OK"
 
 check-free-space:
 	@./scripts/check_free_space.sh

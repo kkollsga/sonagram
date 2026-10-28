@@ -17,7 +17,7 @@
 //! `weakly_connected_components`, `louvain_communities`, and `label_propagation`
 //! — **not** `leiden_communities` (it lives behind the `pub(crate) mod graph`
 //! wall). Rather than reach past the sealed surface, and because P6's headline
-//! requirement is *determinism* (CLAUDE.md: "the same library scanned twice must
+//! requirement is *determinism* (AGENTS.md: "the same library scanned twice must
 //! produce a byte-identical graph"), styles are the documented deterministic
 //! fallback: **connected components over the `SIMILAR_TO` graph filtered to
 //! `score >= STYLE_SCORE_THRESHOLD`**. Components are computed here with a
