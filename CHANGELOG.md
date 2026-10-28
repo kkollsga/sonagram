@@ -4,6 +4,34 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.32] - 2026-10-29
+
+This release updates the embedded graph engine to KGLite 0.21.4 and moves the
+Python floor to 3.12. Sonagram's analysis, graph schema, mapping and playlist
+behavior are unchanged.
+
+### Breaking
+
+- **Python 3.12 or newer is required.** The abi3 wheel is now `cp312-abi3`, and
+  `kglite>=0.21.4` itself no longer installs on Python 3.10 or 3.11. Sonagram
+  0.2.31 stays the newest release for Python 3.9-3.11; stay on it there.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Changed
+
+- Embedded KGLite: 0.21.2 → 0.21.4, and the Python runtime floor with it
+  (`kglite>=0.21.4`). MCP clients that speak protocol 2026-07-28 and never send
+  `initialize` now work against `sonagram-mcp-server`; its `--selftest` gained
+  `stateless …` checks, all green. The MCP server now reports
+  `serverInfo.name = sonagram (single-graph)` instead of `KGLite (single-graph)`.
+- Dependencies at their latest releases: `pyo3` and `numpy` 0.28 → 0.30,
+  `ureq` 2 → 3 (Last.fm enrichment client), `sha2` 0.10 → 0.11 (tests),
+  `rayon` 1.12, `schemars` 1.2, and the rest of the lockfile.
+
 ## [0.2.31] - 2026-10-24
 
 This release updates the embedded graph engine to KGLite 0.21.2. Sonagram's

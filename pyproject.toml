@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "sonagram"
-version = "0.2.31"
+version = "0.2.32"
 description = "Map a music library's analysis into a kglite knowledge graph for AI agents"
 requires-python = ">=3.12"
 license = {file = "LICENSE"}
