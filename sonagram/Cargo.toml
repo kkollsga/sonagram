@@ -34,4 +34,4 @@ filetime = "0.2"
 # Test-only: SHA-256 for the golden_graph gate's canonical-graph digest
 # (`tests/golden_graph.rs`). The gate observes the graph; it never ships, so
 # this is a dev-dependency only, never a normal dep.
-sha2 = "0.10"
+sha2 = "0.11"

@@ -11,13 +11,13 @@ repository = "https://github.com/kkollsga/sonagram"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-schemars = "1"
+schemars = "1.2"
 blake3 = "1"
 walkdir = "2"
 thiserror = "2"
-rayon = "1.11"
+rayon = "1.12"
 # HTTP for the Last.fm enrichment fetcher only (blocking, small).
-ureq = { version = "2", features = ["json"] }
+ureq = "3"
 
 # Upstreams — consumed as cargo libraries, read-only here. `version` must be
 # satisfiable by the LOCAL path checkout: sonara 0.3.6 (everything 0.3.5 gave us
@@ -38,14 +38,14 @@ ureq = { version = "2", features = ["json"] }
 # and the default profile is bit-identical to 0.3.5, so no stored vector and no
 # distance we compute today changes. Adoption of both lanes is deliberately
 # deferred: we pin the surface in `contract_sonara` so upstream drift fails at
-# compile time, and consume it in a later plan), kglite 0.21.2 (forty-two
+# compile time, and consume it in a later plan), kglite 0.21.3 (forty-two
 # releases across twenty-two sonagram releases: 0.16.10 + 0.16.11 + 0.16.12 shipped
 # in 0.2.9, 0.16.13 in 0.2.10, 0.16.14 + 0.16.15 in 0.2.11, 0.16.16 + 0.16.17
 # in 0.2.12, 0.16.18 in 0.2.13, 0.16.19 in 0.2.14, 0.16.20 in 0.2.15,
 # 0.16.21 + 0.16.22 in 0.2.16, 0.16.23 + 0.16.24 + 0.17.0 + 0.17.1 in 0.2.17,
 # 0.17.2 + 0.17.3 in 0.2.18, 0.17.4 in 0.2.19, 0.17.5 in 0.2.20,
 # 0.17.6 + 0.17.7 in 0.2.21, 0.17.8 + 0.17.9 in 0.2.22, 0.17.10 in 0.2.23,
-# 0.17.11 + 0.17.12 + 0.18.0 + 0.18.1 + 0.19.0 + 0.19.1 in 0.2.25, 0.19.2 + 0.19.3 in 0.2.26, 0.19.4 in 0.2.27, 0.19.5 + 0.19.6 in 0.2.28, 0.19.7 + 0.20.0 in 0.2.29, 0.21.0 + 0.21.1 in 0.2.30, 0.21.2 here; all
+# 0.17.11 + 0.17.12 + 0.18.0 + 0.18.1 + 0.19.0 + 0.19.1 in 0.2.25, 0.19.2 + 0.19.3 in 0.2.26, 0.19.4 in 0.2.27, 0.19.5 + 0.19.6 in 0.2.28, 0.19.7 + 0.20.0 in 0.2.29, 0.21.0 + 0.21.1 in 0.2.30, 0.21.2 in 0.2.31, 0.21.3 here; all
 # goldens byte-identical and `capture_goldens` never run throughout.
 # Only four have ever reached our source: 0.16.14 (import paths), 0.16.20 (the
 # manifest-side write opt-in, guarded by a text grep), 0.16.21, which replaced
@@ -627,6 +627,12 @@ ureq = { version = "2", features = ["json"] }
 # `sonagram-mcp-server <version>`, and the ontology and `format_version` changes
 # touch nothing sonagram declares or asserts.
 #
+# 0.21.3 reaches no sonagram source: `--version` is still answered by `run`
+# (a deliberate `sonagram-mcp-server <version>` line), the `--selftest`
+# stateless-client lines pass, and the MCP schema, boltr, dependency and RustSec
+# changes touch no sonagram declaration. Python 3.12 is the new floor (the abi3
+# wheel is `cp312`).
+#
 # 0.19.5 and 0.19.6 reach no sonagram source either, each checked against the
 # code: the new `KgError`/`KgErrorCode` variants, the new `OntologyStore`
 # fields (`closed_labels`, `enforcement`), `CommitOutcome` losing `UnwindSafe`
@@ -666,18 +672,18 @@ ureq = { version = "2", features = ["json"] }
 # the very files the server's own file layer parses. The cost is one optional,
 # pure-Rust dependency (`yaml-rust2`).
 sonara = { version = "0.3.6", path = "../sonara/sonara", features = ["aggression"] }
-kglite = { version = "0.21.2", default-features = false, features = ["okf"] }
-kglite-mcp-server = { version = "0.21.2", default-features = false }
+kglite = { version = "0.21.3", default-features = false, features = ["okf"] }
+kglite-mcp-server = { version = "0.21.3", default-features = false }
 
 # Bindings only. `extension-module` is NOT enabled here so `cargo test
 # --workspace` can link the cdylib test harness against a real libpython;
 # maturin turns it on at wheel-build time via pyproject `features`.
 [workspace.dependencies.pyo3]
-version = "0.28"
-features = ["abi3-py39"]
+version = "0.30"
+features = ["abi3-py312"]
 
 [workspace.dependencies.numpy]
-version = "0.28"
+version = "0.30"
 
 [profile.release]
 lto = "fat"

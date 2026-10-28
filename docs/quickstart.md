@@ -15,7 +15,7 @@ command forms also exist for scripting a single folder without any registration.
 ## Install
 
 Prebuilt wheels cover macOS (Apple Silicon + Intel), Linux x86_64, and Windows
-x86_64 on Python ≥ 3.9 — no toolchain needed. Other platforms build from the
+x86_64 on Python ≥ 3.12 — no toolchain needed. Other platforms build from the
 sdist, which needs a **Rust toolchain** ([rustup](https://rustup.rs)):
 
 ```bash

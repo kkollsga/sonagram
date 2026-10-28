@@ -9,8 +9,8 @@ name: Release
 # against `release.yml`, so the publish job MUST live here — an OIDC mint from
 # any other workflow (e.g. ci.yml) is rejected by PyPI.
 #
-# WHEELS (kglite's pattern): the extension is built with pyo3 `abi3-py39`, so
-# ONE wheel per platform serves every CPython >= 3.9 — no per-Python matrix.
+# WHEELS (kglite's pattern): the extension is built with pyo3 `abi3-py312`, so
+# ONE wheel per platform serves every CPython >= 3.12 — no per-Python matrix.
 # Linux builds inside the manylinux2014 container via maturin-action (a bare
 # build on the runner would tag a glibc too new for older distros). Users on
 # these platforms need NO Rust toolchain; the sdist remains the fallback for
@@ -74,7 +74,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -92,7 +92,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: kkollsga/kglite
-          ref: v0.21.2
+          ref: v0.21.3
           path: _siblings/KGLite
       - name: Place siblings beside the workspace
         run: |
@@ -122,8 +122,8 @@ jobs:
             python "$t"
           done
 
-  # One abi3 wheel per platform (pyo3 abi3-py39 → cp39-abi3 tag serves every
-  # CPython >= 3.9). Builds run in parallel with the test gate; nothing
+  # One abi3 wheel per platform (pyo3 abi3-py312 → cp312-abi3 tag serves every
+  # CPython >= 3.12). Builds run in parallel with the test gate; nothing
   # reaches PyPI before `publish`, which needs both.
   build-wheels:
     name: Wheel ${{ matrix.target }}
@@ -155,7 +155,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: kkollsga/kglite
-          ref: v0.21.2
+          ref: v0.21.3
           path: _siblings/KGLite
       - name: Place siblings beside the workspace
         shell: bash
@@ -216,7 +216,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: kkollsga/kglite
-          ref: v0.21.2
+          ref: v0.21.3
           path: _siblings/KGLite
       - name: Place siblings beside the workspace
         run: |
@@ -224,7 +224,7 @@ jobs:
           mv _siblings/KGLite ../KGLite
           rmdir _siblings
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable

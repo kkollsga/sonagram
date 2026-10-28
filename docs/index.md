@@ -47,7 +47,7 @@ schema between them, and nothing else:
         │  sonagram build     map records → nodes + edges + embeddings
         ▼
   music.kgl  (a kglite knowledge graph)
-        │  sonagram mcp install → sonagram-mcp-server (KGLite 0.21.2)
+        │  sonagram mcp install → sonagram-mcp-server (KGLite 0.21.3)
         ▼
   AI agent  ──preset + typed brief──▶  typed MCP curation tools
         │  library selection → sequencing → audit → provenance
@@ -59,7 +59,7 @@ schema between them, and nothing else:
 
 sonagram ships to PyPI with **prebuilt abi3 wheels** for macOS (Apple Silicon +
 Intel), Linux x86_64 (manylinux2014), and Windows x86_64 — one wheel per
-platform covers every CPython ≥ 3.9, so on these platforms nothing compiles:
+platform covers every CPython ≥ 3.12, so on these platforms nothing compiles:
 
 ```bash
 pip install sonagram          # prebuilt wheel on common platforms

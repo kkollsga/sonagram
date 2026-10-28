@@ -199,7 +199,10 @@ impl UreqClient {
 
     /// Build a client against a custom base URL (tests / mirrors).
     pub fn with_base(api_key: String, base: String) -> Self {
-        let agent = ureq::AgentBuilder::new().timeout(HTTP_TIMEOUT).build();
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(HTTP_TIMEOUT))
+            .build()
+            .into();
         UreqClient {
             agent,
             api_key,
@@ -223,7 +226,8 @@ impl LastfmApi for UreqClient {
         let result = req.call();
         // Throttle after every live call (whether or not it succeeded).
         std::thread::sleep(RATE_LIMIT);
-        let body = result.ok()?.into_string().ok()?;
+        let mut response = result.ok()?;
+        let body = response.body_mut().read_to_string().ok()?;
         let json: Json = serde_json::from_str(&body).ok()?;
         if json.get("error").is_some() {
             return None;

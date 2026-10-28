@@ -21,7 +21,7 @@ your machine.
 You are an AI agent and a user asked you to work with their music library — start here:
 
 1. **Install** — `pip install sonagram`. Prebuilt wheels cover macOS
-   (Apple Silicon + Intel), Linux x86_64, and Windows x86_64 on Python ≥ 3.9 —
+   (Apple Silicon + Intel), Linux x86_64, and Windows x86_64 on Python ≥ 3.12 —
    no toolchain needed. Only on other platforms does pip fall back to the
    sdist, which compiles the native core and needs a Rust toolchain
    ([rustup](https://rustup.rs)).
@@ -105,7 +105,7 @@ sonagram mcp install
 # RUN: '/absolute/path/sonagram-mcp-server' --graph '/.../music.kgl'
 ```
 
-The thin Sonagram frontend embeds KGLite 0.21.2's server and registers typed
+The thin Sonagram frontend embeds KGLite 0.21.3's server and registers typed
 profile/policy/curate/audit/explain/store tools against its live graph. KGLite
 still owns MCP, Cypher, graph lifecycle, and generic tools; Sonagram owns only
 the music-domain handlers.
