@@ -28,5 +28,10 @@ fn help_usage_names_the_executable() {
         .lines()
         .find(|line| line.starts_with("Usage:"))
         .unwrap_or_else(|| panic!("no usage line:\n{out}"));
-    assert!(usage.starts_with("Usage: sonagram-mcp-server "), "{usage}");
+    // clap names the file it was run from, which carries `.exe` on Windows.
+    let expected = format!(
+        "Usage: sonagram-mcp-server{} ",
+        std::env::consts::EXE_SUFFIX
+    );
+    assert!(usage.starts_with(&expected), "{usage}");
 }
