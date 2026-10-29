@@ -56,18 +56,18 @@ secrets.toml
 Thumbs.db
 desktop.ini
 
-# Agent instruction files (local only). `AGENTS.md` is the instructions file;
-# `.agents/skills/` holds the skills and `.claude/skills` is a symlink to it.
-# Ignored deliberately: they are local working instructions, not package content.
+# Agent skills (local only). `.agents/skills/` holds the skills and
+# `.claude/skills` is a symlink to it; `AGENTS.md`, the instructions file, is
+# tracked.
 .claude/
 /.agents/
-AGENTS.md
 
 # Local dev working folder + cross-project coordination channel — never
 # committed. Each has a README describing its own layout, and the
 # dev-docs-cleanup / read-inbox skills own the auto-purged tiers within.
-# Nothing tracked may cite a path inside either: the citation would outlive the
-# file it names and become a dangling instruction.
+# No tracked code may cite a path inside either: the citation would outlive the
+# file it names and become a dangling instruction. `AGENTS.md` is the
+# exception: it is the agents' map of these folders.
 /dev-docs/
 /inbox/
 
