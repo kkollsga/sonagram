@@ -61,7 +61,7 @@ fn f64_prop(graph: &DirGraph, node_type: &str, hash: &str, prop: &str) -> f64 {
         .lookup_by_id_readonly(node_type, &Value::String(hash.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {hash}"));
     let node = graph.node_view(ni).unwrap();
-    match resolve_node_property(node, prop, graph) {
+    match resolve_node_property(&node, prop, graph) {
         Value::Float64(v) => v,
         other => panic!("{prop} is not Float64: {other:?}"),
     }
@@ -72,7 +72,7 @@ fn str_prop(graph: &DirGraph, node_type: &str, hash: &str, prop: &str) -> String
         .lookup_by_id_readonly(node_type, &Value::String(hash.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {hash}"));
     let node = graph.node_view(ni).unwrap();
-    match resolve_node_property(node, prop, graph) {
+    match resolve_node_property(&node, prop, graph) {
         Value::String(s) => s,
         other => panic!("{prop} is not String: {other:?}"),
     }
@@ -82,7 +82,7 @@ fn prop(graph: &DirGraph, node_type: &str, hash: &str, prop: &str) -> Value {
     let ni = graph
         .lookup_by_id_readonly(node_type, &Value::String(hash.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {hash}"));
-    resolve_node_property(graph.node_view(ni).unwrap(), prop, graph)
+    resolve_node_property(&graph.node_view(ni).unwrap(), prop, graph)
 }
 
 // Expected cardinalities, computed independently from the fixture JSON.

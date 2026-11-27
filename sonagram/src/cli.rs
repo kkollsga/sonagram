@@ -1730,7 +1730,7 @@ fn graph_source_build_fingerprint(
     use kglite::api::Value;
     let ni = graph.lookup_by_id_readonly("Source", &Value::String(source_root.to_string()))?;
     let node = graph.node_view(ni)?;
-    let fp = match resolve_node_property(node, "build_input_fingerprint", graph) {
+    let fp = match resolve_node_property(&node, "build_input_fingerprint", graph) {
         Value::String(s) if !s.is_empty() => Some(s),
         _ => None,
     };

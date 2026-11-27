@@ -97,7 +97,7 @@ fn str_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> String {
         .lookup_by_id_readonly(node_type, &Value::String(id.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {id}"));
     let node = graph.node_view(ni).unwrap();
-    match resolve_node_property(node, prop, graph) {
+    match resolve_node_property(&node, prop, graph) {
         Value::String(s) => s,
         other => panic!("{prop} is not String: {other:?}"),
     }
@@ -108,7 +108,7 @@ fn int_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> i64 {
         .lookup_by_id_readonly(node_type, &Value::String(id.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {id}"));
     let node = graph.node_view(ni).unwrap();
-    match resolve_node_property(node, prop, graph) {
+    match resolve_node_property(&node, prop, graph) {
         Value::Int64(v) => v,
         other => panic!("{prop} is not Int64: {other:?}"),
     }
@@ -119,7 +119,7 @@ fn bool_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> bool {
         .lookup_by_id_readonly(node_type, &Value::String(id.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {id}"));
     let node = graph.node_view(ni).unwrap();
-    match resolve_node_property(node, prop, graph) {
+    match resolve_node_property(&node, prop, graph) {
         Value::Boolean(v) => v,
         other => panic!("{prop} is not Boolean: {other:?}"),
     }
@@ -130,7 +130,7 @@ fn float_prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> f64 {
         .lookup_by_id_readonly(node_type, &Value::String(id.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {id}"));
     let node = graph.node_view(ni).unwrap();
-    match resolve_node_property(node, prop, graph) {
+    match resolve_node_property(&node, prop, graph) {
         Value::Float64(v) => v,
         other => panic!("{prop} is not Float64: {other:?}"),
     }

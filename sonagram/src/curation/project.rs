@@ -17,7 +17,7 @@ pub(crate) fn graph_build_input_fingerprint(graph: &DirGraph) -> Option<String> 
         .into_iter()
         .next()?;
     let node = graph.node_view(index)?;
-    prop_string(node, "build_input_fingerprint", graph)
+    prop_string(&node, "build_input_fingerprint", graph)
 }
 
 #[derive(Debug, Clone)]
@@ -93,7 +93,7 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
             "VERSION_OF" => entry.song_key = Some(target_id),
             "BY_ARTIST" => {
                 if target_node.node_type_str(&graph.interner) == "Artist" {
-                    let mbid = prop_string(target_node, "mbid", graph)
+                    let mbid = prop_string(&target_node, "mbid", graph)
                         .map(|value| group_key(Some(value.as_str())))
                         .filter(|value| !value.is_empty());
                     if let Some(mbid) = mbid {
@@ -112,7 +112,7 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
             }
             "IN_STYLE" => {
                 entry.styles.insert(group_key(Some(target_id.as_str())));
-                if let Some(name) = prop_string(target_node, "name", graph) {
+                if let Some(name) = prop_string(&target_node, "name", graph) {
                     entry.styles.insert(group_key(Some(name.as_str())));
                 }
             }
@@ -134,17 +134,18 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
         let node = graph.node_view(idx).ok_or_else(|| {
             SonagramError::Graph(format!("Track index {} has no node", idx.index()))
         })?;
-        let id = prop_string(node, "content_hash", graph)
+        let id = prop_string(&node, "content_hash", graph)
             .or_else(|| value_string(node.id().into_owned()))
             .ok_or_else(|| SonagramError::Graph("Track has no string content_hash".into()))?;
-        let artist = prop_string(node, "artist_name", graph);
-        let album = prop_string(node, "album_name", graph);
+        let artist = prop_string(&node, "artist_name", graph);
+        let album = prop_string(&node, "album_name", graph);
         let relations = relations.remove(&idx.index()).unwrap_or_default();
-        let year = prop_i64(node, "original_year", graph).or_else(|| prop_i64(node, "year", graph));
-        let aggression = aggression_evidence(node, graph);
+        let year =
+            prop_i64(&node, "original_year", graph).or_else(|| prop_i64(&node, "year", graph));
+        let aggression = aggression_evidence(&node, graph);
         out.push(TrackCandidate {
             id,
-            title: prop_string(node, "title", graph),
+            title: prop_string(&node, "title", graph),
             artist_key: relations
                 .artist_mbid
                 .unwrap_or_else(|| group_key(artist.as_deref())),
@@ -156,22 +157,22 @@ pub(crate) fn project_tracks(graph: &DirGraph) -> Result<Vec<TrackCandidate>> {
             genre_keys: relations.genres.into_iter().collect(),
             decade_keys: relations.decades.into_iter().collect(),
             year,
-            duration_sec: prop_f64(node, "duration_sec", graph),
-            is_music: prop_bool(node, "is_music", graph).unwrap_or(true),
-            is_canonical: prop_bool(node, "is_canonical", graph).unwrap_or(true),
-            quality_tier: prop_string(node, "quality_tier", graph),
-            recording_quality: prop_f64(node, "recording_quality", graph),
-            popularity: prop_f64(node, "popularity", graph),
-            energy: prop_f64(node, "energy", graph),
-            arousal: prop_f64(node, "arousal_index", graph),
-            tension: prop_f64(node, "tension_index", graph),
-            valence: prop_f64(node, "valence_index", graph),
-            vocalness: prop_f64(node, "vocalness", graph),
+            duration_sec: prop_f64(&node, "duration_sec", graph),
+            is_music: prop_bool(&node, "is_music", graph).unwrap_or(true),
+            is_canonical: prop_bool(&node, "is_canonical", graph).unwrap_or(true),
+            quality_tier: prop_string(&node, "quality_tier", graph),
+            recording_quality: prop_f64(&node, "recording_quality", graph),
+            popularity: prop_f64(&node, "popularity", graph),
+            energy: prop_f64(&node, "energy", graph),
+            arousal: prop_f64(&node, "arousal_index", graph),
+            tension: prop_f64(&node, "tension_index", graph),
+            valence: prop_f64(&node, "valence_index", graph),
+            vocalness: prop_f64(&node, "vocalness", graph),
             aggression,
-            flow_smoothness: prop_f64(node, "flow_smoothness", graph),
-            bpm: prop_f64(node, "bpm", graph),
-            bpm_confidence: prop_f64(node, "bpm_confidence", graph),
-            camelot: prop_string(node, "camelot", graph),
+            flow_smoothness: prop_f64(&node, "flow_smoothness", graph),
+            bpm: prop_f64(&node, "bpm", graph),
+            bpm_confidence: prop_f64(&node, "bpm_confidence", graph),
+            camelot: prop_string(&node, "camelot", graph),
             embedding: embedding_store
                 .and_then(|store| store.get_embedding(idx.index()))
                 .map(ToOwned::to_owned),
@@ -189,7 +190,7 @@ impl TrackCandidate {
     }
 }
 
-fn aggression_evidence(node: NodeView<'_>, graph: &DirGraph) -> AggressionEvidence {
+fn aggression_evidence(node: &NodeView<'_>, graph: &DirGraph) -> AggressionEvidence {
     let score = aggression_number(node, "aggression", graph);
     let confidence = aggression_number(node, "aggression_confidence", graph);
     let forcefulness = aggression_number(node, "aggression_forcefulness", graph);
@@ -253,7 +254,7 @@ impl NumericEvidence {
     }
 }
 
-fn aggression_number(node: NodeView<'_>, name: &str, graph: &DirGraph) -> NumericEvidence {
+fn aggression_number(node: &NodeView<'_>, name: &str, graph: &DirGraph) -> NumericEvidence {
     match resolve_node_property(node, name, graph) {
         Value::Null => NumericEvidence::Missing,
         Value::Float64(value) if value.is_finite() => NumericEvidence::Finite(value),
@@ -306,7 +307,7 @@ pub(crate) fn group_key(value: Option<&str>) -> String {
         .unwrap_or_default()
 }
 
-fn prop_string(node: NodeView<'_>, name: &str, graph: &DirGraph) -> Option<String> {
+fn prop_string(node: &NodeView<'_>, name: &str, graph: &DirGraph) -> Option<String> {
     value_string(resolve_node_property(node, name, graph))
 }
 
@@ -317,7 +318,7 @@ fn value_string(value: Value) -> Option<String> {
     }
 }
 
-fn prop_f64(node: NodeView<'_>, name: &str, graph: &DirGraph) -> Option<f64> {
+fn prop_f64(node: &NodeView<'_>, name: &str, graph: &DirGraph) -> Option<f64> {
     match resolve_node_property(node, name, graph) {
         Value::Float64(value) if value.is_finite() => Some(value),
         Value::Int64(value) => Some(value as f64),
@@ -325,14 +326,14 @@ fn prop_f64(node: NodeView<'_>, name: &str, graph: &DirGraph) -> Option<f64> {
     }
 }
 
-fn prop_i64(node: NodeView<'_>, name: &str, graph: &DirGraph) -> Option<i64> {
+fn prop_i64(node: &NodeView<'_>, name: &str, graph: &DirGraph) -> Option<i64> {
     match resolve_node_property(node, name, graph) {
         Value::Int64(value) => Some(value),
         _ => None,
     }
 }
 
-fn prop_bool(node: NodeView<'_>, name: &str, graph: &DirGraph) -> Option<bool> {
+fn prop_bool(node: &NodeView<'_>, name: &str, graph: &DirGraph) -> Option<bool> {
     match resolve_node_property(node, name, graph) {
         Value::Boolean(value) => Some(value),
         _ => None,

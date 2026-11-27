@@ -116,7 +116,7 @@ fn graph_with_aggression(
         .into_iter()
         .map(|index| {
             let node = graph.node_view(index).unwrap();
-            let Value::String(id) = resolve_node_property(node, "content_hash", &graph) else {
+            let Value::String(id) = resolve_node_property(&node, "content_hash", &graph) else {
                 panic!("Track content_hash must be a string")
             };
             (id, index)

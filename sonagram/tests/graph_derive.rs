@@ -218,7 +218,7 @@ fn styles_are_two_on_fixtures_under_adaptive_threshold() {
     let lib = graph
         .lookup_by_id_readonly("Library", &Value::String("fixtures".to_string()))
         .expect("Library node present");
-    let thr = match resolve_node_property(graph.node_view(lib).unwrap(), "style_threshold", &graph)
+    let thr = match resolve_node_property(&graph.node_view(lib).unwrap(), "style_threshold", &graph)
     {
         Value::Float64(v) => v,
         other => panic!("style_threshold not Float64: {other:?}"),
@@ -473,19 +473,19 @@ fn style_table_dump() {
         .into_iter()
         .map(|ni| {
             let node = graph.node_view(ni).unwrap();
-            let name = match resolve_node_property(node, "name", &graph) {
+            let name = match resolve_node_property(&node, "name", &graph) {
                 Value::String(s) => s,
                 _ => "?".to_string(),
             };
-            let nt = match resolve_node_property(node, "n_tracks", &graph) {
+            let nt = match resolve_node_property(&node, "n_tracks", &graph) {
                 Value::Int64(v) => v,
                 _ => 0,
             };
-            let bpm = match resolve_node_property(node, "mean_bpm", &graph) {
+            let bpm = match resolve_node_property(&node, "mean_bpm", &graph) {
                 Value::Float64(v) => v,
                 _ => 0.0,
             };
-            let genres = match resolve_node_property(node, "top_genres", &graph) {
+            let genres = match resolve_node_property(&node, "top_genres", &graph) {
                 Value::List(v) => v
                     .iter()
                     .map(|g| match g {
@@ -505,7 +505,7 @@ fn style_table_dump() {
     let chosen = graph
         .lookup_by_id_readonly("Library", &Value::String("subset".to_string()))
         .and_then(|ni| {
-            match resolve_node_property(graph.node_view(ni).unwrap(), "style_threshold", &graph) {
+            match resolve_node_property(&graph.node_view(ni).unwrap(), "style_threshold", &graph) {
                 Value::Float64(v) => Some(v),
                 _ => None,
             }
@@ -549,7 +549,7 @@ fn style_profiles_are_shaped_and_deterministic() {
         // acoustic/electric term (three-way) is omitted for mid-acousticness
         // communities, so a name may be "<band>-<genre>" or "<band>-<ae>-<genre>"
         // (or a "-<n>" uniquifier suffix on a name collision).
-        let name = match resolve_node_property(node_a, "name", &a) {
+        let name = match resolve_node_property(&node_a, "name", &a) {
             Value::String(s) => s,
             other => panic!("style name not String: {other:?}"),
         };
@@ -560,7 +560,7 @@ fn style_profiles_are_shaped_and_deterministic() {
         );
 
         // exemplar_titles: a non-empty list, at most 5, deterministic across builds.
-        let ex_a = resolve_node_property(node_a, "exemplar_titles", &a);
+        let ex_a = resolve_node_property(&node_a, "exemplar_titles", &a);
         let ex_len = match &ex_a {
             Value::List(v) => v.len(),
             other => panic!("exemplar_titles not List: {other:?}"),
@@ -573,11 +573,11 @@ fn style_profiles_are_shaped_and_deterministic() {
         let ni_b = b
             .lookup_by_id_readonly("Style", &Value::String(id.to_string()))
             .unwrap();
-        let ex_b = resolve_node_property(b.node_view(ni_b).unwrap(), "exemplar_titles", &b);
+        let ex_b = resolve_node_property(&b.node_view(ni_b).unwrap(), "exemplar_titles", &b);
         assert_eq!(ex_a, ex_b, "exemplar_titles deterministic for {id}");
 
         // n_tracks matches the IN_STYLE member count for this style.
-        let n = match resolve_node_property(node_a, "n_tracks", &a) {
+        let n = match resolve_node_property(&node_a, "n_tracks", &a) {
             Value::Int64(v) => v,
             other => panic!("n_tracks not Int64: {other:?}"),
         };

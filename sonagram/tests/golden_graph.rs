@@ -761,7 +761,7 @@ fn contract_kglite() {
     // is the one property read the whole curation projection is built on
     // (`curation/project.rs`, `playlist.rs`, `cli.rs`); pinning the signature
     // makes a receiver change a compile error here instead of a silent Null.
-    let _: fn(NodeView<'_>, &str, &DirGraph) -> Value = kglite::api::cypher::resolve_node_property;
+    let _: fn(&NodeView<'_>, &str, &DirGraph) -> Value = kglite::api::cypher::resolve_node_property;
 
     // (b) THE tripwire: a freshly built, memory-backed node must answer its
     // *inserted* id through `node_view`, not the Null sentinel. WHY: node
@@ -800,10 +800,10 @@ fn contract_kglite() {
         .get("Probe")
         .and_then(|nodes| nodes.to_vec().into_iter().next())
         .expect("kglite add_nodes registered no Probe index");
-    let probe_id = probe
+    let probe_view = probe
         .node_view(probe_idx)
-        .expect("no NodeView for a just-added node")
-        .id();
+        .expect("no NodeView for a just-added node");
+    let probe_id = probe_view.id();
     assert_ne!(
         *probe_id,
         Value::Null,

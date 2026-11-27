@@ -70,7 +70,7 @@ fn prop(graph: &DirGraph, node_type: &str, id: &str, prop: &str) -> Value {
         .lookup_by_id_readonly(node_type, &Value::String(id.to_string()))
         .unwrap_or_else(|| panic!("no {node_type} node with id {id}"));
     let node = graph.node_view(ni).unwrap();
-    resolve_node_property(node, prop, graph)
+    resolve_node_property(&node, prop, graph)
 }
 
 /// CROWD_SIMILAR edge stats: `(track_track, track_track_with_score,

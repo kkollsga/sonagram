@@ -4,6 +4,24 @@ All notable changes to sonagram are documented in this file. The graph schema
 is a public API: a stored `.kgl` graph is a compatibility surface, and every
 release that moves it says so under **Graph schema**.
 
+## [0.2.33] - 2026-11-27
+
+This release updates the embedded graph engine to KGLite 0.21.8. Sonagram's
+analysis, graph schema, mapping and playlist behavior are unchanged.
+
+### Graph schema
+
+No change. Graph schema stays at **v3**, and the canonical plain and enriched
+graph tests remain byte-identical. Stored `.kgl` graphs do not need rebuilding.
+
+### Changed
+
+- Embedded KGLite: 0.21.4 → 0.21.8, and the Python runtime floor with it
+  (`kglite>=0.21.8`). KGLite 0.21.8 returns node records through a handle that
+  stays valid on disk graphs; sonagram's property reads now pass `&NodeView`.
+- Dependencies refreshed within their declared ranges. The test-only
+  `filetime` dependency is gone; the touch-mtime test uses `std::fs`.
+
 ## [0.2.32] - 2026-10-29
 
 This release updates the embedded graph engine to KGLite 0.21.4 and moves the

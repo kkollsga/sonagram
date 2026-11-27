@@ -681,8 +681,13 @@ fn touch_mtime_rehashes_but_zero_analyses() {
     // Bump mtime without changing bytes: stat fast-path misses → re-hash → hash
     // still matches an existing record → reused, zero analyses.
     let a = lib.join("a.mp3");
-    let future = filetime::FileTime::from_unix_time(2_000_000_000, 0);
-    filetime::set_file_mtime(&a, future).unwrap();
+    let future = std::time::UNIX_EPOCH + std::time::Duration::from_secs(2_000_000_000);
+    std::fs::File::options()
+        .write(true)
+        .open(&a)
+        .unwrap()
+        .set_modified(future)
+        .unwrap();
 
     let r = scan_library_with(&lib, &opts(), &analyzer).unwrap();
     assert_eq!(r.analyzed, 0);
